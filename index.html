@@ -313,9 +313,20 @@ async function generateImage({ prompt, referenceImageUrl, model, apiKey, nsfw, w
 
   // Flux models use different input format
   const isFlux = model.includes("flux");
+  const isRealVis = model.includes("realvisxl") || model.includes("realvis");
   const input = isFlux
     ? { prompt: fullPrompt, num_outputs: 1, aspect_ratio: "2:3", output_format: "webp" }
-    : { prompt: fullPrompt, num_inference_steps: 30, width: 768, height: 1024, guidance_scale: 7 };
+    : isRealVis
+      ? {
+          prompt: fullPrompt,
+          negative_prompt: "(worst quality, low quality, illustration, 3d, 2d, painting, cartoons, sketch), open mouth, deformed, ugly, bad anatomy",
+          num_inference_steps: 30,
+          width: 768,
+          height: 1024,
+          guidance_scale: 7,
+          disable_safety_checker: nsfw,
+        }
+      : { prompt: fullPrompt, num_inference_steps: 30, width: 768, height: 1024, guidance_scale: 7 };
 
   // version-based vs model-based request
   const hasVersion = model.includes(":");
