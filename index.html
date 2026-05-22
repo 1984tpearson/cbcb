@@ -741,7 +741,8 @@ function AppearanceSection({ appearance, onChange }) {
 
 // ─── CHARACTER FORM ───────────────────────────────────────────────────────────
 function CharacterForm({ character, onSave, onCancel, settings }) {
-  const [form, setForm] = useState(character || {
+  const safeCharacter = character || null;
+  const [form, setForm] = useState(() => safeCharacter ? { ...safeCharacter } : {
     id: Date.now().toString(), name: "", persona: "", nsfw: false,
     referenceImage: null, backgroundImage: null, autoImage: false,
     gender: "Female", customGender: "", sliders: { ...DEFAULT_SLIDERS },
@@ -754,8 +755,6 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const [imgLoading, setImgLoading] = useState(false);
   const [showCustomImgInput, setShowCustomImgInput] = useState(false);
   const [customImgPrompt, setCustomImgPrompt] = useState("");
-  const [showGallery, setShowGallery] = useState(false);
-  const [gallery, setGallery] = useState(() => storage.get(`gallery_${character.id}`, []));
   const [error, setError] = useState("");
   const [showSliders, setShowSliders] = useState(false);
   const [showAppearance, setShowAppearance] = useState(false);
