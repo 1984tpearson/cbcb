@@ -106,9 +106,20 @@ const DEFAULT_SETTINGS = {
   openrouterKey: "",
   replicateKey: "",
   workerUrl: "",
+  dezgoKey: "",
+  imageProvider: "replicate",
   selectedModel: OPENROUTER_MODELS[0].id,
   imageModel: REPLICATE_MODELS[0].id,
+  dezgoModel: "juggernautxl_10_hyper",
 };
+
+const DEZGO_MODELS = [
+  { id: "juggernautxl_10_hyper", label: "JuggernautXL 10 Hyper (Realistic)" },
+  { id: "juggernautxl_9_lightning_1024px", label: "JuggernautXL 9 Lightning" },
+  { id: "dreamshaperxl_lightning_1024px", label: "DreamShaper XL Lightning" },
+  { id: "envy_starlight_xl_01_lightning_1024px", label: "Starlight XL Lightning" },
+  { id: "ponyxl_6_turbo_dpo", label: "Pony XL Turbo" },
+];
 
 const storage = {
   get: (key, fallback = null) => {
@@ -355,6 +366,31 @@ async function generateImage({ prompt, referenceImageUrl, model, apiKey, nsfw, w
   return Array.isArray(result.output) ? result.output[0] : result.output;
 }
 
+async function generateImageDezgo({ prompt, model, apiKey, nsfw, width, height }) {
+  const formData = new FormData();
+  formData.append("prompt", prompt);
+  formData.append("model", model || "juggernautxl_10_hyper");
+  formData.append("width", width || 768);
+  formData.append("height", height || 1024);
+  formData.append("negative_prompt", "worst quality, low quality, illustration, 3d, 2d, painting, cartoons, sketch, deformed, ugly, bad anatomy, watermark, text");
+  formData.append("sampler", "dpmpp_2m_karras");
+  formData.append("format", "jpg");
+
+  const res = await fetch("https://api.dezgo.com/text2image_sdxl_lightning", {
+    method: "POST",
+    headers: { "X-Dezgo-Key": apiKey },
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const err = await res.text().catch(() => "");
+    throw new Error(`Dezgo error: ${res.status} ${err}`);
+  }
+
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
 async function buildImagePromptFromContext({ messages, character, apiKey, model }) {
   const recent = messages.slice(-6).map(m => `${m.role}: ${m.content}`).join("\n");
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -540,16 +576,39 @@ function SettingsPanel({ settings, onSave, onClose }) {
             <button style={{position:"absolute", right:8, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", color:"#7a7268", cursor:"pointer", fontSize:12}} onClick={() => setShowKeys(v => !v)}>{showKeys ? "hide" : "show"}</button>
           </div>
           <a href="https://replicate.com/account/api-tokens" target="_blank" rel="noreferrer">Get a key ↗</a>
-          <label style={S.label}>Cloudflare Worker URL</label>
+          <label style={S.label}>Image Provider</label>
+          <div style={{ display:"flex", gap:8 }}>
+            <button style={form.imageProvider === "replicate" ? S.genderBtnOn : S.genderBtnOff} onClick={() => setForm(f => ({...f, imageProvider:"replicate"}))}>Replicate</button>
+            <button style={form.imageProvider === "dezgo" ? S.genderBtnOn : S.genderBtnOff} onClick={() => setForm(f => ({...f, imageProvider:"dezgo"}))}>Dezgo</button>
+          </div>
+
+          {form.imageProvider === "dezgo" ? (
+            <div>
+              <label style={S.label}>Dezgo API Key</label>
+              <div style={{position:"relative"}}>
+                <input style={{...S.input, paddingRight:60}} type={showKeys ? "text" : "password"} placeholder="dezgo-..." value={form.dezgoKey || ""} onChange={e => setForm(f => ({...f, dezgoKey: e.target.value}))} />
+                <button style={{position:"absolute", right:8, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", color:"var(--text3)", cursor:"pointer", fontSize:12}} onClick={() => setShowKeys(v => !v)}>{showKeys ? "hide" : "show"}</button>
+              </div>
+              <a href="https://dezgo.com/account" target="_blank" rel="noreferrer">Get a key ↗</a>
+              <label style={S.label}>Dezgo Model</label>
+              <select style={S.select} value={form.dezgoModel || "juggernautxl_10_hyper"} onChange={e => setForm(f => ({...f, dezgoModel: e.target.value}))}>
+                {DEZGO_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+            </div>
+          ) : (
+            <div>
+              <label style={S.label}>Cloudflare Worker URL</label>
           <input style={S.input} type="text" placeholder="https://your-worker.workers.dev" value={form.workerUrl || ""} onChange={e => setForm(f => ({...f, workerUrl: e.target.value}))} />
-          <p style={{ fontSize:11, color:"var(--text4)", marginTop:3 }}>Required for image generation on GitHub Pages — see setup guide.</p>
+              <p style={{ fontSize:11, color:"var(--text4)", marginTop:3 }}>Required for image generation on GitHub Pages — see setup guide.</p>
+              <label style={S.label}>Image Model</label>
+              <select style={S.select} value={form.imageModel} onChange={e => setForm(f => ({...f, imageModel: e.target.value}))}>
+                {REPLICATE_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+            </div>
+          )}
           <label style={S.label}>Chat Model</label>
           <select style={S.select} value={form.selectedModel} onChange={e => setForm(f => ({...f, selectedModel: e.target.value}))}>
             {OPENROUTER_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-          </select>
-          <label style={S.label}>Image Model</label>
-          <select style={S.select} value={form.imageModel} onChange={e => setForm(f => ({...f, imageModel: e.target.value}))}>
-            {REPLICATE_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
           </select>
         </div>
         <div style={S.modalFooter}>
@@ -725,7 +784,10 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
       const baseDesc = imgPrompt.trim() ? imgPrompt.trim() : (form.name ? form.name : "person");
       const fullPrompt = charDesc ? `${baseDesc}, ${charDesc}` : baseDesc;
-      const url = await generateImage({ prompt: `${fullPrompt}, photorealistic, natural lighting, full body shot, standing, Canon EOS, 50mm, bokeh background, sharp focus, high detail`, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: form.nsfw, workerUrl: settings.workerUrl });
+      const stylePrompt = `${fullPrompt}, photorealistic, natural lighting, full body shot, standing, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
+      const url = settings.imageProvider === "dezgo" && settings.dezgoKey
+        ? await generateImageDezgo({ prompt: stylePrompt, model: settings.dezgoModel, apiKey: settings.dezgoKey, nsfw: form.nsfw })
+        : await generateImage({ prompt: stylePrompt, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: form.nsfw, workerUrl: settings.workerUrl });
       setForm(f => ({ ...f, referenceImage: url, backgroundImage: url }));
     } catch (e) { setError(e.message); }
     setImgLoading(false);
@@ -1038,14 +1100,23 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       const fullPrompt = charDesc
         ? `${character.name}, ${charDesc}, ${customImgPrompt}, ${styleModifiers}`
         : `${character.name}, ${customImgPrompt}, ${styleModifiers}`;
-      const url = await generateImage({ prompt: fullPrompt, referenceImageUrl: character.referenceImage, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: character.nsfw, workerUrl: settings.workerUrl });
+      const url = settings.imageProvider === "dezgo" && settings.dezgoKey
+        ? await generateImageDezgo({ prompt: fullPrompt, model: settings.dezgoModel, apiKey: settings.dezgoKey, nsfw: character.nsfw })
+        : await generateImage({ prompt: fullPrompt, referenceImageUrl: character.referenceImage, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: character.nsfw, workerUrl: settings.workerUrl });
       setMessages(m => [...m, { role: "image", content: url, prompt: customImgPrompt }]);
       setCustomImgPrompt("");
     } catch (e) { setError(e.message); }
     setImgLoading(false);
   };
 
-  const handleDeleteMessage = (index) => setMessages(m => m.filter((_, i) => i !== index));
+  const handleDeleteMessage = (index, isLast) => {
+    if (!isLast) {
+      if (!confirm("Delete this message and everything after it?")) return;
+      setMessages(m => m.slice(0, index));
+    } else {
+      setMessages(m => m.filter((_, i) => i !== index));
+    }
+  };
   const handleEditMessage = (index, newContent) => setMessages(m => m.map((msg, i) => i === index ? { ...msg, content: newContent } : msg));
 
   const triggerImageGen = async (auto = false) => {
@@ -1062,7 +1133,9 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
       const styleModifiers = "photorealistic, natural lighting, cinematic, Canon EOS, 50mm lens, bokeh, sharp focus, high detail";
       const fullImgPrompt = charDesc ? `${character.name}, ${charDesc}, ${prompt}, ${styleModifiers}` : `${character.name}, ${prompt}, ${styleModifiers}`;
-      const url = await generateImage({ prompt: fullImgPrompt, referenceImageUrl: character.referenceImage, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: character.nsfw, workerUrl: settings.workerUrl });
+      const url = settings.imageProvider === "dezgo" && settings.dezgoKey
+        ? await generateImageDezgo({ prompt: fullImgPrompt, model: settings.dezgoModel, apiKey: settings.dezgoKey, nsfw: character.nsfw })
+        : await generateImage({ prompt: fullImgPrompt, referenceImageUrl: character.referenceImage, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: character.nsfw, workerUrl: settings.workerUrl });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);
     } catch (e) { if (!auto) setError(e.message); }
     setImgLoading(false);
@@ -1210,7 +1283,7 @@ function App() {
   useEffect(() => { storage.set("characters", characters); }, [characters]);
 
   const saveCharacter = (char) => {
-    setCharacters(cs => { const exists = cs.find(c => c.id === char.id); return exists ? cs.map(c => c.id === char.id ? char : c) : [...cs, char]; });
+    setCharacters(cs => { const exists = cs.find(c => c.id === char.id); return exists ? cs.map(c => c.id === char.id ? char : c) : [char, ...cs]; });
     setShowCharForm(false); setEditingChar(null);
   };
 
