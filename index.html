@@ -141,6 +141,8 @@ function buildAppearancePrompt(appearance) {
   const eyes = a.eyeColour === "Custom" ? a.eyeColourCustom : a.eyeColour;
   const skin = a.skinTone === "Custom" ? a.skinToneCustom : a.skinTone;
 
+  const ethnicity = a.ethnicity === "Custom" ? a.ethnicityCustom : a.ethnicity;
+  if (ethnicity) parts.push(ethnicity.toLowerCase());
   if (hair) parts.push(`${hair.toLowerCase()} hair`);
   if (eyes) parts.push(`${eyes.toLowerCase()} eyes`);
   if (skin) parts.push(`${skin.toLowerCase()} skin`);
@@ -392,7 +394,13 @@ async function generateImageDezgo({ prompt, model, apiKey, nsfw, width, height }
   }
 
   const blob = await res.blob();
-  return URL.createObjectURL(blob);
+  // Convert to base64 for persistent storage
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 }
 
 async function buildImagePromptFromContext({ messages, character, apiKey, model }) {
@@ -412,6 +420,11 @@ const HAIR_COLOURS = ["Black", "Dark brown", "Brown", "Auburn", "Dirty blonde", 
 const EYE_COLOURS = ["Brown", "Dark brown", "Hazel", "Green", "Blue", "Grey", "Amber", "Custom"];
 const SKIN_TONES = ["Fair", "Light", "Medium", "Olive", "Tan", "Brown", "Dark brown", "Ebony", "Custom"];
 
+const ETHNICITIES = [
+  "Caucasian", "Black / African", "East Asian", "South Asian", "Southeast Asian",
+  "Middle Eastern", "Hispanic / Latino", "Indigenous", "Mixed", "Custom"
+];
+
 const DEFAULT_APPEARANCE = {
   hairColour: "Brown",
   hairColourCustom: "",
@@ -419,6 +432,8 @@ const DEFAULT_APPEARANCE = {
   eyeColourCustom: "",
   skinTone: "Medium",
   skinToneCustom: "",
+  ethnicity: "",
+  ethnicityCustom: "",
   height: 50,
   build: 50,
   chest: 50,
@@ -443,6 +458,7 @@ function randomiseAppearance(parsed) {
   const eyeOptions = EYE_COLOURS.filter(c => c !== "Custom");
   const skinOptions = SKIN_TONES.filter(c => c !== "Custom");
 
+  const ethnicityOptions = ETHNICITIES.filter(e => e !== "Custom");
   return {
     hairColour: parsed?.hairColour || pick(hairOptions),
     hairColourCustom: "",
@@ -450,6 +466,8 @@ function randomiseAppearance(parsed) {
     eyeColourCustom: "",
     skinTone: parsed?.skinTone || pick(skinOptions),
     skinToneCustom: "",
+    ethnicity: parsed?.ethnicity || pick(ethnicityOptions),
+    ethnicityCustom: "",
     height: rand(20, 80),
     build: rand(15, 75),
     chest: rand(20, 80),
@@ -462,7 +480,7 @@ async function autoGenerateCharacter({ vibe, apiKey, model }) {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, "HTTP-Referer": window.location.href },
-    body: JSON.stringify({ model, messages: [{ role: "user", content: `Create a fictional chat companion character based on this vibe: "${vibe}".\nBe CREATIVE with the name — avoid generic names like Emily, Sarah, Jessica, Wilson, Smith. Use culturally diverse, interesting, or unique names that match the character concept.\nReturn ONLY valid JSON with these exact fields:\n{\n  "name": "character name",\n  "persona": "2-3 sentence personality description, how they speak, backstory and quirks",\n  "age": 28,\n  "maritalStatus": "Single",\n  "hairColour": "Brown",\n  "eyeColour": "Brown",\n  "skinTone": "Medium"\n}\nFor maritalStatus use one of: Single, Married, Divorced, Widowed, In a relationship, It\'s complicated.\nFor hairColour use one of: Black, Dark brown, Brown, Auburn, Dirty blonde, Blonde, Platinum blonde, Red, Strawberry blonde, Grey, White.\nFor eyeColour use one of: Brown, Dark brown, Hazel, Green, Blue, Grey, Amber.\nFor skinTone use one of: Fair, Light, Medium, Olive, Tan, Brown, Dark brown, Ebony.\nNo extra text, no markdown, just the JSON object.` }] }),
+    body: JSON.stringify({ model, messages: [{ role: "user", content: `Create a fictional chat companion character based on this vibe: "${vibe}".\nBe CREATIVE with the name — avoid generic names like Emily, Sarah, Jessica, Wilson, Smith. Use culturally diverse, interesting, or unique names that match the character concept.\nReturn ONLY valid JSON with these exact fields:\n{\n  "name": "character name",\n  "persona": "2-3 sentence personality description, how they speak, backstory and quirks",\n  "age": 28,\n  "maritalStatus": "Single",\n  "hairColour": "Brown",\n  "eyeColour": "Brown",\n  "skinTone": "Medium",\n  "ethnicity": "Caucasian"\n}\nFor ethnicity use one of: Caucasian, Black / African, East Asian, South Asian, Southeast Asian, Middle Eastern, Hispanic / Latino, Indigenous, Mixed.\nFor maritalStatus use one of: Single, Married, Divorced, Widowed, In a relationship, It\'s complicated.\nFor hairColour use one of: Black, Dark brown, Brown, Auburn, Dirty blonde, Blonde, Platinum blonde, Red, Strawberry blonde, Grey, White.\nFor eyeColour use one of: Brown, Dark brown, Hazel, Green, Blue, Grey, Amber.\nFor skinTone use one of: Fair, Light, Medium, Olive, Tan, Brown, Dark brown, Ebony.\nNo extra text, no markdown, just the JSON object.` }] }),
   });
   const data = await res.json();
   const raw = data.choices[0].message.content.trim();
@@ -474,7 +492,7 @@ async function autoGenerateCharacter({ vibe, apiKey, model }) {
     return {
       name: parsed.name || "", persona: parsed.persona || "",
       age: parsed.age || 25, maritalStatus: parsed.maritalStatus || "Single",
-      appearance: { ...DEFAULT_APPEARANCE, hairColour: parsed.hairColour || "Brown", eyeColour: parsed.eyeColour || "Brown", skinTone: parsed.skinTone || "Medium" }
+      appearance: { ...DEFAULT_APPEARANCE, hairColour: parsed.hairColour || "Brown", eyeColour: parsed.eyeColour || "Brown", skinTone: parsed.skinTone || "Medium", ethnicity: parsed.ethnicity || "" }
     };
   } catch {}
 
@@ -486,7 +504,7 @@ async function autoGenerateCharacter({ vibe, apiKey, model }) {
       return {
         name: parsed.name || "", persona: parsed.persona || "",
         age: parsed.age || 25, maritalStatus: parsed.maritalStatus || "Single",
-        appearance: { ...DEFAULT_APPEARANCE, hairColour: parsed.hairColour || "Brown", eyeColour: parsed.eyeColour || "Brown", skinTone: parsed.skinTone || "Medium" }
+        appearance: { ...DEFAULT_APPEARANCE, hairColour: parsed.hairColour || "Brown", eyeColour: parsed.eyeColour || "Brown", skinTone: parsed.skinTone || "Medium", ethnicity: parsed.ethnicity || "" }
       };
     }
   } catch {}
@@ -730,6 +748,12 @@ function AppearanceSection({ appearance, onChange }) {
         {SKIN_TONES.map(c => <option key={c} value={c}>{c}</option>)}
       </select>
       {a.skinTone === "Custom" && <input style={{...S.input, marginTop:6}} placeholder="e.g. warm honey" value={a.skinToneCustom || ""} onChange={e => set("skinToneCustom", e.target.value)} />}
+      <label style={{...S.label, marginTop:10}}>Ethnicity</label>
+      <select style={S.select} value={a.ethnicity || ""} onChange={e => set("ethnicity", e.target.value)}>
+        <option value="">Not specified</option>
+        {ETHNICITIES.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+      {a.ethnicity === "Custom" && <input style={{...S.input, marginTop:6}} placeholder="e.g. Afro-Caribbean" value={a.ethnicityCustom || ""} onChange={e => set("ethnicityCustom", e.target.value)} />}
       <div style={{ marginTop:12 }}>
         {APPEARANCE_SLIDER_DEFS.map(def => (
           <SliderRow key={def.key} def={def} value={a[def.key] ?? 50} onChange={v => set(def.key, v)} />
@@ -1028,6 +1052,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   const [customImgPrompt, setCustomImgPrompt] = useState("");
   const [showGallery, setShowGallery] = useState(false);
   const [gallery, setGallery] = useState(() => storage.get(`gallery_${character.id}`, []));
+  const [lightboxImg, setLightboxImg] = useState(null);
   const [error, setError] = useState("");
   const [bgImage, setBgImage] = useState(initialChar.backgroundImage);
   const [showBgMenu, setShowBgMenu] = useState(false);
@@ -1111,11 +1136,17 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
         ? await generateImageDezgo({ prompt: fullPrompt, model: settings.dezgoModel, apiKey: settings.dezgoKey, nsfw: character.nsfw })
         : await generateImage({ prompt: fullPrompt, referenceImageUrl: character.referenceImage, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: character.nsfw, workerUrl: settings.workerUrl });
       setMessages(m => [...m, { role: "image", content: url, prompt: customImgPrompt }]);
-      const galleryKey = `gallery_${character.id}`;
-      const existing = storage.get(galleryKey, []);
-      const newGallery2 = [{ url, prompt: customImgPrompt, date: Date.now() }, ...existing].slice(0, 50);
-      storage.set(galleryKey, newGallery2);
-      setGallery(newGallery2);
+      const galleryKey2 = `gallery_${character.id}`;
+      const existing2 = storage.get(galleryKey2, []);
+      const newGallery2 = [{ url, prompt: customImgPrompt, date: Date.now() }, ...existing2].slice(0, 20);
+      try {
+        storage.set(galleryKey2, newGallery2);
+        setGallery(newGallery2);
+      } catch (e) {
+        const trimmed2 = [{ url, prompt: customImgPrompt, date: Date.now() }, ...existing2].slice(0, 5);
+        try { storage.set(galleryKey2, trimmed2); setGallery(trimmed2); } catch {}
+        setError("Gallery storage full — older images were removed to make space.");
+      }
       setCustomImgPrompt("");
     } catch (e) { setError(e.message); }
     setImgLoading(false);
@@ -1285,6 +1316,15 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
         <button style={S.sendBtn} onClick={() => sendMessage()} disabled={loading || !input.trim()}>Send</button>
       </div>
 
+      {lightboxImg && (
+        <div style={{ position:"fixed", inset:0, zIndex:200, background:"rgba(0,0,0,0.92)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
+          onClick={() => setLightboxImg(null)}>
+          <img src={lightboxImg} alt="expanded" style={{ maxWidth:"100%", maxHeight:"90vh", borderRadius:12, objectFit:"contain", boxShadow:"0 8px 40px rgba(0,0,0,0.8)" }} />
+          <button style={{ position:"absolute", top:20, right:20, background:"rgba(255,255,255,0.15)", border:"none", color:"white", borderRadius:"50%", width:40, height:40, fontSize:20, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}
+            onClick={() => setLightboxImg(null)}>✕</button>
+        </div>
+      )}
+
       {showGallery && (
         <div style={S.overlay} onClick={() => setShowGallery(false)}>
           <div style={{ ...S.modal, maxWidth:560, maxHeight:"88vh" }} onClick={e => e.stopPropagation()}>
@@ -1300,7 +1340,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
                   {gallery.map((item, i) => (
                     <div key={i} style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"2px solid var(--border)", cursor:"pointer" }}
                       onClick={() => { handleSetBackground(item.url); setShowGallery(false); }}>
-                      <img src={item.url} alt={item.prompt} style={{ width:"100%", display:"block", aspectRatio:"3/4", objectFit:"cover" }} />
+                      <img src={item.url} alt={item.prompt} style={{ width:"100%", display:"block", aspectRatio:"3/4", objectFit:"cover" }} onClick={e => { e.stopPropagation(); setLightboxImg(item.url); }} />
                       <div style={{ position:"absolute", bottom:0, left:0, right:0, background:"rgba(0,0,0,0.6)", padding:"6px 8px" }}>
                         <p style={{ fontSize:10, color:"white", margin:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.prompt}</p>
                       </div>
