@@ -105,6 +105,7 @@ const SLIDER_DEFS = [
 const DEFAULT_SETTINGS = {
   openrouterKey: "",
   replicateKey: "",
+  workerUrl: "",
   selectedModel: OPENROUTER_MODELS[0].id,
   imageModel: REPLICATE_MODELS[0].id,
 };
@@ -254,12 +255,16 @@ async function sendChat({ messages, character, model, apiKey }) {
   return data.choices[0].message.content;
 }
 
-async function generateImage({ prompt, referenceImageUrl, model, apiKey, nsfw }) {
+async function generateImage({ prompt, referenceImageUrl, model, apiKey, nsfw, workerUrl }) {
   const fullPrompt = nsfw ? prompt : `${prompt}, safe for work, tasteful`;
   const input = referenceImageUrl && model.includes("ip-adapter")
     ? { prompt: fullPrompt, image: referenceImageUrl, num_inference_steps: 30 }
     : { prompt: fullPrompt, num_inference_steps: 25, width: 512, height: 768 };
-  const res = await fetch("https://api.replicate.com/v1/predictions", {
+
+  // Use proxy worker if set, otherwise direct (works locally but not on GitHub Pages)
+  const base = workerUrl ? workerUrl.replace(/\/$/, "") + "/proxy" : "https://api.replicate.com";
+
+  const res = await fetch(`${base}/v1/predictions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Token ${apiKey}` },
     body: JSON.stringify({ version: model.includes(":") ? model.split(":")[1] : undefined, model: model.includes(":") ? undefined : model, input }),
@@ -268,7 +273,7 @@ async function generateImage({ prompt, referenceImageUrl, model, apiKey, nsfw })
   let result = await res.json();
   while (result.status !== "succeeded" && result.status !== "failed") {
     await new Promise(r => setTimeout(r, 1500));
-    const poll = await fetch(`https://api.replicate.com/v1/predictions/${result.id}`, { headers: { Authorization: `Token ${apiKey}` } });
+    const poll = await fetch(`${base}/v1/predictions/${result.id}`, { headers: { Authorization: `Token ${apiKey}` } });
     result = await poll.json();
   }
   if (result.status === "failed") throw new Error("Image generation failed");
@@ -398,6 +403,9 @@ function SettingsPanel({ settings, onSave, onClose }) {
             <button style={{position:"absolute", right:8, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", color:"#7a7268", cursor:"pointer", fontSize:12}} onClick={() => setShowKeys(v => !v)}>{showKeys ? "hide" : "show"}</button>
           </div>
           <a href="https://replicate.com/account/api-tokens" target="_blank" rel="noreferrer">Get a key ↗</a>
+          <label style={S.label}>Cloudflare Worker URL</label>
+          <input style={S.input} type="text" placeholder="https://your-worker.workers.dev" value={form.workerUrl || ""} onChange={e => setForm(f => ({...f, workerUrl: e.target.value}))} />
+          <p style={{ fontSize:11, color:"var(--text4)", marginTop:3 }}>Required for image generation on GitHub Pages — see setup guide.</p>
           <label style={S.label}>Chat Model</label>
           <select style={S.select} value={form.selectedModel} onChange={e => setForm(f => ({...f, selectedModel: e.target.value}))}>
             {OPENROUTER_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
@@ -523,7 +531,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
     if (!imgPrompt.trim()) { setError("Enter an image description."); return; }
     setImgLoading(true); setError("");
     try {
-      const url = await generateImage({ prompt: `${imgPrompt}, portrait, character art, detailed`, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: form.nsfw });
+      const url = await generateImage({ prompt: `${imgPrompt}, portrait, character art, detailed`, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: form.nsfw, workerUrl: settings.workerUrl });
       setForm(f => ({ ...f, referenceImage: url, backgroundImage: url }));
     } catch (e) { setError(e.message); }
     setImgLoading(false);
@@ -819,7 +827,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       const prompt = messages.length > 0
         ? await buildImagePromptFromContext({ messages, character, apiKey: settings.openrouterKey, model: settings.selectedModel })
         : `${character.name}, portrait, character art`;
-      const url = await generateImage({ prompt: `${character.name}, ${prompt}`, referenceImageUrl: character.referenceImage, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: character.nsfw });
+      const url = await generateImage({ prompt: `${character.name}, ${prompt}`, referenceImageUrl: character.referenceImage, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: character.nsfw, workerUrl: settings.workerUrl });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);
     } catch (e) { if (!auto) setError(e.message); }
     setImgLoading(false);
@@ -899,10 +907,10 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
             onEdit={handleEditMessage} onRegenerate={handleRegenerate} regenLoading={regenLoading} />
         ))}
 
-        {loading && (
+        {(loading || regenLoading) && (
           <div style={{ ...S.bubbleWrapper, justifyContent: "flex-start" }} className="msg-anim">
             <div style={{ ...S.messageBubble, ...S.aiBubble }}>
-              <span style={S.bubbleName}>{character.name}</span>
+              <span style={S.bubbleName}>{regenLoading ? `↺ ${character.name} is rethinking…` : character.name}</span>
               <div style={S.typingDots}>
                 <span style={{ ...S.dot, animationDelay: "0s" }} />
                 <span style={{ ...S.dot, animationDelay: "0.2s" }} />
