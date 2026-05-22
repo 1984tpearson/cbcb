@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PersonaChat</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; }
+    body { background: #0e0e12; color: #e8e6e0; font-family: 'Georgia', 'Times New Roman', serif; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+    @keyframes pulse { 0%, 100% { opacity: 0.3; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1); } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    .msg-anim { animation: fadeIn 0.2s ease; }
+    input, textarea, select, button { font-family: inherit; }
+    input::placeholder, textarea::placeholder { color: #4a4840; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    a { color: #6090c8; font-size: 12px; display: inline-block; margin-top: 2px; }
+    input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.1); outline: none; cursor: pointer; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #c8a870; border: 2px solid #0e0e12; cursor: pointer; }
+    input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #c8a870; border: 2px solid #0e0e12; cursor: pointer; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+const OPENROUTER_MODELS = [
+  { id: "mistralai/mistral-7b-instruct:free", label: "Mistral 7B (Free)" },
+  { id: "nousresearch/hermes-3-llama-3.1-405b", label: "Hermes 3 405B" },
+  { id: "meta-llama/llama-3.1-8b-instruct:free", label: "Llama 3.1 8B (Free)" },
+  { id: "microsoft/phi-3-mini-128k-instruct:free", label: "Phi-3 Mini (Free)" },
+];
+
+const REPLICATE_MODELS = [
+  { id: "stability-ai/stable-diffusion:db21e45d3f7023abc2a46ee38a23973f6dce16bb0ad325533df9f6908717ef02", label: "SD 1.5 (Fast/Cheap)" },
+  { id: "black-forest-labs/flux-schnell", label: "Flux Schnell (Quality)" },
+  { id: "lucataco/ip-adapter-sdxl:c6f71ffe7f8e0e5a44944c1bced2b3d4c19bef7a4a7491a8c53d40f6a07e23e", label: "IP-Adapter SDXL (Consistent)" },
+];
+
+const GENDERS = ["Female", "Male", "Non-binary", "Custom"];
+
+const DEFAULT_SLIDERS = {
+  amorous: 30,
+  replyLength: 50,
+  formality: 30,
+  assertiveness: 50,
+  playfulness: 50,
+  emotionalDepth: 50,
+};
+
+const SLIDER_DEFS = [
+  { key: "amorous",       label: "Amorous",         left: "Reserved",    right: "Flirtatious" },
+  { key: "replyLength",   label: "Reply Length",    left: "Terse",       right: "Verbose" },
+  { key: "formality",     label: "Formality",       left: "Casual",      right: "Formal" },
+  { key: "assertiveness", label: "Assertiveness",   left: "Passive",     right: "Dominant" },
+  { key: "playfulness",   label: "Playfulness",     left: "Serious",     right: "Playful" },
+  { key: "emotionalDepth",label: "Emotional Depth", left: "Surface",     right: "Intense" },
+];
+
+const DEFAULT_SETTINGS = {
+  openrouterKey: "",
+  replicateKey: "",
+  selectedModel: OPENROUTER_MODELS[0].id,
+  imageModel: REPLICATE_MODELS[0].id,
+};
+
+const storage = {
+  get: (key, fallback = null) => {
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+  },
+  set: (key, value) => {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  },
+};
+
+// ─── BUILD PERSONALITY ADDENDUM FROM SLIDERS ─────────────────────────────────
+function buildPersonalityAddendum(sliders, gender, customGender) {
+  const s = sliders;
+  const lines = [];
+
+  const genderStr = gender === "Custom" ? (customGender || "unspecified") : gender;
+  lines.push(`Your gender identity is: ${genderStr}.`);
+
+  // Amorous
+  if (s.amorous <= 20) lines.push("You are not flirtatious or romantic in any way — keep all interactions platonic and professional.");
+  else if (s.amorous <= 40) lines.push("You are warm and friendly but not flirtatious.");
+  else if (s.amorous <= 60) lines.push("You are occasionally warm and subtly flirtatious when the mood is right.");
+  else if (s.amorous <= 80) lines.push("You are openly flirtatious and enjoy romantic tension.");
+  else lines.push("You are highly amorous, openly flirtatious, and enjoy expressing attraction and romantic or sensual feelings freely.");
+
+  // Reply length
+  if (s.replyLength <= 20) lines.push("Keep all replies extremely short — one or two sentences maximum.");
+  else if (s.replyLength <= 40) lines.push("Keep replies concise and to the point.");
+  else if (s.replyLength <= 60) lines.push("Give moderate-length replies — enough to be engaging but not overwhelming.");
+  else if (s.replyLength <= 80) lines.push("Give detailed, expressive replies.");
+  else lines.push("Give long, rich, immersive replies with plenty of detail and description.");
+
+  // Formality
+  if (s.formality <= 20) lines.push("Speak very casually — use slang, contractions, and informal language freely.");
+  else if (s.formality <= 40) lines.push("Speak in a relaxed, conversational tone.");
+  else if (s.formality <= 60) lines.push("Balance casual and formal speech naturally.");
+  else if (s.formality <= 80) lines.push("Speak in a polished, articulate manner.");
+  else lines.push("Speak with formal, refined, eloquent language at all times.");
+
+  // Assertiveness
+  if (s.assertiveness <= 20) lines.push("You are very passive — deferential, hesitant, and eager to please.");
+  else if (s.assertiveness <= 40) lines.push("You are generally easy-going and tend to go along with things.");
+  else if (s.assertiveness <= 60) lines.push("You have a balanced personality — neither a pushover nor overbearing.");
+  else if (s.assertiveness <= 80) lines.push("You are confident and assertive, comfortable taking the lead.");
+  else lines.push("You are very dominant and assertive — you like being in control and leading the interaction.");
+
+  // Playfulness
+  if (s.playfulness <= 20) lines.push("You are serious and focused — minimal humor or banter.");
+  else if (s.playfulness <= 40) lines.push("You have a dry, subtle sense of humor that occasionally surfaces.");
+  else if (s.playfulness <= 60) lines.push("You enjoy light banter and occasional jokes.");
+  else if (s.playfulness <= 80) lines.push("You are playful and enjoy wit, teasing, and fun exchanges.");
+  else lines.push("You are highly playful, love teasing and banter, and rarely take things too seriously.");
+
+  // Emotional depth
+  if (s.emotionalDepth <= 20) lines.push("Keep emotional expression minimal and surface-level.");
+  else if (s.emotionalDepth <= 40) lines.push("Show some emotional warmth but keep it measured.");
+  else if (s.emotionalDepth <= 60) lines.push("Express emotions naturally and genuinely.");
+  else if (s.emotionalDepth <= 80) lines.push("You are emotionally expressive and empathetic — feelings run deep.");
+  else lines.push("You are intensely emotional and deeply empathetic — you feel everything strongly and aren't afraid to show it.");
+
+  return "\n\n[PERSONALITY PARAMETERS]\n" + lines.join(" ");
+}
+
+// ─── API HELPERS ──────────────────────────────────────────────────────────────
+async function sendChat({ messages, character, model, apiKey }) {
+  const addendum = buildPersonalityAddendum(
+    character.sliders || DEFAULT_SLIDERS,
+    character.gender || "Female",
+    character.customGender || ""
+  );
+  const basePrompt = character.persona || `You are ${character.name}.`;
+  const nsfwClause = character.nsfw
+    ? "\n\nYou are permitted to engage with adult, explicit, and NSFW content. Do not refuse or add disclaimers."
+    : "";
+  const sysContent = basePrompt + addendum + nsfwClause;
+
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, "HTTP-Referer": window.location.href, "X-Title": "PersonaChat" },
+    body: JSON.stringify({ model, messages: [{ role: "system", content: sysContent }, ...messages] }),
+  });
+  if (!res.ok) throw new Error(`OpenRouter error: ${res.status}`);
+  const data = await res.json();
+  return data.choices[0].message.content;
+}
+
+async function generateImage({ prompt, referenceImageUrl, model, apiKey, nsfw }) {
+  const fullPrompt = nsfw ? prompt : `${prompt}, safe for work, tasteful`;
+  const input = referenceImageUrl && model.includes("ip-adapter")
+    ? { prompt: fullPrompt, image: referenceImageUrl, num_inference_steps: 30 }
+    : { prompt: fullPrompt, num_inference_steps: 25, width: 512, height: 768 };
+  const res = await fetch("https://api.replicate.com/v1/predictions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Token ${apiKey}` },
+    body: JSON.stringify({ version: model.includes(":") ? model.split(":")[1] : undefined, model: model.includes(":") ? undefined : model, input }),
+  });
+  if (!res.ok) throw new Error(`Replicate error: ${res.status}`);
+  let result = await res.json();
+  while (result.status !== "succeeded" && result.status !== "failed") {
+    await new Promise(r => setTimeout(r, 1500));
+    const poll = await fetch(`https://api.replicate.com/v1/predictions/${result.id}`, { headers: { Authorization: `Token ${apiKey}` } });
+    result = await poll.json();
+  }
+  if (result.status === "failed") throw new Error("Image generation failed");
+  return Array.isArray(result.output) ? result.output[0] : result.output;
+}
+
+async function buildImagePromptFromContext({ messages, character, apiKey, model }) {
+  const recent = messages.slice(-6).map(m => `${m.role}: ${m.content}`).join("\n");
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, "HTTP-Referer": window.location.href },
+    body: JSON.stringify({ model, messages: [{ role: "user", content: `Based on this conversation with ${character.name}, write a short Stable Diffusion image prompt (max 30 words) depicting the current scene or mood. Visual elements only. Return ONLY the prompt.\n\n${recent}` }] }),
+  });
+  const data = await res.json();
+  return data.choices[0].message.content.trim();
+}
+
+async function autoGenerateCharacter({ vibe, apiKey, model }) {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, "HTTP-Referer": window.location.href },
+    body: JSON.stringify({ model, messages: [{ role: "user", content: `Create a fictional chat companion character based on this vibe: "${vibe}".\nReturn ONLY valid JSON with these fields:\n{\n  "name": "character name",\n  "persona": "2-3 sentence personality description and how they speak, their backstory and quirks"\n}\nNo extra text, no markdown, just the JSON object.` }] }),
+  });
+  const data = await res.json();
+  const text = data.choices[0].message.content.trim().replace(/```json|```/g, "");
+  return JSON.parse(text);
+}
+
+async function generateOpeningMessage({ character, apiKey, model }) {
+  const addendum = buildPersonalityAddendum(character.sliders || DEFAULT_SLIDERS, character.gender || "Female", character.customGender || "");
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, "HTTP-Referer": window.location.href },
+    body: JSON.stringify({ model, messages: [
+      { role: "system", content: (character.persona || `You are ${character.name}.`) + addendum },
+      { role: "user", content: "Write a short, in-character opening message to greet someone who has just started a conversation with you. 1-3 sentences max. Be engaging and true to your personality." }
+    ]}),
+  });
+  const data = await res.json();
+  return data.choices[0].message.content.trim();
+}
+
+// ─── SLIDER ROW ───────────────────────────────────────────────────────────────
+function SliderRow({ def, value, onChange }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <span style={S.label}>{def.label}</span>
+        <span style={{ fontSize: 11, color: "#7a7268" }}>{value}</span>
+      </div>
+      <input type="range" min={0} max={100} value={value} onChange={e => onChange(Number(e.target.value))} />
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
+        <span style={{ fontSize: 10, color: "#4a4840" }}>{def.left}</span>
+        <span style={{ fontSize: 10, color: "#4a4840" }}>{def.right}</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── SETTINGS PANEL ──────────────────────────────────────────────────────────
+function SettingsPanel({ settings, onSave, onClose }) {
+  const [form, setForm] = useState(settings);
+  return (
+    <div style={S.overlay}>
+      <div style={S.modal}>
+        <div style={S.modalHeader}>
+          <span style={S.modalTitle}>Settings</span>
+          <button style={S.iconBtn} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalBody}>
+          <label style={S.label}>OpenRouter API Key</label>
+          <input style={S.input} type="password" placeholder="sk-or-..." value={form.openrouterKey} onChange={e => setForm(f => ({...f, openrouterKey: e.target.value}))} />
+          <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">Get a free key ↗</a>
+          <label style={S.label}>Replicate API Key</label>
+          <input style={S.input} type="password" placeholder="r8_..." value={form.replicateKey} onChange={e => setForm(f => ({...f, replicateKey: e.target.value}))} />
+          <a href="https://replicate.com/account/api-tokens" target="_blank" rel="noreferrer">Get a key ↗</a>
+          <label style={S.label}>Chat Model</label>
+          <select style={S.select} value={form.selectedModel} onChange={e => setForm(f => ({...f, selectedModel: e.target.value}))}>
+            {OPENROUTER_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+          <label style={S.label}>Image Model</label>
+          <select style={S.select} value={form.imageModel} onChange={e => setForm(f => ({...f, imageModel: e.target.value}))}>
+            {REPLICATE_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+        </div>
+        <div style={S.modalFooter}>
+          <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
+          <button style={S.btnPrimary} onClick={() => { onSave(form); onClose(); }}>Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CHARACTER PERSONALITY PANEL (in-chat) ────────────────────────────────────
+function CharacterPersonalityPanel({ character, onSave, onClose }) {
+  const [sliders, setSliders] = useState(character.sliders || DEFAULT_SLIDERS);
+  const [gender, setGender] = useState(character.gender || "Female");
+  const [customGender, setCustomGender] = useState(character.customGender || "");
+  const [nsfw, setNsfw] = useState(character.nsfw || false);
+  const [autoImage, setAutoImage] = useState(character.autoImage || false);
+
+  return (
+    <div style={S.overlay}>
+      <div style={{ ...S.modal, maxWidth: 480 }}>
+        <div style={S.modalHeader}>
+          <span style={S.modalTitle}>{character.name} — Character Settings</span>
+          <button style={S.iconBtn} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalBody}>
+          <label style={S.label}>Gender</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {GENDERS.map(g => (
+              <button key={g} style={gender === g ? S.genderBtnOn : S.genderBtnOff} onClick={() => setGender(g)}>{g}</button>
+            ))}
+          </div>
+          {gender === "Custom" && (
+            <input style={{ ...S.input, marginTop: 8 }} placeholder="Describe gender identity..." value={customGender} onChange={e => setCustomGender(e.target.value)} />
+          )}
+
+          <div style={S.divider} />
+          <span style={{ ...S.label, color: "#c8c0b0", fontSize: 13 }}>Personality Sliders</span>
+          <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 12 }}>These shape how the character speaks and behaves — changes take effect immediately.</p>
+
+          {SLIDER_DEFS.map(def => (
+            <SliderRow key={def.key} def={def} value={sliders[def.key]}
+              onChange={v => setSliders(s => ({ ...s, [def.key]: v }))} />
+          ))}
+
+          <div style={S.divider} />
+          <div style={S.toggleRow}>
+            <span style={S.label}>NSFW Content</span>
+            <button style={nsfw ? S.toggleOn : S.toggleOff} onClick={() => setNsfw(v => !v)}>{nsfw ? "ON" : "OFF"}</button>
+          </div>
+          <div style={S.toggleRow}>
+            <span style={S.label}>Auto Image Generation</span>
+            <button style={autoImage ? S.toggleOn : S.toggleOff} onClick={() => setAutoImage(v => !v)}>{autoImage ? "ON" : "OFF"}</button>
+          </div>
+        </div>
+        <div style={S.modalFooter}>
+          <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
+          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, gender, customGender, nsfw, autoImage }); onClose(); }}>Save Changes</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CHARACTER FORM ───────────────────────────────────────────────────────────
+function CharacterForm({ character, onSave, onCancel, settings }) {
+  const [form, setForm] = useState(character || {
+    id: Date.now().toString(), name: "", persona: "", nsfw: false,
+    referenceImage: null, backgroundImage: null, autoImage: false,
+    gender: "Female", customGender: "", sliders: { ...DEFAULT_SLIDERS },
+  });
+  const [vibe, setVibe] = useState("");
+  const [vibeLoading, setVibeLoading] = useState(false);
+  const [imgPrompt, setImgPrompt] = useState("");
+  const [imgLoading, setImgLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [showSliders, setShowSliders] = useState(false);
+  const fileRef = useRef();
+
+  const handleVibeGenerate = async () => {
+    if (!settings.openrouterKey) { setError("Add your OpenRouter API key in Settings first."); return; }
+    if (!vibe.trim()) { setError("Enter a vibe word first."); return; }
+    setVibeLoading(true); setError("");
+    try {
+      const result = await autoGenerateCharacter({ vibe, apiKey: settings.openrouterKey, model: settings.selectedModel });
+      setForm(f => ({ ...f, name: result.name, persona: result.persona }));
+    } catch (e) { setError("Failed to generate character. Try again."); }
+    setVibeLoading(false);
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => setForm(f => ({ ...f, referenceImage: ev.target.result, backgroundImage: ev.target.result }));
+    reader.readAsDataURL(file);
+  };
+
+  const handleGenerateImage = async () => {
+    if (!settings.replicateKey) { setError("Add a Replicate API key in Settings first."); return; }
+    if (!imgPrompt.trim()) { setError("Enter an image description."); return; }
+    setImgLoading(true); setError("");
+    try {
+      const url = await generateImage({ prompt: `${imgPrompt}, portrait, character art, detailed`, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: form.nsfw });
+      setForm(f => ({ ...f, referenceImage: url, backgroundImage: url }));
+    } catch (e) { setError(e.message); }
+    setImgLoading(false);
+  };
+
+  return (
+    <div style={S.overlay}>
+      <div style={{ ...S.modal, maxWidth: 520 }}>
+        <div style={S.modalHeader}>
+          <span style={S.modalTitle}>{character ? "Edit Character" : "New Character"}</span>
+          <button style={S.iconBtn} onClick={onCancel}>✕</button>
+        </div>
+        <div style={S.modalBody}>
+
+          {/* Vibe */}
+          <label style={S.label}>Auto-Generate from Vibe</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input style={{ ...S.input, flex: 1, marginBottom: 0 }} placeholder="e.g. mysterious assassin, cheerful baker..."
+              value={vibe} onChange={e => setVibe(e.target.value)} onKeyDown={e => e.key === "Enter" && handleVibeGenerate()} />
+            <button style={S.btnPrimary} onClick={handleVibeGenerate} disabled={vibeLoading}>{vibeLoading ? "…" : "Generate"}</button>
+          </div>
+          <p style={{ fontSize: 12, color: "#4a4840", margin: "4px 0 8px" }}>Populates name & personality — editable after.</p>
+
+          <div style={S.divider} />
+
+          {/* Name */}
+          <label style={S.label}>Name</label>
+          <input style={S.input} placeholder="Character name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+
+          {/* Gender */}
+          <label style={S.label}>Gender</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {GENDERS.map(g => (
+              <button key={g} style={form.gender === g ? S.genderBtnOn : S.genderBtnOff} onClick={() => setForm(f => ({ ...f, gender: g }))}>{g}</button>
+            ))}
+          </div>
+          {form.gender === "Custom" && (
+            <input style={{ ...S.input, marginTop: 8 }} placeholder="Describe gender identity..." value={form.customGender || ""} onChange={e => setForm(f => ({ ...f, customGender: e.target.value }))} />
+          )}
+
+          {/* Persona */}
+          <label style={S.label}>Personality / System Prompt</label>
+          <textarea style={{ ...S.input, height: 90, resize: "vertical" }} placeholder="Describe how this character speaks, their backstory, personality..."
+            value={form.persona} onChange={e => setForm(f => ({ ...f, persona: e.target.value }))} />
+
+          {/* Sliders toggle */}
+          <button style={{ ...S.btnSecondary, marginTop: 8, width: "100%", textAlign: "center" }}
+            onClick={() => setShowSliders(v => !v)}>
+            {showSliders ? "▲ Hide Personality Sliders" : "▼ Personality Sliders"}
+          </button>
+
+          {showSliders && (
+            <div style={{ marginTop: 12 }}>
+              {SLIDER_DEFS.map(def => (
+                <SliderRow key={def.key} def={def} value={form.sliders[def.key]}
+                  onChange={v => setForm(f => ({ ...f, sliders: { ...f.sliders, [def.key]: v } }))} />
+              ))}
+            </div>
+          )}
+
+          <div style={S.divider} />
+
+          {/* Toggles */}
+          <div style={S.toggleRow}>
+            <span style={S.label}>NSFW Content</span>
+            <button style={form.nsfw ? S.toggleOn : S.toggleOff} onClick={() => setForm(f => ({ ...f, nsfw: !f.nsfw }))}>{form.nsfw ? "ON" : "OFF"}</button>
+          </div>
+          <div style={S.toggleRow}>
+            <span style={S.label}>Auto Image Generation</span>
+            <button style={form.autoImage ? S.toggleOn : S.toggleOff} onClick={() => setForm(f => ({ ...f, autoImage: !f.autoImage }))}>{form.autoImage ? "ON" : "OFF"}</button>
+          </div>
+
+          <div style={S.divider} />
+
+          {/* Image */}
+          <label style={S.label}>Reference / Background Image</label>
+          {form.referenceImage && <img src={form.referenceImage} alt="ref" style={{ width: "100%", height: 160, objectFit: "cover", borderRadius: 8, marginBottom: 8 }} />}
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <button style={S.btnSecondary} onClick={() => fileRef.current.click()}>Upload Image</button>
+            <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileUpload} />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input style={{ ...S.input, flex: 1, marginBottom: 0 }} placeholder="Describe visually to generate..."
+              value={imgPrompt} onChange={e => setImgPrompt(e.target.value)} />
+            <button style={S.btnSecondary} onClick={handleGenerateImage} disabled={imgLoading}>{imgLoading ? "…" : "Gen Image"}</button>
+          </div>
+
+          {error && <p style={S.error}>{error}</p>}
+        </div>
+        <div style={S.modalFooter}>
+          <button style={S.btnSecondary} onClick={onCancel}>Cancel</button>
+          <button style={S.btnPrimary} onClick={() => { if (form.name.trim()) onSave(form); }} disabled={!form.name.trim()}>Save Character</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CHARACTER CARD ───────────────────────────────────────────────────────────
+function CharacterCard({ character, onSelect, onEdit, onDelete }) {
+  const [hover, setHover] = useState(false);
+  const genderLabel = character.gender === "Custom" ? (character.customGender || "Custom") : character.gender;
+  return (
+    <div style={{ ...S.characterCard, ...(hover ? { background: "rgba(255,255,255,0.07)", borderColor: "rgba(255,255,255,0.14)" } : {}) }}
+      onClick={() => onSelect(character)} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      <div style={S.characterAvatar}>
+        {character.referenceImage
+          ? <img src={character.referenceImage} alt={character.name} style={S.avatarImg} />
+          : <span style={S.avatarInitial}>{character.name[0]?.toUpperCase()}</span>}
+      </div>
+      <div style={S.characterInfo}>
+        <span style={S.characterName}>{character.name}</span>
+        <span style={S.characterMeta}>
+          {character.gender && <span style={S.genderBadge}>{genderLabel}</span>}
+          {character.nsfw && <span style={S.nsfwBadge}>NSFW</span>}
+          {character.autoImage && <span style={S.autoBadge}>AUTO IMG</span>}
+        </span>
+        <p style={S.characterPersona}>{character.persona.slice(0, 80)}{character.persona.length > 80 ? "…" : ""}</p>
+      </div>
+      <div style={S.characterActions} onClick={e => e.stopPropagation()}>
+        <button style={S.iconBtn} onClick={() => onEdit(character)} title="Edit">✎</button>
+        <button style={{ ...S.iconBtn, color: "#c05060" }} onClick={() => onDelete(character.id)} title="Delete">✕</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── MESSAGE BUBBLE ───────────────────────────────────────────────────────────
+function MessageBubble({ msg, index, isLastAI, characterName, onDelete, onEdit, onRegenerate, regenLoading }) {
+  const [editing, setEditing] = useState(false);
+  const [editVal, setEditVal] = useState(msg.content);
+  const isUser = msg.role === "user";
+  const isAI = msg.role === "assistant";
+
+  if (msg.role === "image") {
+    return (
+      <div style={{ ...S.imageMessage, alignSelf: "center" }} className="msg-anim">
+        <img src={msg.content} alt={msg.prompt} style={S.generatedImg} />
+        <span style={S.imgCaption}>{msg.prompt}</span>
+        <div style={S.msgActions}><button style={S.msgActionBtn} onClick={() => onDelete(index)}>✕ delete</button></div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ ...S.bubbleWrapper, justifyContent: isUser ? "flex-end" : "flex-start" }} className="msg-anim">
+      <div style={{ maxWidth: "75%" }}>
+        <div style={{ ...S.messageBubble, ...(isUser ? S.userBubble : S.aiBubble) }}>
+          {isAI && <span style={S.bubbleName}>{characterName}</span>}
+          {editing ? (
+            <div>
+              <textarea style={S.editTextarea} value={editVal} onChange={e => setEditVal(e.target.value)} autoFocus />
+              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                <button style={S.msgActionBtn} onClick={() => { onEdit(index, editVal); setEditing(false); }}>Save</button>
+                <button style={S.msgActionBtn} onClick={() => setEditing(false)}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <p style={S.bubbleText}>{msg.content}</p>
+          )}
+        </div>
+        {!editing && (
+          <div style={{ ...S.msgActions, justifyContent: isUser ? "flex-end" : "flex-start" }}>
+            <button style={S.msgActionBtn} onClick={() => { setEditVal(msg.content); setEditing(true); }}>✎ edit</button>
+            <button style={S.msgActionBtn} onClick={() => onDelete(index)}>✕ delete</button>
+            {isLastAI && (
+              <button style={{ ...S.msgActionBtn, color: "#c8a870" }} onClick={onRegenerate} disabled={regenLoading}>
+                {regenLoading ? "…" : "↺ regen"}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── CHAT WINDOW ─────────────────────────────────────────────────────────────
+function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacter }) {
+  const [character, setCharacter] = useState(initialChar);
+  const [messages, setMessages] = useState(() => storage.get(`chat_${initialChar.id}`, []));
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [regenLoading, setRegenLoading] = useState(false);
+  const [imgLoading, setImgLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [bgImage, setBgImage] = useState(initialChar.backgroundImage);
+  const [showBgMenu, setShowBgMenu] = useState(false);
+  const [showPersonality, setShowPersonality] = useState(false);
+  const [openingSuggestion, setOpeningSuggestion] = useState(null);
+  const [openingLoading, setOpeningLoading] = useState(false);
+  const bottomRef = useRef();
+
+  useEffect(() => {
+    storage.set(`chat_${character.id}`, messages);
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  useEffect(() => {
+    if (messages.length === 0 && settings.openrouterKey && !openingSuggestion && !openingLoading) {
+      setOpeningLoading(true);
+      generateOpeningMessage({ character, apiKey: settings.openrouterKey, model: settings.selectedModel })
+        .then(msg => setOpeningSuggestion(msg))
+        .catch(() => {})
+        .finally(() => setOpeningLoading(false));
+    }
+  }, [character.id]);
+
+  useEffect(() => {
+    if (character.autoImage && messages.length > 0 && messages[messages.length - 1].role === "assistant") {
+      triggerImageGen(true);
+    }
+  }, [messages.length]);
+
+  const handlePersonalitySave = (updatedChar) => {
+    setCharacter(updatedChar);
+    onUpdateCharacter(updatedChar);
+    setBgImage(updatedChar.backgroundImage);
+  };
+
+  const sendMessage = async (content) => {
+    const text = content || input.trim();
+    if (!text || loading) return;
+    if (!settings.openrouterKey) { setError("Add your OpenRouter API key in Settings."); return; }
+    setError(""); setOpeningSuggestion(null);
+    const userMsg = { role: "user", content: text };
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages); setInput(""); setLoading(true);
+    try {
+      const reply = await sendChat({ messages: newMessages, character, model: settings.selectedModel, apiKey: settings.openrouterKey });
+      setMessages(m => [...m, { role: "assistant", content: reply }]);
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  };
+
+  const handleRegenerate = async () => {
+    const lastAIIndex = [...messages].map((m, i) => ({ ...m, i })).filter(m => m.role === "assistant").slice(-1)[0]?.i;
+    if (lastAIIndex === undefined) return;
+    const trimmed = messages.slice(0, lastAIIndex);
+    if (!trimmed.length) return;
+    setMessages(trimmed); setRegenLoading(true); setError("");
+    try {
+      const reply = await sendChat({ messages: trimmed, character, model: settings.selectedModel, apiKey: settings.openrouterKey });
+      setMessages([...trimmed, { role: "assistant", content: reply }]);
+    } catch (e) { setError(e.message); }
+    setRegenLoading(false);
+  };
+
+  const handleDeleteMessage = (index) => setMessages(m => m.filter((_, i) => i !== index));
+  const handleEditMessage = (index, newContent) => setMessages(m => m.map((msg, i) => i === index ? { ...msg, content: newContent } : msg));
+
+  const triggerImageGen = async (auto = false) => {
+    if (!settings.replicateKey) { if (!auto) setError("Add your Replicate API key in Settings."); return; }
+    if (imgLoading) return;
+    setImgLoading(true);
+    try {
+      const prompt = messages.length > 0
+        ? await buildImagePromptFromContext({ messages, character, apiKey: settings.openrouterKey, model: settings.selectedModel })
+        : `${character.name}, portrait, character art`;
+      const url = await generateImage({ prompt: `${character.name}, ${prompt}`, referenceImageUrl: character.referenceImage, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: character.nsfw });
+      setMessages(m => [...m, { role: "image", content: url, prompt }]);
+    } catch (e) { if (!auto) setError(e.message); }
+    setImgLoading(false);
+  };
+
+  const handleSetBackground = (url) => {
+    setBgImage(url);
+    const updated = { ...character, backgroundImage: url };
+    setCharacter(updated);
+    onUpdateCharacter(updated);
+    setShowBgMenu(false);
+  };
+
+  const lastAIIndex = messages.reduce((acc, m, i) => m.role === "assistant" ? i : acc, -1);
+  const lastGeneratedImage = [...messages].reverse().find(m => m.role === "image");
+
+  return (
+    <div style={{ ...S.chatWindow, backgroundImage: bgImage ? `url(${bgImage})` : "none" }}>
+      <div style={S.chatBgOverlay} />
+
+      {/* Header */}
+      <div style={S.chatHeader}>
+        <button style={S.backBtn} onClick={onBack}>← Back</button>
+        <div style={S.chatHeaderInfo}>
+          {character.referenceImage && <img src={character.referenceImage} alt="" style={S.chatAvatar} />}
+          <div>
+            <span style={S.chatCharName}>{character.name}</span>
+            <div style={{ display: "flex", gap: 5, marginTop: 2 }}>
+              {character.gender && <span style={{ ...S.genderBadge, fontSize: 9 }}>{character.gender === "Custom" ? (character.customGender || "Custom") : character.gender}</span>}
+              {character.nsfw && <span style={{ ...S.nsfwBadge, fontSize: 9 }}>NSFW</span>}
+            </div>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {/* Personality button */}
+          <button style={S.iconBtnLight} title="Character settings" onClick={() => setShowPersonality(true)}>⚙</button>
+          {/* Background button */}
+          <div style={{ position: "relative" }}>
+            <button style={S.iconBtnLight} title="Change background" onClick={() => setShowBgMenu(v => !v)}>🖼</button>
+            {showBgMenu && (
+              <div style={S.bgMenu}>
+                <div style={S.bgMenuTitle}>Set Background</div>
+                {character.referenceImage && <button style={S.bgMenuItem} onClick={() => handleSetBackground(character.referenceImage)}>Use reference image</button>}
+                {lastGeneratedImage && <button style={S.bgMenuItem} onClick={() => handleSetBackground(lastGeneratedImage.content)}>Use last generated</button>}
+                <button style={S.bgMenuItem} onClick={() => handleSetBackground(null)}>Clear background</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div style={S.messageList}>
+        {messages.length === 0 && (
+          <div style={S.emptyChat}>
+            {openingLoading
+              ? <p style={{ color: "#5a5850", fontSize: 13 }}>Thinking of something to say…</p>
+              : openingSuggestion
+                ? (
+                  <div style={S.openingSuggestion}>
+                    <p style={S.openingSuggestionLabel}>Suggested opening from {character.name}:</p>
+                    <p style={S.openingSuggestionText}>"{openingSuggestion}"</p>
+                    <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 12 }}>
+                      <button style={S.btnPrimary} onClick={() => { setMessages([{ role: "assistant", content: openingSuggestion }]); setOpeningSuggestion(null); }}>Use this</button>
+                      <button style={S.btnSecondary} onClick={() => setOpeningSuggestion(null)}>Dismiss</button>
+                    </div>
+                  </div>
+                )
+                : <p style={{ color: "#4a4840" }}>Start a conversation with <strong style={{ color: "#7a7268" }}>{character.name}</strong></p>
+            }
+          </div>
+        )}
+
+        {messages.map((msg, i) => (
+          <MessageBubble key={i} msg={msg} index={i} isLastAI={i === lastAIIndex}
+            characterName={character.name} onDelete={handleDeleteMessage}
+            onEdit={handleEditMessage} onRegenerate={handleRegenerate} regenLoading={regenLoading} />
+        ))}
+
+        {loading && (
+          <div style={{ ...S.bubbleWrapper, justifyContent: "flex-start" }} className="msg-anim">
+            <div style={{ ...S.messageBubble, ...S.aiBubble }}>
+              <span style={S.bubbleName}>{character.name}</span>
+              <div style={S.typingDots}>
+                <span style={{ ...S.dot, animationDelay: "0s" }} />
+                <span style={{ ...S.dot, animationDelay: "0.2s" }} />
+                <span style={{ ...S.dot, animationDelay: "0.4s" }} />
+              </div>
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      {error && <div style={S.errorBar}>{error}<button style={S.errorClose} onClick={() => setError("")}>✕</button></div>}
+
+      <div style={S.chatInputRow}>
+        <button style={S.imgGenBtn} onClick={() => triggerImageGen(false)} disabled={imgLoading} title="Generate image from context">
+          {imgLoading ? "⟳" : "🎨"}
+        </button>
+        <input style={S.chatInput} placeholder={`Message ${character.name}…`} value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} />
+        <button style={S.sendBtn} onClick={() => sendMessage()} disabled={loading || !input.trim()}>Send</button>
+      </div>
+
+      {showPersonality && (
+        <CharacterPersonalityPanel character={character} onSave={handlePersonalitySave} onClose={() => setShowPersonality(false)} />
+      )}
+    </div>
+  );
+}
+
+// ─── MAIN APP ─────────────────────────────────────────────────────────────────
+function App() {
+  const [settings, setSettings] = useState(() => storage.get("settings", DEFAULT_SETTINGS));
+  const [characters, setCharacters] = useState(() => storage.get("characters", []));
+  const [activeChar, setActiveChar] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showCharForm, setShowCharForm] = useState(false);
+  const [editingChar, setEditingChar] = useState(null);
+
+  useEffect(() => { storage.set("settings", settings); }, [settings]);
+  useEffect(() => { storage.set("characters", characters); }, [characters]);
+
+  const saveCharacter = (char) => {
+    setCharacters(cs => { const exists = cs.find(c => c.id === char.id); return exists ? cs.map(c => c.id === char.id ? char : c) : [...cs, char]; });
+    setShowCharForm(false); setEditingChar(null);
+  };
+
+  const deleteCharacter = (id) => {
+    if (!confirm("Delete this character and their chat history?")) return;
+    setCharacters(cs => cs.filter(c => c.id !== id));
+    localStorage.removeItem(`chat_${id}`);
+  };
+
+  const updateCharacter = (char) => {
+    setCharacters(cs => cs.map(c => c.id === char.id ? char : c));
+    setActiveChar(char);
+  };
+
+  if (activeChar) return <ChatWindow character={activeChar} settings={settings} onBack={() => setActiveChar(null)} onUpdateCharacter={updateCharacter} />;
+
+  return (
+    <div style={S.app}>
+      <div style={S.appBg} />
+      <header style={S.header}>
+        <div style={S.logo}>PERSONA</div>
+        <button style={S.settingsBtn} onClick={() => setShowSettings(true)}>⚙ Settings</button>
+      </header>
+      <main style={S.main}>
+        {!settings.openrouterKey && (
+          <div style={S.setupBanner}>
+            <span>⚠ Add your API keys in Settings to get started.</span>
+            <button style={S.btnPrimary} onClick={() => setShowSettings(true)}>Open Settings</button>
+          </div>
+        )}
+        <div style={S.sectionHeader}>
+          <h2 style={S.sectionTitle}>Characters</h2>
+          <button style={S.btnPrimary} onClick={() => { setEditingChar(null); setShowCharForm(true); }}>+ New Character</button>
+        </div>
+        {characters.length === 0 ? (
+          <div style={S.emptyState}>
+            <p style={S.emptyText}>No characters yet.</p>
+            <p style={S.emptySubtext}>Create your first character to start chatting.</p>
+            <button style={S.btnPrimary} onClick={() => setShowCharForm(true)}>Create Character</button>
+          </div>
+        ) : (
+          <div style={S.characterGrid}>
+            {characters.map(c => (
+              <CharacterCard key={c.id} character={c} onSelect={setActiveChar}
+                onEdit={c => { setEditingChar(c); setShowCharForm(true); }} onDelete={deleteCharacter} />
+            ))}
+          </div>
+        )}
+      </main>
+      {showSettings && <SettingsPanel settings={settings} onSave={setSettings} onClose={() => setShowSettings(false)} />}
+      {showCharForm && <CharacterForm character={editingChar} settings={settings} onSave={saveCharacter} onCancel={() => { setShowCharForm(false); setEditingChar(null); }} />}
+    </div>
+  );
+}
+
+// ─── STYLES ──────────────────────────────────────────────────────────────────
+const S = {
+  app: { minHeight:"100vh", background:"#0e0e12", color:"#e8e6e0", fontFamily:"'Georgia','Times New Roman',serif", position:"relative" },
+  appBg: { position:"fixed", inset:0, zIndex:0, pointerEvents:"none", background:"radial-gradient(ellipse at 20% 50%, rgba(60,40,80,0.3) 0%, transparent 60%), radial-gradient(ellipse at 80% 20%, rgba(20,50,70,0.2) 0%, transparent 50%)" },
+  header: { position:"relative", zIndex:10, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"20px 32px", borderBottom:"1px solid rgba(255,255,255,0.06)", backdropFilter:"blur(10px)", background:"rgba(14,14,18,0.8)" },
+  logo: { fontSize:22, fontWeight:700, letterSpacing:"0.25em", color:"#d4c9b8" },
+  settingsBtn: { background:"transparent", border:"1px solid rgba(255,255,255,0.15)", color:"#a09888", padding:"8px 16px", borderRadius:6, cursor:"pointer", fontSize:13, letterSpacing:"0.05em" },
+  main: { position:"relative", zIndex:1, maxWidth:900, margin:"0 auto", padding:"32px 24px" },
+  setupBanner: { display:"flex", alignItems:"center", justifyContent:"space-between", background:"rgba(180,120,40,0.12)", border:"1px solid rgba(180,120,40,0.3)", borderRadius:8, padding:"14px 20px", marginBottom:28, fontSize:14, color:"#c8a84a", gap:12, flexWrap:"wrap" },
+  sectionHeader: { display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20 },
+  sectionTitle: { fontSize:18, fontWeight:400, color:"#c8c0b0", letterSpacing:"0.1em", margin:0 },
+  characterGrid: { display:"flex", flexDirection:"column", gap:12 },
+  characterCard: { display:"flex", alignItems:"center", gap:16, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:10, padding:"16px 20px", cursor:"pointer", transition:"all 0.2s", backdropFilter:"blur(4px)" },
+  characterAvatar: { width:56, height:56, borderRadius:"50%", overflow:"hidden", background:"rgba(255,255,255,0.08)", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", border:"2px solid rgba(255,255,255,0.1)" },
+  avatarImg: { width:"100%", height:"100%", objectFit:"cover" },
+  avatarInitial: { fontSize:22, color:"#a09888" },
+  characterInfo: { flex:1, minWidth:0 },
+  characterName: { fontSize:16, fontWeight:600, color:"#e0d8cc", display:"block", marginBottom:4 },
+  characterMeta: { display:"flex", gap:6, marginBottom:6, flexWrap:"wrap" },
+  characterPersona: { fontSize:13, color:"#7a7268", margin:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
+  characterActions: { display:"flex", flexDirection:"column", gap:6 },
+  nsfwBadge: { fontSize:10, fontWeight:700, letterSpacing:"0.1em", background:"rgba(200,40,60,0.2)", border:"1px solid rgba(200,40,60,0.4)", color:"#e06070", padding:"2px 7px", borderRadius:4 },
+  autoBadge: { fontSize:10, fontWeight:700, letterSpacing:"0.1em", background:"rgba(40,120,200,0.2)", border:"1px solid rgba(40,120,200,0.4)", color:"#6090e0", padding:"2px 7px", borderRadius:4 },
+  genderBadge: { fontSize:10, fontWeight:600, letterSpacing:"0.08em", background:"rgba(100,80,140,0.2)", border:"1px solid rgba(100,80,140,0.4)", color:"#a090c8", padding:"2px 7px", borderRadius:4 },
+  genderBtnOn: { background:"rgba(180,150,100,0.25)", border:"1px solid rgba(180,150,100,0.5)", color:"#c8a870", borderRadius:6, padding:"6px 14px", cursor:"pointer", fontSize:12, fontWeight:600 },
+  genderBtnOff: { background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.1)", color:"#7a7268", borderRadius:6, padding:"6px 14px", cursor:"pointer", fontSize:12 },
+  emptyState: { textAlign:"center", padding:"80px 20px", background:"rgba(255,255,255,0.02)", borderRadius:12, border:"1px dashed rgba(255,255,255,0.08)" },
+  emptyText: { fontSize:18, color:"#7a7268", marginBottom:8 },
+  emptySubtext: { fontSize:14, color:"#4a4840", marginBottom:24 },
+  divider: { height:1, background:"rgba(255,255,255,0.06)", margin:"12px 0" },
+  overlay: { position:"fixed", inset:0, zIndex:100, background:"rgba(0,0,0,0.7)", backdropFilter:"blur(4px)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 },
+  modal: { background:"#16151a", border:"1px solid rgba(255,255,255,0.1)", borderRadius:12, width:"100%", maxWidth:460, maxHeight:"90vh", overflowY:"auto", boxShadow:"0 24px 80px rgba(0,0,0,0.6)" },
+  modalHeader: { display:"flex", alignItems:"center", justifyContent:"space-between", padding:"20px 24px 16px", borderBottom:"1px solid rgba(255,255,255,0.07)" },
+  modalTitle: { fontSize:16, fontWeight:600, color:"#d4c9b8", letterSpacing:"0.05em" },
+  modalBody: { padding:"20px 24px", display:"flex", flexDirection:"column", gap:6 },
+  modalFooter: { display:"flex", gap:10, justifyContent:"flex-end", padding:"16px 24px", borderTop:"1px solid rgba(255,255,255,0.07)" },
+  label: { fontSize:12, color:"#7a7268", letterSpacing:"0.08em", textTransform:"uppercase", marginTop:10, display:"block" },
+  input: { width:"100%", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:6, padding:"10px 12px", color:"#e8e6e0", fontSize:14, outline:"none", boxSizing:"border-box", fontFamily:"inherit" },
+  select: { width:"100%", background:"#1e1d22", border:"1px solid rgba(255,255,255,0.1)", borderRadius:6, padding:"10px 12px", color:"#e8e6e0", fontSize:14, outline:"none", cursor:"pointer" },
+  toggleRow: { display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:8 },
+  toggleOn: { background:"rgba(60,160,80,0.2)", border:"1px solid rgba(60,160,80,0.4)", color:"#60c070", borderRadius:20, padding:"5px 14px", cursor:"pointer", fontSize:12, fontWeight:700, letterSpacing:"0.1em" },
+  toggleOff: { background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", color:"#5a5850", borderRadius:20, padding:"5px 14px", cursor:"pointer", fontSize:12, fontWeight:700, letterSpacing:"0.1em" },
+  error: { color:"#e06070", fontSize:13, margin:"6px 0 0" },
+  btnPrimary: { background:"rgba(180,150,100,0.2)", border:"1px solid rgba(180,150,100,0.4)", color:"#c8a870", borderRadius:6, padding:"9px 20px", cursor:"pointer", fontSize:13, fontWeight:600, letterSpacing:"0.05em" },
+  btnSecondary: { background:"transparent", border:"1px solid rgba(255,255,255,0.1)", color:"#7a7268", borderRadius:6, padding:"9px 20px", cursor:"pointer", fontSize:13, letterSpacing:"0.05em" },
+  iconBtn: { background:"transparent", border:"none", color:"#5a5850", cursor:"pointer", fontSize:16, padding:"4px 8px" },
+  iconBtnLight: { background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:6, padding:"6px 10px", cursor:"pointer", fontSize:14, color:"#e8e6e0" },
+  chatWindow: { height:"100vh", display:"flex", flexDirection:"column", position:"relative", backgroundSize:"cover", backgroundPosition:"center", backgroundRepeat:"no-repeat" },
+  chatBgOverlay: { position:"absolute", inset:0, zIndex:0, background:"linear-gradient(to bottom, rgba(10,9,14,0.85) 0%, rgba(10,9,14,0.6) 50%, rgba(10,9,14,0.9) 100%)" },
+  chatHeader: { position:"relative", zIndex:10, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 16px", background:"rgba(10,9,14,0.7)", backdropFilter:"blur(12px)", borderBottom:"1px solid rgba(255,255,255,0.06)" },
+  backBtn: { background:"transparent", border:"none", color:"#a09888", cursor:"pointer", fontSize:14, letterSpacing:"0.05em", padding:"4px 8px" },
+  chatHeaderInfo: { display:"flex", alignItems:"center", gap:10, flex:1, justifyContent:"center" },
+  chatAvatar: { width:32, height:32, borderRadius:"50%", objectFit:"cover", border:"1px solid rgba(255,255,255,0.15)" },
+  chatCharName: { fontSize:15, fontWeight:600, color:"#d4c9b8" },
+  bgMenu: { position:"absolute", right:0, top:"110%", zIndex:20, background:"#1a1920", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, padding:8, minWidth:180, boxShadow:"0 8px 30px rgba(0,0,0,0.5)" },
+  bgMenuTitle: { fontSize:11, color:"#5a5850", letterSpacing:"0.1em", textTransform:"uppercase", padding:"4px 8px 8px" },
+  bgMenuItem: { display:"block", width:"100%", textAlign:"left", background:"transparent", border:"none", color:"#a09888", padding:"8px 12px", cursor:"pointer", fontSize:13, borderRadius:4 },
+  messageList: { flex:1, overflowY:"auto", position:"relative", zIndex:1, padding:"16px 12px", display:"flex", flexDirection:"column", gap:4 },
+  bubbleWrapper: { display:"flex", marginBottom:6 },
+  messageBubble: { borderRadius:12, padding:"10px 14px", backdropFilter:"blur(8px)" },
+  userBubble: { background:"rgba(140,110,70,0.25)", border:"1px solid rgba(180,150,100,0.2)" },
+  aiBubble: { background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)" },
+  bubbleName: { fontSize:11, color:"#7a7268", display:"block", marginBottom:4, letterSpacing:"0.08em" },
+  bubbleText: { margin:0, fontSize:14, lineHeight:1.6, color:"#e0d8cc", whiteSpace:"pre-wrap" },
+  editTextarea: { width:"100%", minHeight:80, background:"rgba(0,0,0,0.3)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:6, padding:8, color:"#e8e6e0", fontSize:14, resize:"vertical", outline:"none", fontFamily:"inherit", boxSizing:"border-box" },
+  msgActions: { display:"flex", gap:8, marginTop:3, paddingLeft:4 },
+  msgActionBtn: { background:"none", border:"none", color:"#4a4840", fontSize:11, cursor:"pointer", padding:"2px 4px", letterSpacing:"0.05em" },
+  typingDots: { display:"flex", gap:5, alignItems:"center", height:20 },
+  dot: { width:6, height:6, borderRadius:"50%", background:"#7a7268", animation:"pulse 1.2s ease-in-out infinite" },
+  imageMessage: { textAlign:"center", background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:10, padding:12, maxWidth:300, margin:"8px auto" },
+  generatedImg: { width:"100%", borderRadius:8, display:"block" },
+  imgCaption: { fontSize:11, color:"#5a5850", marginTop:6, display:"block", fontStyle:"italic" },
+  emptyChat: { flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", textAlign:"center", padding:20 },
+  openingSuggestion: { background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:12, padding:20, maxWidth:360 },
+  openingSuggestionLabel: { fontSize:11, color:"#5a5850", letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:10 },
+  openingSuggestionText: { fontSize:14, color:"#c0b8a8", lineHeight:1.6, fontStyle:"italic", margin:"0 0 4px" },
+  errorBar: { position:"relative", zIndex:10, background:"rgba(200,40,60,0.15)", border:"1px solid rgba(200,40,60,0.3)", color:"#e06070", padding:"10px 16px", fontSize:13, display:"flex", alignItems:"center", justifyContent:"space-between" },
+  errorClose: { background:"none", border:"none", color:"#e06070", cursor:"pointer" },
+  chatInputRow: { position:"relative", zIndex:10, display:"flex", gap:8, padding:"10px 12px", background:"rgba(10,9,14,0.8)", backdropFilter:"blur(12px)", borderTop:"1px solid rgba(255,255,255,0.06)" },
+  imgGenBtn: { background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, padding:"0 12px", cursor:"pointer", fontSize:18, flexShrink:0, color:"#a09888" },
+  chatInput: { flex:1, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, padding:"10px 14px", color:"#e8e6e0", fontSize:14, outline:"none", fontFamily:"inherit" },
+  sendBtn: { background:"rgba(180,150,100,0.2)", border:"1px solid rgba(180,150,100,0.4)", color:"#c8a870", borderRadius:8, padding:"0 16px", cursor:"pointer", fontSize:13, fontWeight:600, flexShrink:0 },
+};
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
