@@ -764,14 +764,14 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 function App() {
-  const [settings, setSettings] = useState(() => storage.get("settings", DEFAULT_SETTINGS));
+  const [settings, setSettings] = useState(() => storage.get("personachat_settings", DEFAULT_SETTINGS));
   const [characters, setCharacters] = useState(() => storage.get("characters", []));
   const [activeChar, setActiveChar] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showCharForm, setShowCharForm] = useState(false);
   const [editingChar, setEditingChar] = useState(null);
 
-  useEffect(() => { storage.set("settings", settings); }, [settings]);
+  useEffect(() => { storage.set("personachat_settings", settings); }, [settings]);
   useEffect(() => { storage.set("characters", characters); }, [characters]);
 
   const saveCharacter = (char) => {
