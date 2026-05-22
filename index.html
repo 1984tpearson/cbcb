@@ -61,9 +61,9 @@ const OPENROUTER_MODELS = [
 ];
 
 const REPLICATE_MODELS = [
-  { id: "stability-ai/stable-diffusion:db21e45d3f7023abc2a46ee38a23973f6dce16bb0ad325533df9f6908717ef02", label: "SD 1.5 (Fast/Cheap)" },
-  { id: "black-forest-labs/flux-schnell", label: "Flux Schnell (Quality)" },
-  { id: "lucataco/ip-adapter-sdxl:c6f71ffe7f8e0e5a44944c1bced2b3d4c19bef7a4a7491a8c53d40f6a07e23e", label: "IP-Adapter SDXL (Consistent)" },
+  { id: "black-forest-labs/flux-schnell", label: "Flux Schnell (Fast/Cheap)" },
+  { id: "black-forest-labs/flux-dev", label: "Flux Dev (Quality)" },
+  { id: "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b", label: "SDXL (Consistent)" },
 ];
 
 const GENDERS = ["Female", "Male", "Non-binary", "Custom"];
@@ -310,26 +310,37 @@ async function sendChat({ messages, character, model, apiKey }) {
 
 async function generateImage({ prompt, referenceImageUrl, model, apiKey, nsfw, workerUrl }) {
   const fullPrompt = nsfw ? prompt : `${prompt}, safe for work, tasteful`;
-  const input = referenceImageUrl && model.includes("ip-adapter")
-    ? { prompt: fullPrompt, image: referenceImageUrl, num_inference_steps: 30 }
-    : { prompt: fullPrompt, num_inference_steps: 25, width: 512, height: 768 };
 
-  // Use proxy worker if set, otherwise direct (works locally but not on GitHub Pages)
+  // Flux models use different input format
+  const isFlux = model.includes("flux");
+  const input = isFlux
+    ? { prompt: fullPrompt, num_outputs: 1, aspect_ratio: "2:3", output_format: "webp" }
+    : { prompt: fullPrompt, num_inference_steps: 30, width: 512, height: 768, guidance_scale: 7.5 };
+
+  // version-based vs model-based request
+  const hasVersion = model.includes(":");
+  const body = hasVersion
+    ? { version: model.split(":")[1], input }
+    : { model, input };
+
   const base = workerUrl ? workerUrl.replace(/\/$/, "") + "/proxy" : "https://api.replicate.com";
 
   const res = await fetch(`${base}/v1/predictions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Token ${apiKey}` },
-    body: JSON.stringify({ version: model.includes(":") ? model.split(":")[1] : undefined, model: model.includes(":") ? undefined : model, input }),
+    body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Replicate error: ${res.status}`);
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Replicate error: ${res.status} ${errText}`);
+  }
   let result = await res.json();
   while (result.status !== "succeeded" && result.status !== "failed") {
     await new Promise(r => setTimeout(r, 1500));
     const poll = await fetch(`${base}/v1/predictions/${result.id}`, { headers: { Authorization: `Token ${apiKey}` } });
     result = await poll.json();
   }
-  if (result.status === "failed") throw new Error("Image generation failed");
+  if (result.status === "failed") throw new Error(`Image generation failed: ${result.error || ""}`);
   return Array.isArray(result.output) ? result.output[0] : result.output;
 }
 
