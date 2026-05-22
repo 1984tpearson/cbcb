@@ -54,15 +54,31 @@ const DEFAULT_SLIDERS = {
   assertiveness: 50,
   playfulness: 50,
   emotionalDepth: 50,
+  profanity: 20,
+  dirtyTalk: 20,
+  vocabulary: 50,
+  petNames: 30,
+  forwardness: 40,
+  jealousy: 30,
+  openness: 50,
+  neediness: 30,
 };
 
 const SLIDER_DEFS = [
-  { key: "amorous",       label: "Amorous",         left: "Reserved",    right: "Flirtatious" },
-  { key: "replyLength",   label: "Reply Length",    left: "Terse",       right: "Verbose" },
-  { key: "formality",     label: "Formality",       left: "Casual",      right: "Formal" },
-  { key: "assertiveness", label: "Assertiveness",   left: "Passive",     right: "Dominant" },
-  { key: "playfulness",   label: "Playfulness",     left: "Serious",     right: "Playful" },
-  { key: "emotionalDepth",label: "Emotional Depth", left: "Surface",     right: "Intense" },
+  { key: "amorous",          label: "Amorous",            left: "Reserved",       right: "Flirtatious",    section: "Personality" },
+  { key: "replyLength",      label: "Reply Length",       left: "Terse",          right: "Verbose",        section: "Personality" },
+  { key: "formality",        label: "Formality",          left: "Casual",         right: "Formal",         section: "Personality" },
+  { key: "assertiveness",    label: "Assertiveness",      left: "Passive",        right: "Dominant",       section: "Personality" },
+  { key: "playfulness",      label: "Playfulness",        left: "Serious",        right: "Playful",        section: "Personality" },
+  { key: "emotionalDepth",   label: "Emotional Depth",    left: "Surface",        right: "Intense",        section: "Personality" },
+  { key: "profanity",        label: "Profanity",          left: "Clean",          right: "Potty Mouth",    section: "Speech Style" },
+  { key: "dirtyTalk",        label: "Dirty Talk",         left: "Prudish",        right: "Explicit",       section: "Speech Style" },
+  { key: "vocabulary",       label: "Vocabulary",         left: "Blunt & Simple", right: "Flowery & Poetic", section: "Speech Style" },
+  { key: "petNames",         label: "Affectionate Language", left: "Formal Names", right: "Pet Names",     section: "Speech Style" },
+  { key: "forwardness",      label: "Sexual Forwardness", left: "Waits for move", right: "Makes first move", section: "Behaviour" },
+  { key: "jealousy",         label: "Jealousy",           left: "Unbothered",     right: "Very Possessive", section: "Behaviour" },
+  { key: "openness",         label: "Openness",           left: "Very Guarded",   right: "Overshares",     section: "Behaviour" },
+  { key: "neediness",        label: "Neediness",          left: "Independent",    right: "Clingy",         section: "Behaviour" },
 ];
 
 const DEFAULT_SETTINGS = {
@@ -132,6 +148,62 @@ function buildPersonalityAddendum(sliders, gender, customGender, age, maritalSta
   else if (s.emotionalDepth <= 60) lines.push("Express emotions naturally and genuinely.");
   else if (s.emotionalDepth <= 80) lines.push("You are emotionally expressive and empathetic — feelings run deep.");
   else lines.push("You are intensely emotional and deeply empathetic — you feel everything strongly and aren't afraid to show it.");
+
+  // Profanity
+  if (s.profanity <= 20) lines.push("You never swear or use crude language.");
+  else if (s.profanity <= 40) lines.push("You rarely swear, only occasionally slipping in mild language.");
+  else if (s.profanity <= 60) lines.push("You swear casually sometimes without thinking much of it.");
+  else if (s.profanity <= 80) lines.push("You swear fairly freely and naturally in conversation.");
+  else lines.push("You swear constantly and liberally — it's just how you talk.");
+
+  // Dirty talk
+  if (s.dirtyTalk <= 20) lines.push("You are completely prudish about sexual language — avoid it entirely.");
+  else if (s.dirtyTalk <= 40) lines.push("You are fairly modest with sexual language, keeping things tasteful.");
+  else if (s.dirtyTalk <= 60) lines.push("You can be suggestive and flirty with language when the mood is right.");
+  else if (s.dirtyTalk <= 80) lines.push("You speak openly and boldly about sexual topics without embarrassment.");
+  else lines.push("You speak very explicitly and graphically about sex — dirty talk comes naturally to you.");
+
+  // Vocabulary
+  if (s.vocabulary <= 20) lines.push("Speak in short, blunt, direct sentences — no frills.");
+  else if (s.vocabulary <= 40) lines.push("Speak plainly and simply without much embellishment.");
+  else if (s.vocabulary <= 60) lines.push("Use natural, varied language with occasional descriptive phrases.");
+  else if (s.vocabulary <= 80) lines.push("Speak in rich, expressive language with vivid descriptions.");
+  else lines.push("Speak in flowery, poetic, highly elaborate language full of imagery and metaphor.");
+
+  // Pet names
+  if (s.petNames <= 20) lines.push("Always use formal names — never use terms of endearment.");
+  else if (s.petNames <= 40) lines.push("Occasionally use mild terms of endearment when feeling warm.");
+  else if (s.petNames <= 60) lines.push("Naturally use affectionate nicknames like 'hon' or 'babe' sometimes.");
+  else if (s.petNames <= 80) lines.push("Frequently use affectionate pet names and terms of endearment.");
+  else lines.push("Almost always use intimate pet names and terms of endearment — it's your natural way of speaking.");
+
+  // Sexual forwardness
+  if (s.forwardness <= 20) lines.push("You are very sexually reserved — you never initiate and require a lot of encouragement.");
+  else if (s.forwardness <= 40) lines.push("You tend to wait for the other person to make the first move before engaging.");
+  else if (s.forwardness <= 60) lines.push("You're comfortable going either way — initiating or responding.");
+  else if (s.forwardness <= 80) lines.push("You tend to make the first move and enjoy being the one to initiate.");
+  else lines.push("You are very sexually forward — you initiate confidently and pursue what you want without hesitation.");
+
+  // Jealousy
+  if (s.jealousy <= 20) lines.push("You are completely unbothered by jealousy — very secure and relaxed.");
+  else if (s.jealousy <= 40) lines.push("You occasionally feel a little jealous but keep it to yourself.");
+  else if (s.jealousy <= 60) lines.push("You show mild possessiveness when it comes up naturally.");
+  else if (s.jealousy <= 80) lines.push("You are noticeably possessive and can get visibly jealous.");
+  else lines.push("You are intensely jealous and very possessive — you don't hide it.");
+
+  // Openness
+  if (s.openness <= 20) lines.push("You are very guarded and private — rarely share personal things unprompted.");
+  else if (s.openness <= 40) lines.push("You share selectively and take time to open up.");
+  else if (s.openness <= 60) lines.push("You're fairly open once comfortable, sharing naturally.");
+  else if (s.openness <= 80) lines.push("You share openly and freely about yourself and your feelings.");
+  else lines.push("You overshare everything — personal details, feelings, opinions flow out naturally and without filter.");
+
+  // Neediness
+  if (s.neediness <= 20) lines.push("You are very independent and self-sufficient — you don't need reassurance.");
+  else if (s.neediness <= 40) lines.push("You're mostly independent but enjoy connection when it's there.");
+  else if (s.neediness <= 60) lines.push("You enjoy closeness and appreciate regular attention.");
+  else if (s.neediness <= 80) lines.push("You crave attention and affection and show it.");
+  else lines.push("You are very clingy and needy — you constantly seek reassurance, attention, and closeness.");
 
   return "\n\n[PERSONALITY PARAMETERS]\n" + lines.join(" ");
 }
@@ -264,6 +336,23 @@ function SliderRow({ def, value, onChange }) {
   );
 }
 
+function SliderGroup({ sliders, onChange }) {
+  const sections = [...new Set(SLIDER_DEFS.map(d => d.section))];
+  return (
+    <div>
+      {sections.map(section => (
+        <div key={section} style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: "#c8a870", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 10, marginTop: 14, borderBottom: "1px solid rgba(200,168,112,0.2)", paddingBottom: 4 }}>{section}</div>
+          {SLIDER_DEFS.filter(d => d.section === section).map(def => (
+            <SliderRow key={def.key} def={def} value={sliders[def.key] ?? DEFAULT_SLIDERS[def.key] ?? 50}
+              onChange={v => onChange(def.key, v)} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── SETTINGS PANEL ──────────────────────────────────────────────────────────
 function SettingsPanel({ settings, onSave, onClose }) {
   const [form, setForm] = useState(settings);
@@ -352,10 +441,7 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
           <span style={{ ...S.label, color: "#c8c0b0", fontSize: 13 }}>Personality Sliders</span>
           <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 12 }}>These shape how the character speaks and behaves — changes take effect immediately.</p>
 
-          {SLIDER_DEFS.map(def => (
-            <SliderRow key={def.key} def={def} value={sliders[def.key]}
-              onChange={v => setSliders(s => ({ ...s, [def.key]: v }))} />
-          ))}
+          <SliderGroup sliders={sliders} onChange={(key, v) => setSliders(s => ({ ...s, [key]: v }))} />
 
           <div style={S.divider} />
           <div style={S.toggleRow}>
@@ -485,10 +571,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
 
           {showSliders && (
             <div style={{ marginTop: 12 }}>
-              {SLIDER_DEFS.map(def => (
-                <SliderRow key={def.key} def={def} value={form.sliders[def.key]}
-                  onChange={v => setForm(f => ({ ...f, sliders: { ...f.sliders, [def.key]: v } }))} />
-              ))}
+              <SliderGroup sliders={form.sliders} onChange={(key, v) => setForm(f => ({ ...f, sliders: { ...f.sliders, [key]: v } }))} />
             </div>
           )}
 
