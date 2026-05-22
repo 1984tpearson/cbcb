@@ -37,6 +37,7 @@
     ::-webkit-scrollbar-thumb { background: var(--pink-light); border-radius: 3px; }
     @keyframes pulse { 0%, 100% { opacity: 0.3; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1); } }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
     .msg-anim { animation: fadeIn 0.2s ease; }
     input, textarea, select, button { font-family: inherit; }
     input::placeholder, textarea::placeholder { color: var(--text4); }
@@ -368,12 +369,15 @@ async function generateImage({ prompt, referenceImageUrl, model, apiKey, nsfw, w
 
 async function generateImageDezgo({ prompt, model, apiKey, nsfw, width, height }) {
   const formData = new FormData();
-  formData.append("prompt", prompt);
+  // JuggernautXL quality boosters
+  const qualityPrefix = "RAW photo, (realistic:1.4), (photorealistic:1.4), masterpiece, best quality, ultra high res, ";
+  formData.append("prompt", qualityPrefix + prompt);
   formData.append("model", model || "juggernautxl_10_hyper");
-  formData.append("width", width || 768);
-  formData.append("height", height || 1024);
-  formData.append("negative_prompt", "worst quality, low quality, illustration, 3d, 2d, painting, cartoons, sketch, deformed, ugly, bad anatomy, watermark, text");
+  formData.append("width", width || 832);
+  formData.append("height", height || 1216);
+  formData.append("negative_prompt", "(worst quality:2), (low quality:2), (normal quality:2), lowres, bad anatomy, bad hands, ((monochrome)), ((grayscale)), watermark, text, signature, logo, cropped, out of frame, jpeg artifacts, blurry, deformed, ugly, disfigured, cartoon, anime, illustration, painting, drawing, art, sketch, 3d render");
   formData.append("sampler", "dpmpp_2m_karras");
+  formData.append("guidance", "1.5");
   formData.append("format", "jpg");
 
   const res = await fetch("https://api.dezgo.com/text2image_sdxl_lightning", {
@@ -458,7 +462,7 @@ async function autoGenerateCharacter({ vibe, apiKey, model }) {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, "HTTP-Referer": window.location.href },
-    body: JSON.stringify({ model, messages: [{ role: "user", content: `Create a fictional chat companion character based on this vibe: "${vibe}".\nReturn ONLY valid JSON with these exact fields:\n{\n  "name": "character name",\n  "persona": "2-3 sentence personality description, how they speak, backstory and quirks",\n  "age": 28,\n  "maritalStatus": "Single",\n  "hairColour": "Brown",\n  "eyeColour": "Brown",\n  "skinTone": "Medium"\n}\nFor maritalStatus use one of: Single, Married, Divorced, Widowed, In a relationship, It\'s complicated.\nFor hairColour use one of: Black, Dark brown, Brown, Auburn, Dirty blonde, Blonde, Platinum blonde, Red, Strawberry blonde, Grey, White.\nFor eyeColour use one of: Brown, Dark brown, Hazel, Green, Blue, Grey, Amber.\nFor skinTone use one of: Fair, Light, Medium, Olive, Tan, Brown, Dark brown, Ebony.\nNo extra text, no markdown, just the JSON object.` }] }),
+    body: JSON.stringify({ model, messages: [{ role: "user", content: `Create a fictional chat companion character based on this vibe: "${vibe}".\nBe CREATIVE with the name — avoid generic names like Emily, Sarah, Jessica, Wilson, Smith. Use culturally diverse, interesting, or unique names that match the character concept.\nReturn ONLY valid JSON with these exact fields:\n{\n  "name": "character name",\n  "persona": "2-3 sentence personality description, how they speak, backstory and quirks",\n  "age": 28,\n  "maritalStatus": "Single",\n  "hairColour": "Brown",\n  "eyeColour": "Brown",\n  "skinTone": "Medium"\n}\nFor maritalStatus use one of: Single, Married, Divorced, Widowed, In a relationship, It\'s complicated.\nFor hairColour use one of: Black, Dark brown, Brown, Auburn, Dirty blonde, Blonde, Platinum blonde, Red, Strawberry blonde, Grey, White.\nFor eyeColour use one of: Brown, Dark brown, Hazel, Green, Blue, Grey, Amber.\nFor skinTone use one of: Fair, Light, Medium, Olive, Tan, Brown, Dark brown, Ebony.\nNo extra text, no markdown, just the JSON object.` }] }),
   });
   const data = await res.json();
   const raw = data.choices[0].message.content.trim();
@@ -750,6 +754,8 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const [imgLoading, setImgLoading] = useState(false);
   const [showCustomImgInput, setShowCustomImgInput] = useState(false);
   const [customImgPrompt, setCustomImgPrompt] = useState("");
+  const [showGallery, setShowGallery] = useState(false);
+  const [gallery, setGallery] = useState(() => storage.get(`gallery_${initialChar.id}`, []));
   const [error, setError] = useState("");
   const [showSliders, setShowSliders] = useState(false);
   const [showAppearance, setShowAppearance] = useState(false);
@@ -1021,6 +1027,8 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   const [imgLoading, setImgLoading] = useState(false);
   const [showCustomImgInput, setShowCustomImgInput] = useState(false);
   const [customImgPrompt, setCustomImgPrompt] = useState("");
+  const [showGallery, setShowGallery] = useState(false);
+  const [gallery, setGallery] = useState(() => storage.get(`gallery_${initialChar.id}`, []));
   const [error, setError] = useState("");
   const [bgImage, setBgImage] = useState(initialChar.backgroundImage);
   const [showBgMenu, setShowBgMenu] = useState(false);
@@ -1104,6 +1112,11 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
         ? await generateImageDezgo({ prompt: fullPrompt, model: settings.dezgoModel, apiKey: settings.dezgoKey, nsfw: character.nsfw })
         : await generateImage({ prompt: fullPrompt, referenceImageUrl: character.referenceImage, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: character.nsfw, workerUrl: settings.workerUrl });
       setMessages(m => [...m, { role: "image", content: url, prompt: customImgPrompt }]);
+      const galleryKey = `gallery_${character.id}`;
+      const existing = storage.get(galleryKey, []);
+      const newGallery2 = [{ url, prompt: customImgPrompt, date: Date.now() }, ...existing].slice(0, 50);
+      storage.set(galleryKey, newGallery2);
+      setGallery(newGallery2);
       setCustomImgPrompt("");
     } catch (e) { setError(e.message); }
     setImgLoading(false);
@@ -1227,6 +1240,16 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
             </div>
           </div>
         )}
+        {imgLoading && (
+          <div style={{ alignSelf:"center", textAlign:"center", padding:"20px 24px" }} className="msg-anim">
+            <div style={{ ...S.imageMessage, display:"inline-block" }}>
+              <div style={{ width:200, height:260, background:"linear-gradient(135deg, var(--bg3) 25%, var(--border) 50%, var(--bg3) 75%)", backgroundSize:"200% 200%", animation:"shimmer 1.5s infinite", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:10 }}>
+                <span style={{ fontSize:28 }}>🎨</span>
+                <span style={{ fontSize:12, color:"var(--text3)", fontWeight:700 }}>Generating…</span>
+              </div>
+            </div>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
@@ -1251,7 +1274,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       <div style={S.chatInputRow}>
         <div style={{ display:"flex", flexDirection:"column", gap:4, flexShrink:0 }}>
           <button style={S.imgGenBtn} onClick={() => triggerImageGen(false)} disabled={imgLoading} title="Generate image from chat context">
-            {imgLoading ? "⟳" : "🎨"}
+            🎨
           </button>
           <button style={{...S.imgGenBtn, fontSize:13}} onClick={() => setShowCustomImgInput(v => !v)} disabled={imgLoading} title="Generate custom image">
             ✏️
@@ -1262,6 +1285,40 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
           onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} />
         <button style={S.sendBtn} onClick={() => sendMessage()} disabled={loading || !input.trim()}>Send</button>
       </div>
+
+      {showGallery && (
+        <div style={S.overlay} onClick={() => setShowGallery(false)}>
+          <div style={{ ...S.modal, maxWidth:560, maxHeight:"88vh" }} onClick={e => e.stopPropagation()}>
+            <div style={S.modalHeader}>
+              <span style={S.modalTitle}>📸 {character.name}'s Gallery</span>
+              <button style={S.iconBtn} onClick={() => setShowGallery(false)}>✕</button>
+            </div>
+            <div style={{ padding:16, overflowY:"auto", maxHeight:"70vh" }}>
+              {gallery.length === 0 ? (
+                <p style={{ textAlign:"center", color:"var(--text4)", padding:40 }}>No images yet — generate some in chat!</p>
+              ) : (
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(2, 1fr)", gap:10 }}>
+                  {gallery.map((item, i) => (
+                    <div key={i} style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"2px solid var(--border)", cursor:"pointer" }}
+                      onClick={() => { handleSetBackground(item.url); setShowGallery(false); }}>
+                      <img src={item.url} alt={item.prompt} style={{ width:"100%", display:"block", aspectRatio:"3/4", objectFit:"cover" }} />
+                      <div style={{ position:"absolute", bottom:0, left:0, right:0, background:"rgba(0,0,0,0.6)", padding:"6px 8px" }}>
+                        <p style={{ fontSize:10, color:"white", margin:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.prompt}</p>
+                      </div>
+                      <div style={{ position:"absolute", top:6, right:6, display:"flex", gap:4 }}>
+                        <button style={{ background:"var(--pink)", border:"none", borderRadius:6, padding:"4px 8px", fontSize:10, color:"white", cursor:"pointer", fontWeight:700 }}
+                          onClick={e => { e.stopPropagation(); handleSetBackground(item.url); setShowGallery(false); }}>
+                          Set BG
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {showPersonality && (
         <CharacterPersonalityPanel character={character} onSave={handlePersonalitySave} onClose={() => setShowPersonality(false)} />
@@ -1389,7 +1446,7 @@ const S = {
   iconBtn: { background:"transparent", border:"none", color:"var(--text3)", cursor:"pointer", fontSize:16, padding:"4px 8px" },
   iconBtnLight: { background:"var(--bg3)", border:"1px solid var(--border)", borderRadius:10, padding:"7px 12px", cursor:"pointer", fontSize:14, color:"var(--text2)", fontWeight:600 },
   chatWindow: { height:"100vh", display:"flex", flexDirection:"column", position:"relative", backgroundSize:"cover", backgroundPosition:"center", backgroundRepeat:"no-repeat" },
-  chatBgOverlay: { position:"absolute", inset:0, zIndex:0, background:"linear-gradient(to bottom, rgba(253,246,248,0.92) 0%, rgba(253,246,248,0.7) 40%, rgba(253,246,248,0.95) 100%)" },
+  chatBgOverlay: { position:"absolute", inset:0, zIndex:0, background:"linear-gradient(to bottom, rgba(253,246,248,0.75) 0%, rgba(253,246,248,0.45) 40%, rgba(253,246,248,0.82) 100%)" },
   chatHeader: { position:"relative", zIndex:10, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 16px", background:"rgba(253,246,248,0.95)", backdropFilter:"blur(12px)", borderBottom:"1px solid var(--border)", boxShadow:"0 2px 8px var(--shadow)" },
   backBtn: { background:"transparent", border:"none", color:"var(--blue)", cursor:"pointer", fontSize:14, fontWeight:700, padding:"4px 8px" },
   chatHeaderInfo: { display:"flex", alignItems:"center", gap:10, flex:1, justifyContent:"center" },
