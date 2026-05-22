@@ -372,7 +372,9 @@ async function generateImage({ prompt, referenceImageUrl, model, apiKey, nsfw, w
 async function generateImageDezgo({ prompt, model, apiKey, nsfw, width, height }) {
   const formData = new FormData();
   // JuggernautXL quality boosters
-  const qualityPrefix = "RAW photo, (realistic:1.4), (photorealistic:1.4), masterpiece, best quality, ultra high res, ";
+  // For Dezgo, restructure prompt to put appearance terms first for better adherence
+  // Split out any appearance descriptors and put them prominently
+  const qualityPrefix = "RAW photo, (photorealistic:1.5), (realistic:1.4), masterpiece, best quality, ultra high res, sharp focus, ";
   formData.append("prompt", qualityPrefix + prompt);
   formData.append("model", model || "juggernautxl_10_hyper");
   formData.append("width", width || 832);
@@ -1163,7 +1165,8 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   const handleEditMessage = (index, newContent) => setMessages(m => m.map((msg, i) => i === index ? { ...msg, content: newContent } : msg));
 
   const triggerImageGen = async (auto = false) => {
-    if (!settings.replicateKey) { if (!auto) setError("Add your Replicate API key in Settings."); return; }
+    const hasImageProvider = (settings.imageProvider === "dezgo" && settings.dezgoKey) || (settings.imageProvider !== "dezgo" && settings.replicateKey);
+    if (!hasImageProvider) { if (!auto) setError("Add your image API key in Settings."); return; }
     if (imgLoading) return;
     setImgLoading(true);
     try {
@@ -1176,9 +1179,11 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
       const styleModifiers = "photorealistic, natural lighting, cinematic, Canon EOS, 50mm lens, bokeh, sharp focus, high detail";
       const fullImgPrompt = charDesc ? `${character.name}, ${charDesc}, ${prompt}, ${styleModifiers}` : `${character.name}, ${prompt}, ${styleModifiers}`;
+      // Context images: only NSFW if auto-image is on (user has opted in to continuous NSFW)
+      const contextNsfw = auto ? character.nsfw : false;
       const url = settings.imageProvider === "dezgo" && settings.dezgoKey
-        ? await generateImageDezgo({ prompt: fullImgPrompt, model: settings.dezgoModel, apiKey: settings.dezgoKey, nsfw: character.nsfw })
-        : await generateImage({ prompt: fullImgPrompt, referenceImageUrl: character.referenceImage, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: character.nsfw, workerUrl: settings.workerUrl });
+        ? await generateImageDezgo({ prompt: fullImgPrompt, model: settings.dezgoModel, apiKey: settings.dezgoKey, nsfw: contextNsfw })
+        : await generateImage({ prompt: fullImgPrompt, referenceImageUrl: character.referenceImage, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: contextNsfw, workerUrl: settings.workerUrl });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);
     } catch (e) { if (!auto) setError(e.message); }
     setImgLoading(false);
@@ -1338,16 +1343,20 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
               ) : (
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(2, 1fr)", gap:10 }}>
                   {gallery.map((item, i) => (
-                    <div key={i} style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"2px solid var(--border)", cursor:"pointer" }}
-                      onClick={() => { handleSetBackground(item.url); setShowGallery(false); }}>
-                      <img src={item.url} alt={item.prompt} style={{ width:"100%", display:"block", aspectRatio:"3/4", objectFit:"cover" }} onClick={e => { e.stopPropagation(); setLightboxImg(item.url); }} />
+                    <div key={i} style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"2px solid var(--border)", cursor:"zoom-in" }}
+                      onClick={() => setLightboxImg(item.url)}>
+                      <img src={item.url} alt={item.prompt} style={{ width:"100%", display:"block", aspectRatio:"3/4", objectFit:"cover" }} />
                       <div style={{ position:"absolute", bottom:0, left:0, right:0, background:"rgba(0,0,0,0.6)", padding:"6px 8px" }}>
                         <p style={{ fontSize:10, color:"white", margin:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.prompt}</p>
                       </div>
                       <div style={{ position:"absolute", top:6, right:6, display:"flex", gap:4 }}>
                         <button style={{ background:"var(--pink)", border:"none", borderRadius:6, padding:"4px 8px", fontSize:10, color:"white", cursor:"pointer", fontWeight:700 }}
                           onClick={e => { e.stopPropagation(); handleSetBackground(item.url); setShowGallery(false); }}>
-                          Set BG
+                          🌅 BG
+                        </button>
+                        <button style={{ background:"rgba(0,0,0,0.5)", border:"none", borderRadius:6, padding:"4px 8px", fontSize:10, color:"white", cursor:"pointer", fontWeight:700 }}
+                          onClick={e => { e.stopPropagation(); setLightboxImg(item.url); }}>
+                          🔍
                         </button>
                       </div>
                     </div>
