@@ -3,11 +3,60 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PersonaChat</title>
+  <title>AV Clinical Pathway Tool — Dev Build</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
-  <style>
+  <style id="decoy-styles">
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; color: #2c3e50; min-height: 100vh; }
+    .topbar { background: #003d7a; color: white; padding: 10px 20px; display: flex; align-items: center; gap: 14px; }
+    .topbar-logo { font-size: 13px; font-weight: 700; letter-spacing: 0.05em; opacity: 0.9; }
+    .topbar-divider { width: 1px; height: 20px; background: rgba(255,255,255,0.3); }
+    .topbar-title { font-size: 13px; opacity: 0.7; }
+    .topbar-badge { margin-left: auto; background: #e74c3c; color: white; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 3px; letter-spacing: 0.05em; }
+    .container { max-width: 960px; margin: 0 auto; padding: 28px 20px; }
+    .alert { background: #fff3cd; border: 1px solid #ffc107; border-left: 4px solid #ffc107; padding: 12px 16px; border-radius: 4px; font-size: 13px; color: #856404; margin-bottom: 24px; }
+    .alert strong { display: block; margin-bottom: 3px; }
+    .card { background: white; border: 1px solid #dde3ea; border-radius: 6px; margin-bottom: 20px; overflow: hidden; }
+    .card-header { padding: 14px 20px; background: #f8f9fb; border-bottom: 1px solid #dde3ea; display: flex; align-items: center; justify-content: space-between; }
+    .card-title { font-size: 14px; font-weight: 600; color: #1a2a3a; }
+    .card-badge { font-size: 10px; background: #e8edf2; color: #6b7c93; padding: 2px 8px; border-radius: 10px; font-weight: 600; letter-spacing: 0.05em; }
+    .card-body { padding: 20px; }
+    .form-row { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+    .form-group { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 140px; }
+    .form-group label { font-size: 11px; font-weight: 600; color: #6b7c93; text-transform: uppercase; letter-spacing: 0.06em; }
+    .form-group input, .form-group select { padding: 8px 10px; border: 1px solid #dde3ea; border-radius: 4px; font-size: 13px; color: #2c3e50; background: white; outline: none; }
+    .form-group input.error { border-color: #e74c3c; background: #fff5f5; }
+    .btn { padding: 8px 18px; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; }
+    .btn-primary { background: #003d7a; color: white; }
+    .btn-secondary { background: #f0f2f5; color: #6b7c93; border: 1px solid #dde3ea; }
+    .btn-disabled { background: #dde3ea; color: #a0aab4; cursor: not-allowed; }
+    .table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .table th { padding: 8px 12px; background: #f8f9fb; border-bottom: 2px solid #dde3ea; text-align: left; font-size: 11px; font-weight: 700; color: #6b7c93; text-transform: uppercase; letter-spacing: 0.06em; }
+    .table td { padding: 9px 12px; border-bottom: 1px solid #f0f2f5; color: #2c3e50; }
+    .table tr:last-child td { border-bottom: none; }
+    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+    .status-pending { background: #f39c12; }
+    .status-error { background: #e74c3c; }
+    .broken-notice { text-align: center; padding: 32px 20px; color: #a0aab4; }
+    .broken-notice .icon { font-size: 32px; margin-bottom: 10px; }
+    .broken-notice p { font-size: 13px; }
+    .sidebar-note { font-size: 12px; color: #a0aab4; border-left: 3px solid #dde3ea; padding-left: 10px; margin-top: 12px; line-height: 1.5; }
+    footer { text-align: center; padding: 20px; font-size: 11px; color: #c0c8d4; border-top: 1px solid #e8ecf0; margin-top: 20px; }
+    .pin-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+    .pin-overlay.active { display: flex; }
+    .pin-box { background: white; border-radius: 8px; padding: 28px 32px; width: 300px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+    .pin-box h3 { font-size: 15px; color: #1a2a3a; margin-bottom: 6px; }
+    .pin-box p { font-size: 12px; color: #6b7c93; margin-bottom: 18px; }
+    .pin-input { width: 100%; padding: 10px 12px; border: 1px solid #dde3ea; border-radius: 4px; font-size: 18px; letter-spacing: 0.3em; text-align: center; outline: none; margin-bottom: 12px; }
+    .pin-input.shake { animation: shake 0.3s ease; border-color: #e74c3c; }
+    .pin-error { font-size: 12px; color: #e74c3c; text-align: center; margin-bottom: 10px; display: none; }
+    .pin-error.show { display: block; }
+    @keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+    #app-root { display: none; }
+  </style>
+  <style id="app-styles" disabled>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body, #root { height: 100%; }
     @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
@@ -49,8 +98,190 @@
   </style>
 </head>
 <body>
-<div id="root"></div>
-<script type="text/babel">
+
+<!-- DECOY -->
+<div id="decoy-root">
+  <div class="topbar">
+    <span class="topbar-logo">AMBULANCE VICTORIA</span>
+    <div class="topbar-divider"></div>
+    <span class="topbar-title">Clinical Pathway Builder — Internal Dev</span>
+    <span class="topbar-badge">DEV / INCOMPLETE</span>
+  </div>
+  <div class="container">
+    <div class="alert">
+      <strong>⚠ Development build — not for clinical use</strong>
+      This tool is incomplete and under active development. Several features are non-functional. Do not use for patient care decisions.
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Patient Scenario Generator</span>
+        <span class="card-badge">BROKEN</span>
+      </div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Chief Complaint</label>
+            <select><option>Select complaint...</option><option>Chest Pain</option><option>Dyspnoea</option><option>Altered LOC</option><option>Trauma</option></select>
+          </div>
+          <div class="form-group">
+            <label>Age Range</label>
+            <input type="text" placeholder="e.g. 45-65" />
+          </div>
+          <div class="form-group">
+            <label>Complexity</label>
+            <select><option>Standard</option><option>Complex</option><option>Critical</option></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>CPG Reference</label>
+            <input type="text" placeholder="e.g. AV-CPG-0103" class="error" />
+          </div>
+          <div class="form-group">
+            <label>AI Model</label>
+            <select disabled><option>GPT-4 (unavailable)</option></select>
+          </div>
+        </div>
+        <div style="display:flex; gap:10px; margin-top:4px;">
+          <button class="btn btn-disabled" disabled>Generate Scenario</button>
+          <button class="btn btn-secondary">Preview</button>
+        </div>
+        <p class="sidebar-note">API integration pending. CPG lookup returning 401 errors — auth token expired. Raised with IT 14/03.</p>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Recent Scenarios</span>
+        <span class="card-badge">READ ONLY</span>
+      </div>
+      <div class="card-body">
+        <table class="table">
+          <thead><tr><th>ID</th><th>Complaint</th><th>CPG</th><th>Created</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>#1042</td><td>Chest Pain — STEMI</td><td>AV-CPG-0103</td><td>12/03/2025</td><td><span class="status-dot status-error"></span>Error</td></tr>
+            <tr><td>#1041</td><td>Dyspnoea — APO</td><td>AV-CPG-0211</td><td>11/03/2025</td><td><span class="status-dot status-pending"></span>Pending</td></tr>
+            <tr><td>#1040</td><td>Altered LOC</td><td>AV-CPG-0089</td><td>09/03/2025</td><td><span class="status-dot status-error"></span>Error</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Assessment Framework Builder</span>
+        <span class="card-badge">NOT STARTED</span>
+      </div>
+      <div class="card-body">
+        <div class="broken-notice">
+          <div class="icon">🔧</div>
+          <p>This module is not yet implemented.<br/>Planned for sprint 4.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <footer>
+    AV Clinical Tools — Internal Use Only &nbsp;·&nbsp; v0.3.1-dev &nbsp;·&nbsp;
+    <span id="secret-trigger" style="cursor:default; user-select:none;">Build 20250312</span>
+  </footer>
+</div>
+
+<!-- PIN -->
+<div class="pin-overlay" id="pinOverlay">
+  <div class="pin-box">
+    <h3>Authentication Required</h3>
+    <p>Enter your access code to continue.</p>
+    <input type="password" class="pin-input" id="pinInput" maxlength="4" placeholder="····" />
+    <div class="pin-error" id="pinError">Incorrect code. Try again.</div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn btn-primary" style="flex:1;" onclick="checkPin()">Unlock</button>
+      <button class="btn btn-secondary" onclick="closePin()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app-root"></div>
+
+<script>
+  const CORRECT_PIN = "1555";
+  const UNLOCK_KEY = "personachat_unlocked";
+
+  function launchApp() {
+    // Swap styles
+    document.getElementById("decoy-styles").disabled = true;
+    document.getElementById("app-styles").disabled = false;
+    // Swap views
+    document.getElementById("decoy-root").style.display = "none";
+    document.getElementById("pinOverlay").style.display = "none";
+    document.getElementById("app-root").style.display = "block";
+    document.title = "PersonaChat";
+    // Mount React app
+    if (!window._appMounted) {
+      window._appMounted = true;
+      const script = document.getElementById("app-babel");
+      // Already parsed by Babel, just trigger render
+      if (window._mountApp) window._mountApp();
+    }
+  }
+
+  // Check if already unlocked
+  if (localStorage.getItem(UNLOCK_KEY) === "true") {
+    document.addEventListener("DOMContentLoaded", launchApp);
+  }
+
+  // Triple click on build date
+  let clickCount = 0, clickTimer = null;
+  document.addEventListener("DOMContentLoaded", function() {
+    document.getElementById("secret-trigger").addEventListener("click", function() {
+      clickCount++;
+      clearTimeout(clickTimer);
+      clickTimer = setTimeout(() => { clickCount = 0; }, 600);
+      if (clickCount >= 3) {
+        clickCount = 0;
+        document.getElementById("pinOverlay").classList.add("active");
+        setTimeout(() => document.getElementById("pinInput").focus(), 100);
+      }
+    });
+  });
+
+  // Long press anywhere (mobile)
+  let pressTimer = null;
+  document.addEventListener("touchstart", function() {
+    pressTimer = setTimeout(() => {
+      document.getElementById("pinOverlay").classList.add("active");
+      setTimeout(() => document.getElementById("pinInput").focus(), 100);
+    }, 3000);
+  });
+  document.addEventListener("touchend", () => clearTimeout(pressTimer));
+  document.addEventListener("touchmove", () => clearTimeout(pressTimer));
+
+  function checkPin() {
+    const val = document.getElementById("pinInput").value;
+    if (val === CORRECT_PIN) {
+      localStorage.setItem(UNLOCK_KEY, "true");
+      closePin();
+      launchApp();
+    } else {
+      const input = document.getElementById("pinInput");
+      input.classList.add("shake");
+      document.getElementById("pinError").classList.add("show");
+      input.value = "";
+      setTimeout(() => input.classList.remove("shake"), 300);
+    }
+  }
+
+  function closePin() {
+    document.getElementById("pinOverlay").classList.remove("active");
+    document.getElementById("pinInput").value = "";
+    document.getElementById("pinError").classList.remove("show");
+  }
+
+  document.addEventListener("keydown", function(e) {
+    if (e.key === "Enter" && document.getElementById("pinOverlay").classList.contains("active")) checkPin();
+  });
+</script>
+
+<script type="text/babel" id="app-babel">
+
 const { useState, useEffect, useRef } = React;
 
 const OPENROUTER_MODELS = [
@@ -1535,7 +1766,14 @@ const S = {
   regenBtns: { display:"flex", gap:8 },
 };
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+window._mountApp = function() {
+  ReactDOM.createRoot(document.getElementById("app-root")).render(<App />);
+};
+// If already unlocked, mount will be called by launchApp
+// If freshly unlocked, same
+
+
 </script>
+
 </body>
 </html>
