@@ -372,6 +372,30 @@ const APPEARANCE_SLIDER_DEFS = [
   { key: "hips",    label: "Hips",   left: "Narrow",   right: "Full" },
 ];
 
+function randomiseAppearance(parsed) {
+  const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+  const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+  // Use generated colours if available, otherwise random
+  const hairOptions = HAIR_COLOURS.filter(c => c !== "Custom" && c !== "Coloured");
+  const eyeOptions = EYE_COLOURS.filter(c => c !== "Custom");
+  const skinOptions = SKIN_TONES.filter(c => c !== "Custom");
+
+  return {
+    hairColour: parsed?.hairColour || pick(hairOptions),
+    hairColourCustom: "",
+    eyeColour: parsed?.eyeColour || pick(eyeOptions),
+    eyeColourCustom: "",
+    skinTone: parsed?.skinTone || pick(skinOptions),
+    skinToneCustom: "",
+    height: rand(20, 80),
+    build: rand(15, 75),
+    chest: rand(20, 80),
+    waist: rand(20, 70),
+    hips: rand(25, 75),
+  };
+}
+
 async function autoGenerateCharacter({ vibe, apiKey, model }) {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -654,7 +678,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
     setVibeLoading(true); setError("");
     try {
       const result = await autoGenerateCharacter({ vibe, apiKey: settings.openrouterKey, model: settings.selectedModel });
-      setForm(f => ({ ...f, name: result.name, persona: result.persona, age: result.age || "", maritalStatus: result.maritalStatus || "Single", appearance: result.appearance || f.appearance }));
+      setForm(f => ({ ...f, name: result.name, persona: result.persona, age: result.age || "", maritalStatus: result.maritalStatus || "Single", appearance: randomiseAppearance(result.appearance) }));
     } catch (e) { setError("Failed to generate character. Try again."); }
     setVibeLoading(false);
   };
