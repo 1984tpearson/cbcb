@@ -33,9 +33,9 @@ const { useState, useEffect, useRef } = React;
 
 const OPENROUTER_MODELS = [
   { id: "mistralai/mistral-7b-instruct:free", label: "Mistral 7B (Free)" },
-  { id: "nousresearch/hermes-3-llama-3.1-405b", label: "Hermes 3 405B" },
   { id: "meta-llama/llama-3.1-8b-instruct:free", label: "Llama 3.1 8B (Free)" },
-  { id: "microsoft/phi-3-mini-128k-instruct:free", label: "Phi-3 Mini (Free)" },
+  { id: "mistralai/mistral-small", label: "Mistral Small" },
+  { id: "nousresearch/hermes-3-llama-3.1-405b", label: "Hermes 3 405B" },
 ];
 
 const REPLICATE_MODELS = [
@@ -256,6 +256,7 @@ function SliderRow({ def, value, onChange }) {
 // ─── SETTINGS PANEL ──────────────────────────────────────────────────────────
 function SettingsPanel({ settings, onSave, onClose }) {
   const [form, setForm] = useState(settings);
+  const [showKeys, setShowKeys] = useState(false);
   return (
     <div style={S.overlay}>
       <div style={S.modal}>
@@ -265,10 +266,16 @@ function SettingsPanel({ settings, onSave, onClose }) {
         </div>
         <div style={S.modalBody}>
           <label style={S.label}>OpenRouter API Key</label>
-          <input style={S.input} type="password" placeholder="sk-or-..." value={form.openrouterKey} onChange={e => setForm(f => ({...f, openrouterKey: e.target.value}))} />
+          <div style={{position:"relative"}}>
+            <input style={{...S.input, paddingRight:60}} type={showKeys ? "text" : "password"} placeholder="sk-or-..." value={form.openrouterKey} onChange={e => setForm(f => ({...f, openrouterKey: e.target.value}))} />
+            <button style={{position:"absolute", right:8, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", color:"#7a7268", cursor:"pointer", fontSize:12}} onClick={() => setShowKeys(v => !v)}>{showKeys ? "hide" : "show"}</button>
+          </div>
           <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">Get a free key ↗</a>
           <label style={S.label}>Replicate API Key</label>
-          <input style={S.input} type="password" placeholder="r8_..." value={form.replicateKey} onChange={e => setForm(f => ({...f, replicateKey: e.target.value}))} />
+          <div style={{position:"relative"}}>
+            <input style={{...S.input, paddingRight:60}} type={showKeys ? "text" : "password"} placeholder="r8_..." value={form.replicateKey} onChange={e => setForm(f => ({...f, replicateKey: e.target.value}))} />
+            <button style={{position:"absolute", right:8, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", color:"#7a7268", cursor:"pointer", fontSize:12}} onClick={() => setShowKeys(v => !v)}>{showKeys ? "hide" : "show"}</button>
+          </div>
           <a href="https://replicate.com/account/api-tokens" target="_blank" rel="noreferrer">Get a key ↗</a>
           <label style={S.label}>Chat Model</label>
           <select style={S.select} value={form.selectedModel} onChange={e => setForm(f => ({...f, selectedModel: e.target.value}))}>
