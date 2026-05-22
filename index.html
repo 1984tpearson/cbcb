@@ -755,7 +755,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const [showCustomImgInput, setShowCustomImgInput] = useState(false);
   const [customImgPrompt, setCustomImgPrompt] = useState("");
   const [showGallery, setShowGallery] = useState(false);
-  const [gallery, setGallery] = useState(() => storage.get(`gallery_${initialChar.id}`, []));
+  const [gallery, setGallery] = useState(() => storage.get(`gallery_${character.id}`, []));
   const [error, setError] = useState("");
   const [showSliders, setShowSliders] = useState(false);
   const [showAppearance, setShowAppearance] = useState(false);
@@ -1028,7 +1028,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   const [showCustomImgInput, setShowCustomImgInput] = useState(false);
   const [customImgPrompt, setCustomImgPrompt] = useState("");
   const [showGallery, setShowGallery] = useState(false);
-  const [gallery, setGallery] = useState(() => storage.get(`gallery_${initialChar.id}`, []));
+  const [gallery, setGallery] = useState(() => storage.get(`gallery_${character.id}`, []));
   const [error, setError] = useState("");
   const [bgImage, setBgImage] = useState(initialChar.backgroundImage);
   const [showBgMenu, setShowBgMenu] = useState(false);
