@@ -349,7 +349,7 @@ async function buildImagePromptFromContext({ messages, character, apiKey, model 
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, "HTTP-Referer": window.location.href },
-    body: JSON.stringify({ model, messages: [{ role: "user", content: `Based on this conversation with ${character.name}, write a short Stable Diffusion image prompt (max 30 words) depicting the current scene or mood. Visual elements only. Return ONLY the prompt.\n\n${recent}` }] }),
+    body: JSON.stringify({ model, messages: [{ role: "user", content: `Based on this conversation with ${character.name}, write a short Stable Diffusion image prompt (max 25 words) depicting the current scene or mood. Describe setting, lighting, pose, emotion. No character names. Return ONLY the prompt, no preamble.\n\n${recent}` }] }),
   });
   const data = await res.json();
   return data.choices[0].message.content.trim();
@@ -707,7 +707,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
     if (!imgPrompt.trim()) { setError("Enter an image description."); return; }
     setImgLoading(true); setError("");
     try {
-      const url = await generateImage({ prompt: `${imgPrompt}, portrait, character art, detailed`, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: form.nsfw, workerUrl: settings.workerUrl });
+      const url = await generateImage({ prompt: `${imgPrompt}, realistic photograph, photorealistic, real person, professional portrait, soft natural lighting, half body shot, sharp focus, high resolution, 85mm lens`, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: form.nsfw, workerUrl: settings.workerUrl });
       setForm(f => ({ ...f, referenceImage: url, backgroundImage: url }));
     } catch (e) { setError(e.message); }
     setImgLoading(false);
@@ -1020,7 +1020,8 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
       const ageDesc = character.age ? `${character.age} year old` : "";
       const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-      const fullImgPrompt = charDesc ? `${character.name}, ${charDesc}, ${prompt}` : `${character.name}, ${prompt}`;
+      const styleModifiers = "photorealistic, realistic photograph, real person, cinematic lighting, sharp focus, high resolution";
+      const fullImgPrompt = charDesc ? `${character.name}, ${charDesc}, ${prompt}, ${styleModifiers}` : `${character.name}, ${prompt}, ${styleModifiers}`;
       const url = await generateImage({ prompt: fullImgPrompt, referenceImageUrl: character.referenceImage, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: character.nsfw, workerUrl: settings.workerUrl });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);
     } catch (e) { if (!auto) setError(e.message); }
