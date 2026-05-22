@@ -1179,7 +1179,7 @@ function CharacterCard({ character, onSelect, onEdit, onDelete }) {
 }
 
 // ─── MESSAGE BUBBLE ───────────────────────────────────────────────────────────
-function MessageBubble({ msg, index, isLastAI, characterName, onDelete, onEdit, onRegenerate, regenLoading }) {
+function MessageBubble({ msg, index, isLastAI, characterName, onDelete, onEdit, onRegenerate, regenLoading, onExpandImage }) {
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState(msg.content);
   const [showRegen, setShowRegen] = useState(false);
@@ -1196,7 +1196,7 @@ function MessageBubble({ msg, index, isLastAI, characterName, onDelete, onEdit, 
   if (msg.role === "image") {
     return (
       <div style={{ ...S.imageMessage, alignSelf: "center" }} className="msg-anim">
-        <img src={msg.content} alt={msg.prompt} style={S.generatedImg} />
+        <img src={msg.content} alt={msg.prompt} style={{...S.generatedImg, cursor:"zoom-in"}} onClick={() => onExpandImage && onExpandImage(msg.content)} />
         <span style={S.imgCaption}>{msg.prompt}</span>
         <div style={S.msgActions}><button style={S.msgActionBtn} onClick={() => onDelete(index)}>✕ delete</button></div>
       </div>
@@ -1330,7 +1330,8 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
 
   const handleCustomImage = async () => {
     if (!customImgPrompt.trim()) return;
-    if (!settings.replicateKey) { setError("Add your Replicate API key in Settings."); return; }
+    const hasProvider = (settings.imageProvider === "dezgo" && settings.dezgoKey) || (settings.imageProvider !== "dezgo" && settings.replicateKey);
+    if (!hasProvider) { setError("Add your image API key in Settings."); return; }
     setImgLoading(true); setShowCustomImgInput(false);
     try {
       const appearanceDesc = buildAppearancePrompt(character.appearance);
@@ -1425,6 +1426,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
           </div>
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <button style={S.iconBtnLight} title="Image gallery" onClick={() => setShowGallery(true)}>🖼</button>
           {/* Personality button */}
           <button style={S.iconBtnLight} title="Character settings" onClick={() => setShowPersonality(true)}>⚙</button>
           {/* Background button */}
@@ -1467,7 +1469,8 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
         {messages.map((msg, i) => (
           <MessageBubble key={i} msg={msg} index={i} isLastAI={i === lastAIIndex}
             characterName={character.name} onDelete={handleDeleteMessage}
-            onEdit={handleEditMessage} onRegenerate={handleRegenerate} regenLoading={regenLoading} />
+            onEdit={handleEditMessage} onRegenerate={handleRegenerate} regenLoading={regenLoading}
+            onExpandImage={(url) => setLightboxImg(url)} />
         ))}
 
         {(loading || regenLoading) && (
