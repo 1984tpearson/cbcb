@@ -266,7 +266,7 @@ const OPENROUTER_MODELS = [
   { id: "meta-llama/llama-3.1-8b-instruct", label: "Llama 3.1 8B (Fast)" },
   { id: "mistralai/mistral-7b-instruct", label: "Mistral 7B" },
   { id: "google/gemma-3-27b-it", label: "Gemma 3 27B" },
-  { id: "~moonshotai/kimi-latest", label: "Kimi latest" },
+  { id: "moonshotai/kimi-k2.6", label: "Kimi K2.6" },
   { id: "minimax/minimax-m3", label: "MiniMax M3" },
   { id: "mistralai/mistral-small-2603", label: "Mistral Small 4" },
   { id: "nousresearch/hermes-4-70b", label: "Hermes 4 70B" },
@@ -773,7 +773,7 @@ async function generateOpeningScenarios({ character, model, settings }) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages: [
       { role: "system", content: (character.persona || `You are ${character.name}.`) + addendum + personaNote },
-      { role: "user", content: `Generate 5 distinct opening scenarios for the start of a conversation with someone who has just messaged you for the first time. Each scenario should have a different setting/context (e.g. different locations, times of day, situations) and a different opening message in character.\n\nReturn ONLY valid JSON, an array of exactly 5 objects with this exact shape:\n[{"label": "short 2-4 word scenario name", "setting": "one sentence describing the scene/context", "message": "the in-character opening message, 1-3 sentences"}]\n\nNo extra text, no markdown, just the JSON array.` }
+      { role: "user", content: `Generate 5 wildly varied opening scenarios for an in-person encounter with ${character.name}. The two of you are physically together in the scene — never reference messaging, texting, chatting online, "virtual" anything, or any kind of screen. Write as if this is the start of a face-to-face moment in real life.\n\nMake the 5 scenarios genuinely different in tone and energy — mix it up across the set, e.g. some normal/everyday, some awkward or embarrassing, some quirky or unexpected, some emotionally charged, and some taboo or risky. Vary locations, times of day, and what's going on. Avoid defaulting to generic romantic/seductive openers for every single one — only some should lean that way.\n\nEach scenario needs: a short label, a one-sentence setting description, and an in-character opening message (1-3 sentences) that ${character.name} would actually say out loud in that moment — no narration of typing, sending, or reading messages.\n\nReturn ONLY valid JSON, an array of exactly 5 objects with this exact shape:\n[{"label": "short 2-4 word scenario name", "setting": "one sentence describing the scene/context", "message": "the in-character spoken opening line, 1-3 sentences"}]\n\nNo extra text, no markdown, just the JSON array.` }
     ]}),
   });
   const data = await res.json();
