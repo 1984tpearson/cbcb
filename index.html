@@ -539,9 +539,7 @@ async function sendChat({ messages, character, model }) {
 
 async function generateImageDezgo({ prompt, nsfw, width, height, seed }) {
   const formData = new FormData();
-  // Quality boosters
-  const qualityPrefix = "RAW photo, (photorealistic:1.5), (realistic:1.4), masterpiece, best quality, ultra high res, sharp focus, ";
-  formData.append("prompt", qualityPrefix + prompt);
+  formData.append("prompt", prompt);
   formData.append("model", "dreamshaperxl_lightning_1024px");
   formData.append("width", width || 774);
   formData.append("height", height || 1355);
