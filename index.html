@@ -1337,6 +1337,9 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
         seed: ensureSeed(),
       });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);
+      const newGallery3 = [{ url, prompt, date: Date.now() }, ...gallery].slice(0, 20);
+      setGallery(newGallery3);
+      dataApi.saveGallery(character.id, newGallery3).catch(e => { if (!auto) setError(e.message); });
     } catch (e) { if (!auto) setError(e.message); }
     setImgLoading(false);
   };
