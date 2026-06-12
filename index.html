@@ -823,6 +823,11 @@ function SettingsPanel({ settings, onSave, onClose }) {
             {OPENROUTER_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
           </select>
 
+          <label style={S.label}>Image Model</label>
+          <select style={S.select} value={form.imageModel || DEZGO_MODELS[0].id} onChange={e => setForm(f => ({...f, imageModel: e.target.value}))}>
+            {DEZGO_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+
           <div style={S.divider} />
           <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>About You</span>
           <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 4 }}>Used by characters so they know who they're talking to. Applies to all characters by default — individual characters can override this.</p>
@@ -1049,7 +1054,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       const fullPrompt = charDesc ? `${baseDesc}, ${charDesc}` : baseDesc;
       const stylePrompt = `${fullPrompt}, photorealistic, natural lighting, full body shot, standing, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
       const seed = form.seed || Math.floor(Math.random() * 2147483647);
-      const url = await generateImageDezgo({ prompt: stylePrompt, nsfw: form.nsfw, seed });
+      const url = await generateImageDezgo({ prompt: stylePrompt, nsfw: form.nsfw, seed, model: settings.imageModel });
       setForm(f => ({ ...f, referenceImage: url, backgroundImage: url, seed }));
     } catch (e) { setError(e.message); }
     setImgLoading(false);
@@ -1315,7 +1320,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
     if (!messagesLoaded) return;
     if (messages.length === 0 && !openingScenarios && !openingLoading) {
       setOpeningLoading(true);
-      generateOpeningScenarios({ character, model: settings.selectedModel })
+      generateOpeningScenarios({ character, model: settings.selectedModel, settings })
         .then(scenarios => setOpeningScenarios(scenarios))
         .catch(() => {})
         .finally(() => setOpeningLoading(false));
@@ -1389,6 +1394,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
         prompt: fullPrompt,
         nsfw: character.nsfw,
         seed: ensureSeed(),
+        model: settings.imageModel,
       });
       setMessages(m => [...m, { role: "image", content: url, prompt: customImgPrompt }]);
       const newGallery2 = [{ url, prompt: customImgPrompt, date: Date.now() }, ...gallery].slice(0, 20);
@@ -1428,6 +1434,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
         prompt: fullImgPrompt,
         nsfw: contextNsfw,
         seed: ensureSeed(),
+        model: settings.imageModel,
       });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);
       const newGallery3 = [{ url, prompt, date: Date.now() }, ...gallery].slice(0, 20);
