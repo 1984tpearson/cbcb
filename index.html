@@ -1371,7 +1371,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
     const newMessages = [...messages, userMsg];
     setMessages(newMessages); setInput(""); setLoading(true);
     try {
-      const reply = await sendChat({ messages: newMessages, character, model: settings.selectedModel, settings });
+      const reply = await sendChat({ messages: newMessages.filter(m => m.role !== "image"), character, model: settings.selectedModel, settings });
       setMessages(m => [...m, { role: "assistant", content: reply }]);
     } catch (e) { setError(e.message); }
     setLoading(false);
@@ -1387,7 +1387,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       : trimmed;
     setMessages(trimmed); setRegenLoading(true); setError("");
     try {
-      const reply = await sendChat({ messages: messagesWithInstruction, character, model: settings.selectedModel, settings });
+      const reply = await sendChat({ messages: messagesWithInstruction.filter(m => m.role !== "image"), character, model: settings.selectedModel, settings });
       setMessages([...trimmed, { role: "assistant", content: reply }]);
     } catch (e) { setError(e.message); }
     setRegenLoading(false);
