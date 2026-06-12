@@ -528,12 +528,12 @@ async function generateImageDezgo({ prompt, nsfw, width, height, seed, initImage
   // Quality boosters
   const qualityPrefix = "RAW photo, (photorealistic:1.5), (realistic:1.4), masterpiece, best quality, ultra high res, sharp focus, ";
   formData.append("prompt", qualityPrefix + prompt);
-  formData.append("model", initImage ? "dreamshaperxl_1024px" : "dreamshaperxl_lightning_1024px");
+  formData.append("model", initImage ? "dreamshaper_8" : "dreamshaperxl_lightning_1024px");
   formData.append("width", width || 774);
   formData.append("height", height || 1355);
-  formData.append("steps", "5");
+  formData.append("steps", initImage ? "10" : "5");
   formData.append("guidance", "2.0");
-  formData.append("sampler", "auto");
+  formData.append("sampler", initImage ? "dpmpp_2m_karras" : "auto");
   formData.append("format", "png");
   formData.append("negative_prompt", "(worst quality:2), (low quality:2), (normal quality:2), lowres, bad anatomy, bad hands, ((monochrome)), ((grayscale)), watermark, text, signature, logo, cropped, out of frame, jpeg artifacts, blurry, deformed, ugly, disfigured, cartoon, anime, illustration, painting, drawing, art, sketch, 3d render");
 
