@@ -541,7 +541,7 @@ async function generateImageDezgo({ prompt, nsfw, width, height, seed, initImage
 
   if (initImage) {
     formData.append("init_image", dataUrlToBlob(initImage), "init.png");
-    formData.append("strength", String(strength ?? 0.55));
+    formData.append("strength", String(strength ?? 0.75));
     formData.append("dezgo_endpoint", "image2image");
   } else {
     formData.append("dezgo_endpoint", "lightning");
@@ -774,6 +774,7 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
   const [showAppearancePanel, setShowAppearancePanel] = useState(false);
   const [nsfw, setNsfw] = useState(character.nsfw || false);
   const [autoImage, setAutoImage] = useState(character.autoImage || false);
+  const [imgStrength, setImgStrength] = useState(character.imgStrength ?? 0.75);
 
   return (
     <div style={S.overlay}>
@@ -832,10 +833,17 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
             <span style={S.label}>Auto Image Generation</span>
             <button style={autoImage ? S.toggleOn : S.toggleOff} onClick={() => setAutoImage(v => !v)}>{autoImage ? "ON" : "OFF"}</button>
           </div>
+          <div style={{ marginTop: 14 }}>
+            <SliderRow
+              def={{ label: "Image Variation Strength", left: "Closer to reference", right: "More creative freedom" }}
+              value={Math.round(imgStrength * 100)}
+              onChange={v => setImgStrength(v / 100)}
+            />
+          </div>
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, gender, customGender, age, maritalStatus, appearance, nsfw, autoImage }); onClose(); }}>Save Changes</button>
+          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, gender, customGender, age, maritalStatus, appearance, nsfw, autoImage, imgStrength }); onClose(); }}>Save Changes</button>
         </div>
       </div>
     </div>
@@ -1262,6 +1270,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
         nsfw: character.nsfw,
         seed: ensureSeed(),
         initImage: character.referenceImage || null,
+        strength: character.imgStrength,
       });
       setMessages(m => [...m, { role: "image", content: url, prompt: customImgPrompt }]);
       const galleryKey2 = `gallery_${character.id}`;
@@ -1310,6 +1319,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
         nsfw: contextNsfw,
         seed: ensureSeed(),
         initImage: character.referenceImage || null,
+        strength: character.imgStrength,
       });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);
     } catch (e) { if (!auto) setError(e.message); }
