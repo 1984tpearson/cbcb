@@ -316,7 +316,25 @@ const DEZGO_MODELS = [
   { id: "juggernautxl_10_hyper", label: "Juggernaut XL 10 Hyper" },
   { id: "juggernautxl_9_lightning_1024px", label: "Juggernaut XL 9 Lightning" },
   { id: "ponyxl_6_turbo_dpo", label: "Pony XL 6 Turbo DPO" },
+  { id: "bluepencilxl_1024px", label: "BluePencil XL" },
+  { id: "dreamshaperxl_1024px", label: "DreamShaper XL" },
+  { id: "juggernautxl_1024px", label: "Juggernaut XL" },
+  { id: "juggernautxl_rundiffusion_8_1024px", label: "Juggernaut XL RunDiffusion 8" },
+  { id: "sdxl_1024px", label: "SDXL Base 1.0" },
 ];
+
+const DEZGO_MODEL_PARAMS = {
+  dreamshaperxl_lightning_1024px:        { steps: "5",  guidance: "2.0", endpoint: "lightning" },
+  envy_starlight_xl_01_lightning_1024px: { steps: "5",  guidance: "2.0", endpoint: "lightning" },
+  juggernautxl_10_hyper:                 { steps: "6",  guidance: "2.0", endpoint: "lightning" },
+  juggernautxl_9_lightning_1024px:       { steps: "5",  guidance: "2.0", endpoint: "lightning" },
+  ponyxl_6_turbo_dpo:                    { steps: "8",  guidance: "2.0", endpoint: "lightning" },
+  bluepencilxl_1024px:                   { steps: "30", guidance: "7.0", endpoint: "sdxl" },
+  dreamshaperxl_1024px:                  { steps: "30", guidance: "7.0", endpoint: "sdxl" },
+  juggernautxl_1024px:                   { steps: "30", guidance: "7.0", endpoint: "sdxl" },
+  juggernautxl_rundiffusion_8_1024px:    { steps: "30", guidance: "7.0", endpoint: "sdxl" },
+  sdxl_1024px:                           { steps: "30", guidance: "7.0", endpoint: "sdxl" },
+};
 
 const DEFAULT_SETTINGS = {
   selectedModel: OPENROUTER_MODELS[0].id,
@@ -571,20 +589,22 @@ async function sendChat({ messages, character, model, settings }) {
 }
 
 async function generateImageDezgo({ prompt, nsfw, width, height, seed, model }) {
+  const modelId = model || DEZGO_MODELS[0].id;
+  const params = DEZGO_MODEL_PARAMS[modelId] || DEZGO_MODEL_PARAMS[DEZGO_MODELS[0].id];
   const formData = new FormData();
   formData.append("prompt", prompt);
-  formData.append("model", model || DEZGO_MODELS[0].id);
+  formData.append("model", modelId);
   formData.append("width", width || 774);
   formData.append("height", height || 1355);
-  formData.append("steps", "5");
-  formData.append("guidance", "2.0");
+  formData.append("steps", params.steps);
+  formData.append("guidance", params.guidance);
   formData.append("sampler", "auto");
   formData.append("format", "png");
   formData.append("negative_prompt", "(worst quality:2), (low quality:2), (normal quality:2), lowres, bad anatomy, bad hands, ((monochrome)), ((grayscale)), watermark, text, signature, logo, cropped, out of frame, jpeg artifacts, blurry, deformed, ugly, disfigured, cartoon, anime, illustration, painting, drawing, art, sketch, 3d render");
 
   if (seed) formData.append("seed", String(seed));
 
-  formData.append("dezgo_endpoint", "lightning");
+  formData.append("dezgo_endpoint", params.endpoint);
 
   const res = await fetch(IMAGE_PROXY_URL, {
     method: "POST",
