@@ -310,6 +310,7 @@ const DEFAULT_SETTINGS = {
 
 const AI_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/ai-proxy";
 const IMAGE_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/image-proxy";
+const UPLOAD_IMAGE_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/upload-image";
 
 
 const storage = {
@@ -541,13 +542,29 @@ async function generateImageDezgo({ prompt, nsfw, width, height, seed }) {
   }
 
   const blob = await res.blob();
-  // Convert to base64 for persistent storage
-  return new Promise((resolve, reject) => {
+  const dataUrl = await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => resolve(reader.result);
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+
+  // Upload to Supabase Storage and return the public URL (avoids storing
+  // large base64 blobs in localStorage)
+  try {
+    const uploadRes = await fetch(UPLOAD_IMAGE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dataUrl, filename: `img_${Date.now()}_${Math.random().toString(36).slice(2)}` }),
+    });
+    if (uploadRes.ok) {
+      const { url } = await uploadRes.json();
+      if (url) return url;
+    }
+  } catch {}
+
+  // Fallback: if upload fails, return the data URL directly (old behaviour)
+  return dataUrl;
 }
 
 async function buildImagePromptFromContext({ messages, character, model }) {
