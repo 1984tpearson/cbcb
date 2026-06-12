@@ -24,7 +24,10 @@ Deno.serve(async (req: Request) => {
   }
 
   if (req.method !== 'POST') {
-    return new Response('Method not allowed', { status: 405 });
+    return new Response('Method not allowed', {
+      status: 405,
+      headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGINS },
+    });
   }
 
   // ── Read FormData from the browser ─────────────
@@ -32,12 +35,18 @@ Deno.serve(async (req: Request) => {
   try {
     formData = await req.formData();
   } catch {
-    return new Response('Invalid form data', { status: 400 });
+    return new Response('Invalid form data', {
+      status: 400,
+      headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGINS },
+    });
   }
 
   const apiKey = Deno.env.get('DEZGO_API_KEY');
   if (!apiKey) {
-    return new Response('Server misconfiguration', { status: 500 });
+    return new Response('Server misconfiguration', {
+      status: 500,
+      headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGINS },
+    });
   }
 
   // ── Forward to Dezgo ────────────────────────────
@@ -59,7 +68,13 @@ Deno.serve(async (req: Request) => {
 
   if (!upstream.ok) {
     const errText = await upstream.text();
-    return new Response(errText, { status: upstream.status });
+    return new Response(errText, {
+      status: upstream.status,
+      headers: {
+        'Access-Control-Allow-Origin': ALLOWED_ORIGINS,
+        'Content-Type': 'text/plain',
+      },
+    });
   }
 
   // ── Return the image blob ───────────────────────
