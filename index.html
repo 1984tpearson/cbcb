@@ -306,19 +306,11 @@ const SLIDER_DEFS = [
 
 const DEFAULT_SETTINGS = {
   selectedModel: OPENROUTER_MODELS[0].id,
-  dezgoModel: "juggernautxl_10_hyper",
 };
 
 const AI_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/ai-proxy";
 const IMAGE_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/image-proxy";
 
-const DEZGO_MODELS = [
-  { id: "juggernautxl_10_hyper", label: "JuggernautXL 10 Hyper (Realistic)" },
-  { id: "juggernautxl_9_lightning_1024px", label: "JuggernautXL 9 Lightning" },
-  { id: "dreamshaperxl_lightning_1024px", label: "DreamShaper XL Lightning" },
-  { id: "envy_starlight_xl_01_lightning_1024px", label: "Starlight XL Lightning" },
-  { id: "ponyxl_6_turbo_dpo", label: "Pony XL Turbo" },
-];
 
 const storage = {
   get: (key, fallback = null) => {
@@ -520,21 +512,40 @@ async function sendChat({ messages, character, model }) {
   return data.choices[0].message.content;
 }
 
-async function generateImageDezgo({ prompt, model, nsfw, width, height }) {
+// Convert a base64 data URL to a Blob for FormData upload
+function dataUrlToBlob(dataUrl) {
+  const [header, base64] = dataUrl.split(",");
+  const mimeMatch = header.match(/data:(.*?);base64/);
+  const mime = mimeMatch ? mimeMatch[1] : "image/png";
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+async function generateImageDezgo({ prompt, nsfw, width, height, seed, initImage, strength }) {
   const formData = new FormData();
-  // JuggernautXL quality boosters
-  // For Dezgo, restructure prompt to put appearance terms first for better adherence
-  // Split out any appearance descriptors and put them prominently
+  // Quality boosters
   const qualityPrefix = "RAW photo, (photorealistic:1.5), (realistic:1.4), masterpiece, best quality, ultra high res, sharp focus, ";
   formData.append("prompt", qualityPrefix + prompt);
-  formData.append("model", model || "juggernautxl_10_hyper");
-  formData.append("width", width || 832);
-  formData.append("height", height || 1216);
+  formData.append("model", "dreamshaperxl_lightning_1024px");
+  formData.append("width", width || 774);
+  formData.append("height", height || 1355);
+  formData.append("steps", "5");
+  formData.append("guidance", "2.0");
+  formData.append("sampler", "auto");
+  formData.append("format", "png");
   formData.append("negative_prompt", "(worst quality:2), (low quality:2), (normal quality:2), lowres, bad anatomy, bad hands, ((monochrome)), ((grayscale)), watermark, text, signature, logo, cropped, out of frame, jpeg artifacts, blurry, deformed, ugly, disfigured, cartoon, anime, illustration, painting, drawing, art, sketch, 3d render");
-  formData.append("sampler", "dpmpp_2m_karras");
-  formData.append("guidance", "1.5");
-  formData.append("format", "jpg");
-  formData.append("dezgo_endpoint", "lightning");
+
+  if (seed) formData.append("seed", String(seed));
+
+  if (initImage) {
+    formData.append("init_image", dataUrlToBlob(initImage), "init.png");
+    formData.append("strength", String(strength ?? 0.55));
+    formData.append("dezgo_endpoint", "image2image");
+  } else {
+    formData.append("dezgo_endpoint", "lightning");
+  }
 
   const res = await fetch(IMAGE_PROXY_URL, {
     method: "POST",
@@ -742,10 +753,6 @@ function SettingsPanel({ settings, onSave, onClose }) {
           <select style={S.select} value={form.selectedModel} onChange={e => setForm(f => ({...f, selectedModel: e.target.value}))}>
             {OPENROUTER_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
           </select>
-          <label style={S.label}>Image Model</label>
-          <select style={S.select} value={form.dezgoModel || "juggernautxl_10_hyper"} onChange={e => setForm(f => ({...f, dezgoModel: e.target.value}))}>
-            {DEZGO_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-          </select>
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
@@ -926,8 +933,9 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       const baseDesc = imgPrompt.trim() ? imgPrompt.trim() : (form.name ? form.name : "person");
       const fullPrompt = charDesc ? `${baseDesc}, ${charDesc}` : baseDesc;
       const stylePrompt = `${fullPrompt}, photorealistic, natural lighting, full body shot, standing, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
-      const url = await generateImageDezgo({ prompt: stylePrompt, model: settings.dezgoModel, nsfw: form.nsfw });
-      setForm(f => ({ ...f, referenceImage: url, backgroundImage: url }));
+      const seed = form.seed || Math.floor(Math.random() * 2147483647);
+      const url = await generateImageDezgo({ prompt: stylePrompt, nsfw: form.nsfw, seed });
+      setForm(f => ({ ...f, referenceImage: url, backgroundImage: url, seed }));
     } catch (e) { setError(e.message); }
     setImgLoading(false);
   };
@@ -1228,6 +1236,15 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
     setRegenLoading(false);
   };
 
+  const ensureSeed = () => {
+    if (character.seed) return character.seed;
+    const seed = Math.floor(Math.random() * 2147483647);
+    const updated = { ...character, seed };
+    setCharacter(updated);
+    onUpdateCharacter(updated);
+    return seed;
+  };
+
   const handleCustomImage = async () => {
     if (!customImgPrompt.trim()) return;
     setImgLoading(true); setShowCustomImgInput(false);
@@ -1240,7 +1257,12 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       const fullPrompt = charDesc
         ? `${character.name}, ${charDesc}, ${customImgPrompt}, ${styleModifiers}`
         : `${character.name}, ${customImgPrompt}, ${styleModifiers}`;
-      const url = await generateImageDezgo({ prompt: fullPrompt, model: settings.dezgoModel, nsfw: character.nsfw });
+      const url = await generateImageDezgo({
+        prompt: fullPrompt,
+        nsfw: character.nsfw,
+        seed: ensureSeed(),
+        initImage: character.referenceImage || null,
+      });
       setMessages(m => [...m, { role: "image", content: url, prompt: customImgPrompt }]);
       const galleryKey2 = `gallery_${character.id}`;
       const existing2 = storage.get(galleryKey2, []);
@@ -1283,7 +1305,12 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       const fullImgPrompt = charDesc ? `${character.name}, ${charDesc}, ${prompt}, ${styleModifiers}` : `${character.name}, ${prompt}, ${styleModifiers}`;
       // Context images: only NSFW if auto-image is on (user has opted in to continuous NSFW)
       const contextNsfw = auto ? character.nsfw : false;
-      const url = await generateImageDezgo({ prompt: fullImgPrompt, model: settings.dezgoModel, nsfw: contextNsfw });
+      const url = await generateImageDezgo({
+        prompt: fullImgPrompt,
+        nsfw: contextNsfw,
+        seed: ensureSeed(),
+        initImage: character.referenceImage || null,
+      });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);
     } catch (e) { if (!auto) setError(e.message); }
     setImgLoading(false);
