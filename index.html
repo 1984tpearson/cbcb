@@ -304,8 +304,11 @@ const SLIDER_DEFS = [
   { key: "neediness",        label: "Neediness",          left: "Independent",    right: "Clingy",         section: "Behaviour" },
 ];
 
+const DEFAULT_USER_PERSONA = { name: "", gender: "", notes: "" };
+
 const DEFAULT_SETTINGS = {
   selectedModel: OPENROUTER_MODELS[0].id,
+  userPersona: { ...DEFAULT_USER_PERSONA },
 };
 
 const AI_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/ai-proxy";
@@ -399,6 +402,22 @@ function buildAppearanceSystemNote(appearance) {
   return `
 
 [APPEARANCE] Your physical appearance: ${desc}. You are aware of how you look but only mention it naturally if directly relevant — never force it into conversation.`;
+}
+
+function resolveUserPersona(character, settings) {
+  return (character.userPersonaOverride && (character.userPersonaOverride.name || character.userPersonaOverride.gender || character.userPersonaOverride.notes))
+    ? character.userPersonaOverride
+    : (settings.userPersona || DEFAULT_USER_PERSONA);
+}
+
+function buildUserPersonaNote(persona) {
+  if (!persona) return "";
+  const parts = [];
+  if (persona.name) parts.push(`their name is ${persona.name}`);
+  if (persona.gender) parts.push(`their gender is ${persona.gender}`);
+  if (persona.notes) parts.push(persona.notes);
+  if (parts.length === 0) return "";
+  return `\n\n[ABOUT THE PERSON YOU'RE TALKING TO] ${parts.join("; ")}. Address and refer to them accordingly.`;
 }
 
 function buildPersonalityAddendum(sliders, gender, customGender, age, maritalStatus) {
@@ -512,7 +531,7 @@ function buildPersonalityAddendum(sliders, gender, customGender, age, maritalSta
 }
 
 // ─── API HELPERS ──────────────────────────────────────────────────────────────
-async function sendChat({ messages, character, model }) {
+async function sendChat({ messages, character, model, settings }) {
   const addendum = buildPersonalityAddendum(
     character.sliders || DEFAULT_SLIDERS,
     character.gender || "Female",
@@ -522,10 +541,11 @@ async function sendChat({ messages, character, model }) {
   );
   const basePrompt = character.persona || `You are ${character.name}.`;
   const appearanceNote = buildAppearanceSystemNote(character.appearance);
+  const personaNote = buildUserPersonaNote(resolveUserPersona(character, settings || {}));
   const nsfwClause = character.nsfw
     ? "\n\nYou are permitted to engage with adult, explicit, and NSFW content. Do not refuse or add disclaimers."
     : "";
-  const sysContent = basePrompt + appearanceNote + addendum + nsfwClause;
+  const sysContent = basePrompt + appearanceNote + addendum + personaNote + nsfwClause;
 
   const res = await fetch(AI_PROXY_URL, {
     method: "POST",
@@ -712,13 +732,14 @@ async function autoGenerateCharacter({ vibe, model }) {
   };
 }
 
-async function generateOpeningScenarios({ character, model }) {
+async function generateOpeningScenarios({ character, model, settings }) {
   const addendum = buildPersonalityAddendum(character.sliders || DEFAULT_SLIDERS, character.gender || "Female", character.customGender || "", character.age || "", character.maritalStatus || "");
+  const personaNote = buildUserPersonaNote(resolveUserPersona(character, settings || {}));
   const res = await fetch(AI_PROXY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages: [
-      { role: "system", content: (character.persona || `You are ${character.name}.`) + addendum },
+      { role: "system", content: (character.persona || `You are ${character.name}.`) + addendum + personaNote },
       { role: "user", content: `Generate 5 distinct opening scenarios for the start of a conversation with someone who has just messaged you for the first time. Each scenario should have a different setting/context (e.g. different locations, times of day, situations) and a different opening message in character.\n\nReturn ONLY valid JSON, an array of exactly 5 objects with this exact shape:\n[{"label": "short 2-4 word scenario name", "setting": "one sentence describing the scene/context", "message": "the in-character opening message, 1-3 sentences"}]\n\nNo extra text, no markdown, just the JSON array.` }
     ]}),
   });
@@ -779,7 +800,7 @@ function SliderGroup({ sliders, onChange }) {
 
 // ─── SETTINGS PANEL ──────────────────────────────────────────────────────────
 function SettingsPanel({ settings, onSave, onClose }) {
-  const [form, setForm] = useState(settings);
+  const [form, setForm] = useState(() => ({ ...settings, userPersona: { ...DEFAULT_USER_PERSONA, ...(settings.userPersona || {}) } }));
   return (
     <div style={S.overlay}>
       <div style={S.modal}>
@@ -792,6 +813,26 @@ function SettingsPanel({ settings, onSave, onClose }) {
           <select style={S.select} value={form.selectedModel} onChange={e => setForm(f => ({...f, selectedModel: e.target.value}))}>
             {OPENROUTER_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
           </select>
+
+          <div style={S.divider} />
+          <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>About You</span>
+          <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 4 }}>Used by characters so they know who they're talking to. Applies to all characters by default — individual characters can override this.</p>
+
+          <label style={S.label}>Your Name</label>
+          <input style={S.input} placeholder="e.g. Tim" value={form.userPersona.name}
+            onChange={e => setForm(f => ({ ...f, userPersona: { ...f.userPersona, name: e.target.value } }))} />
+
+          <label style={S.label}>Your Gender</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {GENDERS.map(g => (
+              <button key={g} style={form.userPersona.gender === g ? S.genderBtnOn : S.genderBtnOff}
+                onClick={() => setForm(f => ({ ...f, userPersona: { ...f.userPersona, gender: g } }))}>{g}</button>
+            ))}
+          </div>
+
+          <label style={S.label}>Other Details</label>
+          <textarea style={{ ...S.input, height: 70, resize: "vertical" }} placeholder="Anything else characters should know about you (optional)"
+            value={form.userPersona.notes} onChange={e => setForm(f => ({ ...f, userPersona: { ...f.userPersona, notes: e.target.value } }))} />
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
@@ -813,6 +854,8 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
   const [showAppearancePanel, setShowAppearancePanel] = useState(false);
   const [nsfw, setNsfw] = useState(character.nsfw || false);
   const [autoImage, setAutoImage] = useState(character.autoImage || false);
+  const [useUserPersonaOverride, setUseUserPersonaOverride] = useState(!!character.userPersonaOverride);
+  const [userPersonaOverride, setUserPersonaOverride] = useState(character.userPersonaOverride || { ...DEFAULT_USER_PERSONA });
 
   return (
     <div style={S.overlay}>
@@ -871,10 +914,34 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
             <span style={S.label}>Auto Image Generation</span>
             <button style={autoImage ? S.toggleOn : S.toggleOff} onClick={() => setAutoImage(v => !v)}>{autoImage ? "ON" : "OFF"}</button>
           </div>
+
+          <div style={S.divider} />
+          <div style={S.toggleRow}>
+            <span style={S.label}>Custom "About You" for this character</span>
+            <button style={useUserPersonaOverride ? S.toggleOn : S.toggleOff} onClick={() => setUseUserPersonaOverride(v => !v)}>{useUserPersonaOverride ? "ON" : "OFF"}</button>
+          </div>
+          {useUserPersonaOverride && (
+            <div style={{ marginTop: 8 }}>
+              <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 6 }}>Overrides your global "About You" settings just for {character.name}.</p>
+              <label style={S.label}>Your Name</label>
+              <input style={S.input} placeholder="e.g. Tim" value={userPersonaOverride.name}
+                onChange={e => setUserPersonaOverride(p => ({ ...p, name: e.target.value }))} />
+              <label style={S.label}>Your Gender</label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {GENDERS.map(g => (
+                  <button key={g} style={userPersonaOverride.gender === g ? S.genderBtnOn : S.genderBtnOff}
+                    onClick={() => setUserPersonaOverride(p => ({ ...p, gender: g }))}>{g}</button>
+                ))}
+              </div>
+              <label style={S.label}>Other Details</label>
+              <textarea style={{ ...S.input, height: 60, resize: "vertical" }} placeholder="Anything else this character should know about you"
+                value={userPersonaOverride.notes} onChange={e => setUserPersonaOverride(p => ({ ...p, notes: e.target.value }))} />
+            </div>
+          )}
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, gender, customGender, age, maritalStatus, appearance, nsfw, autoImage }); onClose(); }}>Save Changes</button>
+          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, gender, customGender, age, maritalStatus, appearance, nsfw, autoImage, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
         </div>
       </div>
     </div>
@@ -1266,7 +1333,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
     const newMessages = [...messages, userMsg];
     setMessages(newMessages); setInput(""); setLoading(true);
     try {
-      const reply = await sendChat({ messages: newMessages, character, model: settings.selectedModel });
+      const reply = await sendChat({ messages: newMessages, character, model: settings.selectedModel, settings });
       setMessages(m => [...m, { role: "assistant", content: reply }]);
     } catch (e) { setError(e.message); }
     setLoading(false);
@@ -1282,7 +1349,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       : trimmed;
     setMessages(trimmed); setRegenLoading(true); setError("");
     try {
-      const reply = await sendChat({ messages: messagesWithInstruction, character, model: settings.selectedModel });
+      const reply = await sendChat({ messages: messagesWithInstruction, character, model: settings.selectedModel, settings });
       setMessages([...trimmed, { role: "assistant", content: reply }]);
     } catch (e) { setError(e.message); }
     setRegenLoading(false);
@@ -1427,8 +1494,12 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
                       </button>
                     ))}
                     <button style={{ ...S.btnSecondary, marginTop: 4 }}
-                      onClick={() => { setOpeningScenarios(null); setOpeningLoading(true); generateOpeningScenarios({ character, model: settings.selectedModel }).then(s => setOpeningScenarios(s)).catch(() => {}).finally(() => setOpeningLoading(false)); }}>
+                      onClick={() => { setOpeningScenarios(null); setOpeningLoading(true); generateOpeningScenarios({ character, model: settings.selectedModel, settings }).then(s => setOpeningScenarios(s)).catch(() => {}).finally(() => setOpeningLoading(false)); }}>
                       ↺ Different options
+                    </button>
+                    <button style={{ ...S.btnSecondary, marginTop: 0 }}
+                      onClick={() => setOpeningScenarios(null)}>
+                      ✏️ Write your own
                     </button>
                   </div>
                 )
