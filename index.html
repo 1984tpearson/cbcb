@@ -306,9 +306,18 @@ const SLIDER_DEFS = [
 
 const DEFAULT_USER_PERSONA = { name: "", gender: "", notes: "" };
 
+const DEZGO_MODELS = [
+  { id: "dreamshaperxl_lightning_1024px", label: "DreamShaper XL Lightning" },
+  { id: "envy_starlight_xl_01_lightning_1024px", label: "Envy Starlight XL Lightning" },
+  { id: "juggernautxl_10_hyper", label: "Juggernaut XL 10 Hyper" },
+  { id: "juggernautxl_9_lightning_1024px", label: "Juggernaut XL 9 Lightning" },
+  { id: "ponyxl_6_turbo_dpo", label: "Pony XL 6 Turbo DPO" },
+];
+
 const DEFAULT_SETTINGS = {
   selectedModel: OPENROUTER_MODELS[0].id,
   userPersona: { ...DEFAULT_USER_PERSONA },
+  imageModel: DEZGO_MODELS[0].id,
 };
 
 const AI_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/ai-proxy";
@@ -557,10 +566,10 @@ async function sendChat({ messages, character, model, settings }) {
   return data.choices[0].message.content;
 }
 
-async function generateImageDezgo({ prompt, nsfw, width, height, seed }) {
+async function generateImageDezgo({ prompt, nsfw, width, height, seed, model }) {
   const formData = new FormData();
   formData.append("prompt", prompt);
-  formData.append("model", "dreamshaperxl_lightning_1024px");
+  formData.append("model", model || DEZGO_MODELS[0].id);
   formData.append("width", width || 774);
   formData.append("height", height || 1355);
   formData.append("steps", "5");
