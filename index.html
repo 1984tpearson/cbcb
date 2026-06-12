@@ -268,12 +268,6 @@ const OPENROUTER_MODELS = [
   { id: "google/gemma-3-27b-it", label: "Gemma 3 27B" },
 ];
 
-const REPLICATE_MODELS = [
-  { id: "black-forest-labs/flux-schnell", label: "Flux Schnell (Fast)" },
-  { id: "black-forest-labs/flux-dev", label: "Flux Dev (Quality)" },
-  { id: "adirik/realvisxl-v4.0:85a58cc71587cc27539b7c83eb1ce4aea02feedfb9a9fae0598cebc110a3d695", label: "RealVisXL v4 (Realistic/NSFW)" },
-];
-
 const GENDERS = ["Female", "Male", "Non-binary", "Custom"];
 
 const DEFAULT_SLIDERS = {
@@ -311,15 +305,12 @@ const SLIDER_DEFS = [
 ];
 
 const DEFAULT_SETTINGS = {
-  openrouterKey: "",
-  replicateKey: "",
-  workerUrl: "",
-  dezgoKey: "",
-  imageProvider: "replicate",
   selectedModel: OPENROUTER_MODELS[0].id,
-  imageModel: REPLICATE_MODELS[0].id,
   dezgoModel: "juggernautxl_10_hyper",
 };
+
+const AI_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/ai-proxy";
+const IMAGE_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/image-proxy";
 
 const DEZGO_MODELS = [
   { id: "juggernautxl_10_hyper", label: "JuggernautXL 10 Hyper (Realistic)" },
@@ -504,7 +495,7 @@ function buildPersonalityAddendum(sliders, gender, customGender, age, maritalSta
 }
 
 // ─── API HELPERS ──────────────────────────────────────────────────────────────
-async function sendChat({ messages, character, model, apiKey }) {
+async function sendChat({ messages, character, model }) {
   const addendum = buildPersonalityAddendum(
     character.sliders || DEFAULT_SLIDERS,
     character.gender || "Female",
@@ -519,64 +510,17 @@ async function sendChat({ messages, character, model, apiKey }) {
     : "";
   const sysContent = basePrompt + appearanceNote + addendum + nsfwClause;
 
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const res = await fetch(AI_PROXY_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, "HTTP-Referer": window.location.href, "X-Title": "PersonaChat" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages: [{ role: "system", content: sysContent }, ...messages] }),
   });
-  if (!res.ok) throw new Error(`OpenRouter error: ${res.status}`);
+  if (!res.ok) throw new Error(`AI proxy error: ${res.status}`);
   const data = await res.json();
   return data.choices[0].message.content;
 }
 
-async function generateImage({ prompt, referenceImageUrl, model, apiKey, nsfw, workerUrl }) {
-  const fullPrompt = nsfw ? prompt : `${prompt}, safe for work, tasteful`;
-
-  // Flux models use different input format
-  const isFlux = model.includes("flux");
-  const isRealVis = model.includes("realvisxl") || model.includes("realvis");
-  const input = isFlux
-    ? { prompt: fullPrompt, num_outputs: 1, aspect_ratio: "2:3", output_format: "webp" }
-    : isRealVis
-      ? {
-          prompt: fullPrompt,
-          negative_prompt: "(worst quality, low quality, illustration, 3d, 2d, painting, cartoons, sketch), open mouth, deformed, ugly, bad anatomy",
-          num_inference_steps: 30,
-          width: 768,
-          height: 1024,
-          guidance_scale: 7,
-          disable_safety_checker: nsfw,
-        }
-      : { prompt: fullPrompt, num_inference_steps: 30, width: 768, height: 1024, guidance_scale: 7 };
-
-  // version-based vs model-based request
-  const hasVersion = model.includes(":");
-  const body = hasVersion
-    ? { version: model.split(":")[1], input }
-    : { model, input };
-
-  const base = workerUrl ? workerUrl.replace(/\/$/, "") + "/proxy" : "https://api.replicate.com";
-
-  const res = await fetch(`${base}/v1/predictions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Token ${apiKey}` },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(`Replicate error: ${res.status} ${errText}`);
-  }
-  let result = await res.json();
-  while (result.status !== "succeeded" && result.status !== "failed") {
-    await new Promise(r => setTimeout(r, 1500));
-    const poll = await fetch(`${base}/v1/predictions/${result.id}`, { headers: { Authorization: `Token ${apiKey}` } });
-    result = await poll.json();
-  }
-  if (result.status === "failed") throw new Error(`Image generation failed: ${result.error || ""}`);
-  return Array.isArray(result.output) ? result.output[0] : result.output;
-}
-
-async function generateImageDezgo({ prompt, model, apiKey, nsfw, width, height }) {
+async function generateImageDezgo({ prompt, model, nsfw, width, height }) {
   const formData = new FormData();
   // JuggernautXL quality boosters
   // For Dezgo, restructure prompt to put appearance terms first for better adherence
@@ -590,10 +534,10 @@ async function generateImageDezgo({ prompt, model, apiKey, nsfw, width, height }
   formData.append("sampler", "dpmpp_2m_karras");
   formData.append("guidance", "1.5");
   formData.append("format", "jpg");
+  formData.append("dezgo_endpoint", "lightning");
 
-  const res = await fetch("https://api.dezgo.com/text2image_sdxl_lightning", {
+  const res = await fetch(IMAGE_PROXY_URL, {
     method: "POST",
-    headers: { "X-Dezgo-Key": apiKey },
     body: formData,
   });
 
@@ -612,11 +556,11 @@ async function generateImageDezgo({ prompt, model, apiKey, nsfw, width, height }
   });
 }
 
-async function buildImagePromptFromContext({ messages, character, apiKey, model }) {
+async function buildImagePromptFromContext({ messages, character, model }) {
   const recent = messages.slice(-6).map(m => `${m.role}: ${m.content}`).join("\n");
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const res = await fetch(AI_PROXY_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, "HTTP-Referer": window.location.href },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages: [{ role: "user", content: `Based on this conversation with ${character.name}, write a short Stable Diffusion image prompt (max 25 words) depicting the current scene or mood. Describe setting, lighting, pose, emotion. No character names. Return ONLY the prompt, no preamble.\n\n${recent}` }] }),
   });
   const data = await res.json();
@@ -685,10 +629,10 @@ function randomiseAppearance(parsed) {
   };
 }
 
-async function autoGenerateCharacter({ vibe, apiKey, model }) {
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+async function autoGenerateCharacter({ vibe, model }) {
+  const res = await fetch(AI_PROXY_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, "HTTP-Referer": window.location.href },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages: [{ role: "user", content: `Create a fictional chat companion character based on this vibe: "${vibe}".\nBe CREATIVE with the name — avoid generic names like Emily, Sarah, Jessica, Wilson, Smith. Use culturally diverse, interesting, or unique names that match the character concept.\nReturn ONLY valid JSON with these exact fields:\n{\n  "name": "character name",\n  "persona": "2-3 sentence personality description, how they speak, backstory and quirks",\n  "age": 28,\n  "maritalStatus": "Single",\n  "hairColour": "Brown",\n  "eyeColour": "Brown",\n  "skinTone": "Medium",\n  "ethnicity": "Caucasian"\n}\nFor ethnicity use one of: Caucasian, Black / African, East Asian, South Asian, Southeast Asian, Middle Eastern, Hispanic / Latino, Indigenous, Mixed.\nFor maritalStatus use one of: Single, Married, Divorced, Widowed, In a relationship, It\'s complicated.\nFor hairColour use one of: Black, Dark brown, Brown, Auburn, Dirty blonde, Blonde, Platinum blonde, Red, Strawberry blonde, Grey, White.\nFor eyeColour use one of: Brown, Dark brown, Hazel, Green, Blue, Grey, Amber.\nFor skinTone use one of: Fair, Light, Medium, Olive, Tan, Brown, Dark brown, Ebony.\nNo extra text, no markdown, just the JSON object.` }] }),
   });
   const data = await res.json();
@@ -735,11 +679,11 @@ async function autoGenerateCharacter({ vibe, apiKey, model }) {
   };
 }
 
-async function generateOpeningMessage({ character, apiKey, model }) {
+async function generateOpeningMessage({ character, model }) {
   const addendum = buildPersonalityAddendum(character.sliders || DEFAULT_SLIDERS, character.gender || "Female", character.customGender || "", character.age || "", character.maritalStatus || "");
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const res = await fetch(AI_PROXY_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, "HTTP-Referer": window.location.href },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages: [
       { role: "system", content: (character.persona || `You are ${character.name}.`) + addendum },
       { role: "user", content: "Write a short, in-character opening message to greet someone who has just started a conversation with you. 1-3 sentences max. Be engaging and true to your personality." }
@@ -786,7 +730,6 @@ function SliderGroup({ sliders, onChange }) {
 // ─── SETTINGS PANEL ──────────────────────────────────────────────────────────
 function SettingsPanel({ settings, onSave, onClose }) {
   const [form, setForm] = useState(settings);
-  const [showKeys, setShowKeys] = useState(false);
   return (
     <div style={S.overlay}>
       <div style={S.modal}>
@@ -795,51 +738,13 @@ function SettingsPanel({ settings, onSave, onClose }) {
           <button style={S.iconBtn} onClick={onClose}>✕</button>
         </div>
         <div style={S.modalBody}>
-          <label style={S.label}>OpenRouter API Key</label>
-          <div style={{position:"relative"}}>
-            <input style={{...S.input, paddingRight:60}} type={showKeys ? "text" : "password"} placeholder="sk-or-..." value={form.openrouterKey} onChange={e => setForm(f => ({...f, openrouterKey: e.target.value}))} />
-            <button style={{position:"absolute", right:8, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", color:"#7a7268", cursor:"pointer", fontSize:12}} onClick={() => setShowKeys(v => !v)}>{showKeys ? "hide" : "show"}</button>
-          </div>
-          <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">Get a free key ↗</a>
-          <label style={S.label}>Replicate API Key</label>
-          <div style={{position:"relative"}}>
-            <input style={{...S.input, paddingRight:60}} type={showKeys ? "text" : "password"} placeholder="r8_..." value={form.replicateKey} onChange={e => setForm(f => ({...f, replicateKey: e.target.value}))} />
-            <button style={{position:"absolute", right:8, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", color:"#7a7268", cursor:"pointer", fontSize:12}} onClick={() => setShowKeys(v => !v)}>{showKeys ? "hide" : "show"}</button>
-          </div>
-          <a href="https://replicate.com/account/api-tokens" target="_blank" rel="noreferrer">Get a key ↗</a>
-          <label style={S.label}>Image Provider</label>
-          <div style={{ display:"flex", gap:8 }}>
-            <button style={form.imageProvider === "replicate" ? S.genderBtnOn : S.genderBtnOff} onClick={() => setForm(f => ({...f, imageProvider:"replicate"}))}>Replicate</button>
-            <button style={form.imageProvider === "dezgo" ? S.genderBtnOn : S.genderBtnOff} onClick={() => setForm(f => ({...f, imageProvider:"dezgo"}))}>Dezgo</button>
-          </div>
-
-          {form.imageProvider === "dezgo" ? (
-            <div>
-              <label style={S.label}>Dezgo API Key</label>
-              <div style={{position:"relative"}}>
-                <input style={{...S.input, paddingRight:60}} type={showKeys ? "text" : "password"} placeholder="dezgo-..." value={form.dezgoKey || ""} onChange={e => setForm(f => ({...f, dezgoKey: e.target.value}))} />
-                <button style={{position:"absolute", right:8, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", color:"var(--text3)", cursor:"pointer", fontSize:12}} onClick={() => setShowKeys(v => !v)}>{showKeys ? "hide" : "show"}</button>
-              </div>
-              <a href="https://dezgo.com/account" target="_blank" rel="noreferrer">Get a key ↗</a>
-              <label style={S.label}>Dezgo Model</label>
-              <select style={S.select} value={form.dezgoModel || "juggernautxl_10_hyper"} onChange={e => setForm(f => ({...f, dezgoModel: e.target.value}))}>
-                {DEZGO_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-              </select>
-            </div>
-          ) : (
-            <div>
-              <label style={S.label}>Cloudflare Worker URL</label>
-          <input style={S.input} type="text" placeholder="https://your-worker.workers.dev" value={form.workerUrl || ""} onChange={e => setForm(f => ({...f, workerUrl: e.target.value}))} />
-              <p style={{ fontSize:11, color:"var(--text4)", marginTop:3 }}>Required for image generation on GitHub Pages — see setup guide.</p>
-              <label style={S.label}>Image Model</label>
-              <select style={S.select} value={form.imageModel} onChange={e => setForm(f => ({...f, imageModel: e.target.value}))}>
-                {REPLICATE_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-              </select>
-            </div>
-          )}
           <label style={S.label}>Chat Model</label>
           <select style={S.select} value={form.selectedModel} onChange={e => setForm(f => ({...f, selectedModel: e.target.value}))}>
             {OPENROUTER_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+          <label style={S.label}>Image Model</label>
+          <select style={S.select} value={form.dezgoModel || "juggernautxl_10_hyper"} onChange={e => setForm(f => ({...f, dezgoModel: e.target.value}))}>
+            {DEZGO_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
           </select>
         </div>
         <div style={S.modalFooter}>
@@ -994,11 +899,10 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const fileRef = useRef();
 
   const handleVibeGenerate = async () => {
-    if (!settings.openrouterKey) { setError("Add your OpenRouter API key in Settings first."); return; }
     if (!vibe.trim()) { setError("Enter a vibe word first."); return; }
     setVibeLoading(true); setError("");
     try {
-      const result = await autoGenerateCharacter({ vibe, apiKey: settings.openrouterKey, model: settings.selectedModel });
+      const result = await autoGenerateCharacter({ vibe, model: settings.selectedModel });
       setForm(f => ({ ...f, name: result.name, persona: result.persona, age: result.age || "", maritalStatus: result.maritalStatus || "Single", appearance: randomiseAppearance(result.appearance) }));
     } catch (e) { setError("Failed to generate character. Try again."); }
     setVibeLoading(false);
@@ -1013,7 +917,6 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   };
 
   const handleGenerateImage = async () => {
-    if (!settings.replicateKey) { setError("Add a Replicate API key in Settings first."); return; }
     setImgLoading(true); setError("");
     try {
       const appearanceDesc = buildAppearancePrompt(form.appearance);
@@ -1023,9 +926,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       const baseDesc = imgPrompt.trim() ? imgPrompt.trim() : (form.name ? form.name : "person");
       const fullPrompt = charDesc ? `${baseDesc}, ${charDesc}` : baseDesc;
       const stylePrompt = `${fullPrompt}, photorealistic, natural lighting, full body shot, standing, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
-      const url = settings.imageProvider === "dezgo" && settings.dezgoKey
-        ? await generateImageDezgo({ prompt: stylePrompt, model: settings.dezgoModel, apiKey: settings.dezgoKey, nsfw: form.nsfw })
-        : await generateImage({ prompt: stylePrompt, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: form.nsfw, workerUrl: settings.workerUrl });
+      const url = await generateImageDezgo({ prompt: stylePrompt, model: settings.dezgoModel, nsfw: form.nsfw });
       setForm(f => ({ ...f, referenceImage: url, backgroundImage: url }));
     } catch (e) { setError(e.message); }
     setImgLoading(false);
@@ -1276,9 +1177,9 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   }, [messages]);
 
   useEffect(() => {
-    if (messages.length === 0 && settings.openrouterKey && !openingSuggestion && !openingLoading) {
+    if (messages.length === 0 && !openingSuggestion && !openingLoading) {
       setOpeningLoading(true);
-      generateOpeningMessage({ character, apiKey: settings.openrouterKey, model: settings.selectedModel })
+      generateOpeningMessage({ character, model: settings.selectedModel })
         .then(msg => setOpeningSuggestion(msg))
         .catch(() => {})
         .finally(() => setOpeningLoading(false));
@@ -1300,13 +1201,12 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   const sendMessage = async (content) => {
     const text = content || input.trim();
     if (!text || loading) return;
-    if (!settings.openrouterKey) { setError("Add your OpenRouter API key in Settings."); return; }
     setError(""); setOpeningSuggestion(null);
     const userMsg = { role: "user", content: text };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages); setInput(""); setLoading(true);
     try {
-      const reply = await sendChat({ messages: newMessages, character, model: settings.selectedModel, apiKey: settings.openrouterKey });
+      const reply = await sendChat({ messages: newMessages, character, model: settings.selectedModel });
       setMessages(m => [...m, { role: "assistant", content: reply }]);
     } catch (e) { setError(e.message); }
     setLoading(false);
@@ -1322,7 +1222,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       : trimmed;
     setMessages(trimmed); setRegenLoading(true); setError("");
     try {
-      const reply = await sendChat({ messages: messagesWithInstruction, character, model: settings.selectedModel, apiKey: settings.openrouterKey });
+      const reply = await sendChat({ messages: messagesWithInstruction, character, model: settings.selectedModel });
       setMessages([...trimmed, { role: "assistant", content: reply }]);
     } catch (e) { setError(e.message); }
     setRegenLoading(false);
@@ -1330,8 +1230,6 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
 
   const handleCustomImage = async () => {
     if (!customImgPrompt.trim()) return;
-    const hasProvider = (settings.imageProvider === "dezgo" && settings.dezgoKey) || (settings.imageProvider !== "dezgo" && settings.replicateKey);
-    if (!hasProvider) { setError("Add your image API key in Settings."); return; }
     setImgLoading(true); setShowCustomImgInput(false);
     try {
       const appearanceDesc = buildAppearancePrompt(character.appearance);
@@ -1342,9 +1240,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       const fullPrompt = charDesc
         ? `${character.name}, ${charDesc}, ${customImgPrompt}, ${styleModifiers}`
         : `${character.name}, ${customImgPrompt}, ${styleModifiers}`;
-      const url = settings.imageProvider === "dezgo" && settings.dezgoKey
-        ? await generateImageDezgo({ prompt: fullPrompt, model: settings.dezgoModel, apiKey: settings.dezgoKey, nsfw: character.nsfw })
-        : await generateImage({ prompt: fullPrompt, referenceImageUrl: character.referenceImage, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: character.nsfw, workerUrl: settings.workerUrl });
+      const url = await generateImageDezgo({ prompt: fullPrompt, model: settings.dezgoModel, nsfw: character.nsfw });
       setMessages(m => [...m, { role: "image", content: url, prompt: customImgPrompt }]);
       const galleryKey2 = `gallery_${character.id}`;
       const existing2 = storage.get(galleryKey2, []);
@@ -1373,13 +1269,11 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   const handleEditMessage = (index, newContent) => setMessages(m => m.map((msg, i) => i === index ? { ...msg, content: newContent } : msg));
 
   const triggerImageGen = async (auto = false) => {
-    const hasImageProvider = (settings.imageProvider === "dezgo" && settings.dezgoKey) || (settings.imageProvider !== "dezgo" && settings.replicateKey);
-    if (!hasImageProvider) { if (!auto) setError("Add your image API key in Settings."); return; }
     if (imgLoading) return;
     setImgLoading(true);
     try {
       const prompt = messages.length > 0
-        ? await buildImagePromptFromContext({ messages, character, apiKey: settings.openrouterKey, model: settings.selectedModel })
+        ? await buildImagePromptFromContext({ messages, character, model: settings.selectedModel })
         : `${character.name}, portrait, character art`;
       const appearanceDesc = buildAppearancePrompt(character.appearance);
       const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
@@ -1389,9 +1283,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       const fullImgPrompt = charDesc ? `${character.name}, ${charDesc}, ${prompt}, ${styleModifiers}` : `${character.name}, ${prompt}, ${styleModifiers}`;
       // Context images: only NSFW if auto-image is on (user has opted in to continuous NSFW)
       const contextNsfw = auto ? character.nsfw : false;
-      const url = settings.imageProvider === "dezgo" && settings.dezgoKey
-        ? await generateImageDezgo({ prompt: fullImgPrompt, model: settings.dezgoModel, apiKey: settings.dezgoKey, nsfw: contextNsfw })
-        : await generateImage({ prompt: fullImgPrompt, referenceImageUrl: character.referenceImage, model: settings.imageModel, apiKey: settings.replicateKey, nsfw: contextNsfw, workerUrl: settings.workerUrl });
+      const url = await generateImageDezgo({ prompt: fullImgPrompt, model: settings.dezgoModel, nsfw: contextNsfw });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);
     } catch (e) { if (!auto) setError(e.message); }
     setImgLoading(false);
@@ -1623,12 +1515,6 @@ function App() {
         <button style={S.settingsBtn} onClick={() => setShowSettings(true)}>⚙ Settings</button>
       </header>
       <main style={S.main}>
-        {!settings.openrouterKey && (
-          <div style={S.setupBanner}>
-            <span>⚠ Add your API keys in Settings to get started.</span>
-            <button style={S.btnPrimary} onClick={() => setShowSettings(true)}>Open Settings</button>
-          </div>
-        )}
         <div style={S.sectionHeader}>
           <h2 style={S.sectionTitle}>Characters</h2>
           <button style={S.btnPrimary} onClick={() => { setEditingChar(null); setShowCharForm(true); }}>+ New Character</button>
