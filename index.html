@@ -311,6 +311,30 @@ const DEFAULT_SETTINGS = {
 const AI_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/ai-proxy";
 const IMAGE_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/image-proxy";
 const UPLOAD_IMAGE_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/upload-image";
+const DATA_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/data-proxy";
+const ACCESS_TOKEN = "pc_8f3a9d2e7b1c4f6a0d5e9c3b7a2f1e8d";
+
+const dataApi = {
+  call: async (action, payload = {}) => {
+    const res = await fetch(DATA_PROXY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, token: ACCESS_TOKEN, ...payload }),
+    });
+    if (!res.ok) {
+      const err = await res.text().catch(() => "");
+      throw new Error(`Data proxy error: ${res.status} ${err}`);
+    }
+    return res.json();
+  },
+  getCharacters: () => dataApi.call("get_characters").then(r => r.characters || []),
+  saveCharacters: (characters) => dataApi.call("save_characters", { characters }),
+  deleteCharacter: (characterId) => dataApi.call("delete_character", { characterId }),
+  getChat: (characterId) => dataApi.call("get_chat", { characterId }).then(r => r.messages || []),
+  saveChat: (characterId, messages) => dataApi.call("save_chat", { characterId, messages }),
+  getGallery: (characterId) => dataApi.call("get_gallery", { characterId }).then(r => r.gallery || []),
+  saveGallery: (characterId, gallery) => dataApi.call("save_gallery", { characterId, gallery }),
+};
 
 
 const storage = {
@@ -1161,7 +1185,8 @@ function MessageBubble({ msg, index, isLastAI, characterName, onDelete, onEdit, 
 // ─── CHAT WINDOW ─────────────────────────────────────────────────────────────
 function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacter }) {
   const [character, setCharacter] = useState(initialChar);
-  const [messages, setMessages] = useState(() => storage.get(`chat_${initialChar.id}`, []));
+  const [messages, setMessages] = useState([]);
+  const [messagesLoaded, setMessagesLoaded] = useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [regenLoading, setRegenLoading] = useState(false);
@@ -1169,7 +1194,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   const [showCustomImgInput, setShowCustomImgInput] = useState(false);
   const [customImgPrompt, setCustomImgPrompt] = useState("");
   const [showGallery, setShowGallery] = useState(false);
-  const [gallery, setGallery] = useState(() => storage.get(`gallery_${character.id}`, []));
+  const [gallery, setGallery] = useState([]);
   const [lightboxImg, setLightboxImg] = useState(null);
   const [error, setError] = useState("");
   const [bgImage, setBgImage] = useState(initialChar.backgroundImage);
@@ -1180,11 +1205,23 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   const bottomRef = useRef();
 
   useEffect(() => {
-    storage.set(`chat_${character.id}`, messages);
+    dataApi.getChat(character.id)
+      .then(msgs => setMessages(msgs))
+      .catch(e => setError(e.message))
+      .finally(() => setMessagesLoaded(true));
+    dataApi.getGallery(character.id)
+      .then(g => setGallery(g))
+      .catch(() => {});
+  }, [character.id]);
+
+  useEffect(() => {
+    if (!messagesLoaded) return;
+    dataApi.saveChat(character.id, messages).catch(e => setError(e.message));
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   useEffect(() => {
+    if (!messagesLoaded) return;
     if (messages.length === 0 && !openingSuggestion && !openingLoading) {
       setOpeningLoading(true);
       generateOpeningMessage({ character, model: settings.selectedModel })
@@ -1192,7 +1229,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
         .catch(() => {})
         .finally(() => setOpeningLoading(false));
     }
-  }, [character.id]);
+  }, [character.id, messagesLoaded]);
 
   useEffect(() => {
     if (character.autoImage && messages.length > 0 && messages[messages.length - 1].role === "assistant") {
@@ -1263,17 +1300,9 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
         seed: ensureSeed(),
       });
       setMessages(m => [...m, { role: "image", content: url, prompt: customImgPrompt }]);
-      const galleryKey2 = `gallery_${character.id}`;
-      const existing2 = storage.get(galleryKey2, []);
-      const newGallery2 = [{ url, prompt: customImgPrompt, date: Date.now() }, ...existing2].slice(0, 20);
-      try {
-        storage.set(galleryKey2, newGallery2);
-        setGallery(newGallery2);
-      } catch (e) {
-        const trimmed2 = [{ url, prompt: customImgPrompt, date: Date.now() }, ...existing2].slice(0, 5);
-        try { storage.set(galleryKey2, trimmed2); setGallery(trimmed2); } catch {}
-        setError("Gallery storage full — older images were removed to make space.");
-      }
+      const newGallery2 = [{ url, prompt: customImgPrompt, date: Date.now() }, ...gallery].slice(0, 20);
+      setGallery(newGallery2);
+      dataApi.saveGallery(character.id, newGallery2).catch(e => setError(e.message));
       setCustomImgPrompt("");
     } catch (e) { setError(e.message); }
     setImgLoading(false);
@@ -1505,28 +1534,49 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 function App() {
   const [settings, setSettings] = useState(() => storage.get("personachat_settings", DEFAULT_SETTINGS));
-  const [characters, setCharacters] = useState(() => storage.get("characters", []));
+  const [characters, setCharacters] = useState([]);
+  const [loadingChars, setLoadingChars] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [activeChar, setActiveChar] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showCharForm, setShowCharForm] = useState(false);
   const [editingChar, setEditingChar] = useState(null);
 
   useEffect(() => { storage.set("personachat_settings", settings); }, [settings]);
-  useEffect(() => { storage.set("characters", characters); }, [characters]);
+
+  useEffect(() => {
+    dataApi.getCharacters()
+      .then(cs => setCharacters(cs))
+      .catch(e => setLoadError(e.message))
+      .finally(() => setLoadingChars(false));
+  }, []);
 
   const saveCharacter = (char) => {
-    setCharacters(cs => { const exists = cs.find(c => c.id === char.id); return exists ? cs.map(c => c.id === char.id ? char : c) : [char, ...cs]; });
+    setCharacters(cs => {
+      const exists = cs.find(c => c.id === char.id);
+      const next = exists ? cs.map(c => c.id === char.id ? char : c) : [char, ...cs];
+      dataApi.saveCharacters(next).catch(e => setLoadError(e.message));
+      return next;
+    });
     setShowCharForm(false); setEditingChar(null);
   };
 
   const deleteCharacter = (id) => {
     if (!confirm("Delete this character and their chat history?")) return;
-    setCharacters(cs => cs.filter(c => c.id !== id));
-    localStorage.removeItem(`chat_${id}`);
+    setCharacters(cs => {
+      const next = cs.filter(c => c.id !== id);
+      dataApi.saveCharacters(next).catch(e => setLoadError(e.message));
+      return next;
+    });
+    dataApi.deleteCharacter(id).catch(() => {});
   };
 
   const updateCharacter = (char) => {
-    setCharacters(cs => cs.map(c => c.id === char.id ? char : c));
+    setCharacters(cs => {
+      const next = cs.map(c => c.id === char.id ? char : c);
+      dataApi.saveCharacters(next).catch(e => setLoadError(e.message));
+      return next;
+    });
     setActiveChar(char);
   };
 
@@ -1540,11 +1590,16 @@ function App() {
         <button style={S.settingsBtn} onClick={() => setShowSettings(true)}>⚙ Settings</button>
       </header>
       <main style={S.main}>
+        {loadError && <div style={S.errorBar}>{loadError}<button style={S.errorClose} onClick={() => setLoadError("")}>✕</button></div>}
         <div style={S.sectionHeader}>
           <h2 style={S.sectionTitle}>Characters</h2>
           <button style={S.btnPrimary} onClick={() => { setEditingChar(null); setShowCharForm(true); }}>+ New Character</button>
         </div>
-        {characters.length === 0 ? (
+        {loadingChars ? (
+          <div style={S.emptyState}>
+            <p style={S.emptyText}>Loading characters…</p>
+          </div>
+        ) : characters.length === 0 ? (
           <div style={S.emptyState}>
             <p style={S.emptyText}>No characters yet.</p>
             <p style={S.emptySubtext}>Create your first character to start chatting.</p>
