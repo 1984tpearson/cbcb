@@ -1237,7 +1237,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
       const baseDesc = imgPrompt.trim() ? imgPrompt.trim() : (form.name ? form.name : "person");
       const fullPrompt = charDesc ? `${baseDesc}, ${charDesc}` : baseDesc;
-      const stylePrompt = `${fullPrompt}, photorealistic, natural lighting, full body shot, standing, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
+      const stylePrompt = `full body shot, standing, ${fullPrompt}, photorealistic, natural lighting, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
       const seed = Math.floor(Math.random() * 2147483647);
       const url = await generateImageDezgo({ prompt: stylePrompt, nsfw: form.nsfw, seed, model: settings.imageModel });
       setForm(f => ({ ...f, referenceImage: url, backgroundImage: url, seed }));
