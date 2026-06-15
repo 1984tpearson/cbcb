@@ -653,14 +653,18 @@ async function generateImageDezgo({ prompt, nsfw, width, height, seed, model }) 
 }
 
 async function buildImagePromptFromContext({ messages, character, model }) {
-  const recent = messages.slice(-6).map(m => `${m.role}: ${m.content}`).join("\n");
+  const recent = messages.slice(-10).filter(m => m.role !== "image").map(m => `${m.role === "user" ? "User" : character.name}: ${m.content}`).join("\n");
+  const appearanceDesc = buildAppearancePrompt(character.appearance);
+  const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
+  const ageDesc = character.age ? `${character.age} year old` : "";
+  const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
   const res = await fetch(AI_PROXY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages: [{ role: "user", content: `Based on this conversation with ${character.name}, write a short Stable Diffusion image prompt (max 25 words) depicting the current scene or mood. Describe setting, lighting, pose, emotion. No character names. Return ONLY the prompt, no preamble.\n\n${recent}` }] }),
+    body: JSON.stringify({ model, messages: [{ role: "user", content: `You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is ${character.name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: ${charDesc || "not specified"}.\n\nConversation:\n${recent}\n\nWrite a Stable Diffusion prompt of 20-35 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression. Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere". Return ONLY the prompt text, nothing else.` }] }),
   });
   const data = await res.json();
-  return data.choices[0].message.content.trim();
+  return data.choices[0].message.content.trim().replace(/^"|"$/g, "");
 }
 
 const MARITAL_STATUSES = ["Single", "Married", "Divorced", "Widowed", "In a relationship", "It's complicated"];
@@ -1554,8 +1558,9 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
       const ageDesc = character.age ? `${character.age} year old` : "";
       const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-      const styleModifiers = "photorealistic, natural lighting, cinematic, Canon EOS, 50mm lens, bokeh, sharp focus, high detail";
-      const fullImgPrompt = charDesc ? `${character.name}, ${charDesc}, ${prompt}, ${styleModifiers}` : `${character.name}, ${prompt}, ${styleModifiers}`;
+      const styleModifiers = "photorealistic, natural lighting, cinematic, Canon EOS, 50mm lens, sharp focus, high detail";
+      // Scene context goes FIRST so SD weights it highest, appearance after as supporting context
+      const fullImgPrompt = charDesc ? `${prompt}, ${charDesc}, ${styleModifiers}` : `${prompt}, ${styleModifiers}`;
       // Context images: only NSFW if auto-image is on (user has opted in to continuous NSFW)
       const contextNsfw = auto ? character.nsfw : false;
       const url = await generateImageDezgo({
