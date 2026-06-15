@@ -1485,7 +1485,7 @@ function MessageBubble({ msg, index, isLastAI, characterName, onDelete, onEdit, 
               </div>
             </div>
           ) : (
-            {renderMessageContent(msg.content, isUser)}
+            renderMessageContent(msg.content, isUser)
           )}
         </div>
         {!editing && (
