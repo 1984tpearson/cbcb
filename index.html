@@ -656,7 +656,10 @@ async function sendChat({ messages, character, model, settings }) {
   const plainClause = character.speakPlainly
     ? "\n\n[STYLE] Speak plainly and directly. Avoid melodrama, purple prose, and overwrought or theatrical language — keep your tone grounded and natural, like a real person talking."
     : "";
-  const sysContent = basePrompt + appearanceNote + addendum + personaNote + nsfwClause + actionClause + plainClause;
+  const memoryClause = (character.memorySummary || character.memoryFacts)
+    ? `\n\n[MEMORY — what you already know]\n${character.memorySummary ? `Story so far: ${character.memorySummary}` : ""}${character.memoryFacts ? `\nKey facts: ${character.memoryFacts}` : ""}`
+    : "";
+  const sysContent = basePrompt + appearanceNote + addendum + personaNote + nsfwClause + actionClause + plainClause + memoryClause;
 
   const res = await fetch(AI_PROXY_URL, {
     method: "POST",
@@ -1040,6 +1043,9 @@ function SettingsPanel({ settings, onSave, onClose }) {
 // ─── CHARACTER PERSONALITY PANEL (in-chat) ────────────────────────────────────
 function CharacterPersonalityPanel({ character, onSave, onClose }) {
   const [sliders, setSliders] = useState(character.sliders || DEFAULT_SLIDERS);
+  const [memorySummary, setMemorySummary] = useState(character.memorySummary || "");
+  const [memoryFacts, setMemoryFacts] = useState(character.memoryFacts || "");
+  const [memoryGenLoading, setMemoryGenLoading] = useState(false);
   const [reactiveEnabled, setReactiveEnabled] = useState(character.reactiveEnabled !== false);
   const [gender, setGender] = useState(character.gender || "Female");
   const [customGender, setCustomGender] = useState(character.customGender || "");
@@ -1112,6 +1118,56 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
             </div>
           )}
           <div style={S.divider} />
+          <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Memory</span>
+          <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Injected into every message so the character remembers past events even as the conversation grows long. Edit freely or regenerate from chat history.</p>
+          <label style={S.label}>Story So Far</label>
+          <textarea style={{ ...S.input, height: 90, resize: "vertical" }}
+            placeholder="A running narrative of what has happened between you and this character..."
+            value={memorySummary} onChange={e => setMemorySummary(e.target.value)} />
+          <label style={S.label}>Key Facts</label>
+          <textarea style={{ ...S.input, height: 70, resize: "vertical" }}
+            placeholder="Names used, places visited, things agreed to, relationship milestones..."
+            value={memoryFacts} onChange={e => setMemoryFacts(e.target.value)} />
+          <button
+            style={{ ...S.btnSecondary, marginTop: 4 }}
+            disabled={memoryGenLoading}
+            onClick={async () => {
+              setMemoryGenLoading(true);
+              try {
+                const chatHistory = storage.get(`chat_${character.id}`, []);
+                const chatText = chatHistory.filter(m => m.role !== "image").map(m => `${m.role === "user" ? "User" : character.name}: ${m.content}`).join("\n");
+                if (!chatText.trim()) { setMemoryGenLoading(false); return; }
+                const res = await fetch(AI_PROXY_URL, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ model: "meta-llama/llama-3.1-8b-instruct", messages: [{ role: "user", content:
+`Summarise the following roleplay conversation between a user and ${character.name}. Return a JSON object with two fields:
+- "summary": a 3-5 sentence narrative summary of what has happened so far — key events, emotional moments, how the relationship has developed
+- "facts": a concise bullet-point list of key facts to remember — names used, places, things agreed to, relationship milestones, important details mentioned
+
+Conversation:
+${chatText.slice(-8000)}
+
+Return ONLY the JSON object, no other text.` }] }) ,
+                });
+                const data = await res.json();
+                const raw = data.choices[0].message.content.trim().replace(/```json|```/g, "").trim();
+                try {
+                  const parsed = JSON.parse(raw);
+                  if (parsed.summary) setMemorySummary(parsed.summary);
+                  if (parsed.facts) setMemoryFacts(typeof parsed.facts === "string" ? parsed.facts : parsed.facts.join("\n"));
+                } catch {}
+              } catch (e) {}
+              setMemoryGenLoading(false);
+            }}>
+            {memoryGenLoading ? "Generating…" : "↺ Regenerate from Chat History"}
+          </button>
+          <button style={{ ...S.btnSecondary, marginTop: 4, color: "#c04060" }}
+            onClick={() => { setMemorySummary(""); setMemoryFacts(""); }}>
+            Clear Memory
+          </button>
+
+          <div style={S.divider} />
           <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Personality Sliders</span>
           <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 12 }}>These shape how the character speaks and behaves — changes take effect immediately.</p>
 
@@ -1165,7 +1221,7 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, reactiveEnabled, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
+          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, reactiveEnabled, memorySummary, memoryFacts, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
         </div>
       </div>
     </div>
@@ -1590,6 +1646,40 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
     setBgImage(updatedChar.backgroundImage);
   };
 
+  const autoUpdateMemory = async (newMessages, currentChar) => {
+    const chatMsgs = newMessages.filter(m => m.role !== "image");
+    // Only trigger every 20 non-image messages
+    if (chatMsgs.length % 20 !== 0 || chatMsgs.length === 0) return;
+    try {
+      const chatText = chatMsgs.map(m => `${m.role === "user" ? "User" : currentChar.name}: ${m.content}`).join("\n");
+      const res = await fetch(AI_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct", messages: [{ role: "user", content:
+`Summarise the following roleplay conversation between a user and ${currentChar.name}. Return a JSON object with two fields:
+- "summary": a 3-5 sentence narrative summary of what has happened so far — key events, emotional moments, how the relationship has developed
+- "facts": a concise bullet-point list of key facts to remember — names used, places, things agreed to, relationship milestones, important details mentioned
+
+Conversation:
+${chatText.slice(-8000)}
+
+Return ONLY the JSON object, no other text.` }] }),
+      });
+      const data = await res.json();
+      const raw = data.choices[0].message.content.trim().replace(/```json|```/g, "").trim();
+      try {
+        const parsed = JSON.parse(raw);
+        const updatedChar = {
+          ...currentChar,
+          memorySummary: parsed.summary || currentChar.memorySummary || "",
+          memoryFacts: typeof parsed.facts === "string" ? parsed.facts : (parsed.facts?.join("\n") || currentChar.memoryFacts || ""),
+        };
+        setCharacter(updatedChar);
+        onUpdateCharacter(updatedChar);
+      } catch {}
+    } catch {}
+  };
+
   const applyReactivity = async (newMessages, currentChar) => {
     if (!currentChar.reactiveEnabled && currentChar.reactiveEnabled !== undefined) return;
     try {
@@ -1677,8 +1767,9 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const reply = await sendChat({ messages: newMessages.filter(m => m.role !== "image"), character, model: settings.selectedModel, settings });
       const withReply = [...newMessages, { role: "assistant", content: reply }];
       setMessages(m => [...m, { role: "assistant", content: reply }]);
-      // Fire reactivity analysis in background — don't await, don't block
+      // Fire reactivity and memory in background — don't await, don't block
       applyReactivity(withReply, character);
+      autoUpdateMemory(withReply, character);
     } catch (e) { setError(e.message); }
     setLoading(false);
   };
