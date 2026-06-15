@@ -10,7 +10,7 @@
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
-    #app-root { display: none; height: 100vh; }
+    #app-root { display: none; height: 100dvh; min-height: -webkit-fill-available; }
     html, body { margin:0; padding:0; }
     .dcy * { box-sizing:border-box; }
     .dcy body,.dcy-body { font-family:'Segoe UI',Arial,sans-serif; background:#f0f2f5; color:#2c3e50; min-height:100vh; }
@@ -1494,6 +1494,10 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   const [imgLoading, setImgLoading] = useState(false);
   const [showCustomImgInput, setShowCustomImgInput] = useState(false);
   const [customImgPrompt, setCustomImgPrompt] = useState("");
+  const [showCustomScenario, setShowCustomScenario] = useState(false);
+  const [customSceneDesc, setCustomSceneDesc] = useState("");
+  const [customSceneOpening, setCustomSceneOpening] = useState("");
+  const [customSceneGenLoading, setCustomSceneGenLoading] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
   const [gallery, setGallery] = useState([]);
   const [lightboxImg, setLightboxImg] = useState(null);
@@ -1749,11 +1753,29 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         <button style={S.backBtn} onClick={onBack}>← Back</button>
         <div style={S.chatHeaderInfo}>
           {character.referenceImage && <img src={character.referenceImage} alt="" style={S.chatAvatar} />}
-          <div>
+          <div style={{ minWidth: 0 }}>
             <span style={S.chatCharName}>{character.name}</span>
-            <div style={{ display: "flex", gap: 5, marginTop: 2 }}>
+            <div style={{ display: "flex", gap: 5, marginTop: 2, marginBottom: 4 }}>
               {character.gender && <span style={{ ...S.genderBadge, fontSize: 9 }}>{character.gender === "Custom" ? (character.customGender || "Custom") : character.gender}</span>}
               {character.nsfw && <span style={{ ...S.nsfwBadge, fontSize: 9 }}>NSFW</span>}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 140, maxWidth: 200 }}>
+              {[
+                { key: "familiarity",      icon: "🤝", label: "Familiarity",  color: "#5080c8" },
+                { key: "likesUser",        icon: "💛", label: "Likes",        color: "#c87830" },
+                { key: "attractionToUser", icon: "💗", label: "Attraction",   color: "#d4607a" },
+              ].map(({ key, icon, label, color }) => {
+                const val = (character.sliders || DEFAULT_SLIDERS)[key] ?? DEFAULT_SLIDERS[key] ?? 50;
+                return (
+                  <div key={key} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ fontSize: 9, width: 12 }}>{icon}</span>
+                    <div style={{ flex: 1, height: 4, borderRadius: 2, background: "rgba(0,0,0,0.08)" }}>
+                      <div style={{ width: `${val}%`, height: "100%", borderRadius: 2, background: color, transition: "width 0.6s ease" }} />
+                    </div>
+                    <span style={{ fontSize: 8, color: "var(--text4)", width: 22, textAlign: "right", fontWeight: 700 }}>{val}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1794,13 +1816,18 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                         <span style={S.scenarioMessage}>"{sc.message}"</span>
                       </button>
                     ))}
+                    <button style={{ ...S.scenarioCard, border:"2px dashed var(--pink-border)", background:"var(--pink-bg)" }}
+                      onClick={() => setShowCustomScenario(true)}>
+                      <span style={S.scenarioLabel}>✏️ Custom Scene</span>
+                      <span style={S.scenarioSetting}>Set your own scene, generate an opening, or start blank</span>
+                    </button>
                     <button style={{ ...S.btnSecondary, marginTop: 4 }}
                       onClick={() => { setOpeningScenarios(null); setOpeningLoading(true); generateOpeningScenarios({ character, model: settings.selectedModel, settings }).then(s => setOpeningScenarios(s)).catch(() => {}).finally(() => setOpeningLoading(false)); }}>
                       ↺ Different options
                     </button>
                     <button style={{ ...S.btnSecondary, marginTop: 0 }}
                       onClick={() => setOpeningScenarios(null)}>
-                      ✏️ Write your own
+                      Skip — start blank
                     </button>
                   </div>
                 )
@@ -1873,6 +1900,71 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
           onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} />
         <button style={S.sendBtn} onClick={() => sendMessage()} disabled={loading || !input.trim()}>Send</button>
       </div>
+
+      {showCustomScenario && (
+        <div style={S.overlay} onClick={() => setShowCustomScenario(false)}>
+          <div style={{ ...S.modal, maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+            <div style={S.modalHeader}>
+              <span style={S.modalTitle}>✏️ Custom Scene</span>
+              <button style={S.iconBtn} onClick={() => setShowCustomScenario(false)}>✕</button>
+            </div>
+            <div style={S.modalBody}>
+              <label style={S.label}>Scene Description</label>
+              <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 6 }}>Describe where you are, what's happening, the mood — anything that sets the scene. Used to generate an opening if you want one.</p>
+              <textarea style={{ ...S.input, height: 90, resize: "vertical" }}
+                placeholder={`e.g. We're both stuck at the office late. The building is almost empty...`}
+                value={customSceneDesc}
+                onChange={e => setCustomSceneDesc(e.target.value)} />
+
+              <label style={S.label}>Opening Message from {character.name}</label>
+              <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 6 }}>Generate one from your scene description, write your own, or leave blank to open yourself.</p>
+              <textarea style={{ ...S.input, height: 80, resize: "vertical" }}
+                placeholder={`What does ${character.name} say or do first? (optional)`}
+                value={customSceneOpening}
+                onChange={e => setCustomSceneOpening(e.target.value)} />
+              <button style={{ ...S.btnSecondary, marginTop: 4 }}
+                disabled={!customSceneDesc.trim() || customSceneGenLoading}
+                onClick={async () => {
+                  setCustomSceneGenLoading(true);
+                  try {
+                    const addendum = buildPersonalityAddendum(
+                      character.sliders || DEFAULT_SLIDERS,
+                      character.gender || "Female", character.customGender || "",
+                      character.age || "", character.maritalStatus || "",
+                      character.relationship || "", character.relationshipCustom || ""
+                    );
+                    const res = await fetch(AI_PROXY_URL, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ model: settings.selectedModel, messages: [
+                        { role: "system", content: (character.persona || `You are ${character.name}.`) + addendum },
+                        { role: "user", content: `Scene context: ${customSceneDesc}\n\nWrite a short in-character opening message (1-3 sentences) that ${character.name} would say or do in this moment. Include physical actions in asterisks where natural. No narration, just the opening.` }
+                      ]})
+                    });
+                    const data = await res.json();
+                    setCustomSceneOpening(data.choices[0].message.content.trim());
+                  } catch (e) { /* silent */ }
+                  setCustomSceneGenLoading(false);
+                }}>
+                {customSceneGenLoading ? "Generating…" : "✨ Generate Opening"}
+              </button>
+            </div>
+            <div style={S.modalFooter}>
+              <button style={S.btnSecondary} onClick={() => setShowCustomScenario(false)}>Cancel</button>
+              <button style={S.btnPrimary} onClick={() => {
+                const msgs = [];
+                if (customSceneDesc.trim()) msgs.push({ role: "system", content: `[Scene context: ${customSceneDesc.trim()}]`, hidden: true });
+                if (customSceneOpening.trim()) msgs.push({ role: "assistant", content: customSceneOpening.trim() });
+                if (msgs.length > 0) setMessages(msgs);
+                setOpeningScenarios(null);
+                setShowCustomScenario(false);
+                setCustomSceneDesc("");
+                setCustomSceneOpening("");
+              }}>Start Scene</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {lightboxImg && (
         <div style={{ position:"fixed", inset:0, zIndex:200, background:"rgba(0,0,0,0.92)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
@@ -2066,7 +2158,7 @@ const S = {
   btnSecondary: { background:"var(--blue-bg)", border:"1px solid var(--blue-border)", color:"var(--blue)", borderRadius:20, padding:"10px 22px", cursor:"pointer", fontSize:13, fontWeight:700 },
   iconBtn: { background:"transparent", border:"none", color:"var(--text3)", cursor:"pointer", fontSize:16, padding:"4px 8px" },
   iconBtnLight: { background:"var(--bg3)", border:"1px solid var(--border)", borderRadius:10, padding:"7px 12px", cursor:"pointer", fontSize:14, color:"var(--text2)", fontWeight:600 },
-  chatWindow: { height:"100vh", display:"flex", flexDirection:"column", position:"relative", backgroundSize:"cover", backgroundPosition:"center", backgroundRepeat:"no-repeat" },
+  chatWindow: { height:"100dvh", minHeight:"-webkit-fill-available", display:"flex", flexDirection:"column", position:"relative", backgroundSize:"cover", backgroundPosition:"center", backgroundRepeat:"no-repeat" },
   chatBgOverlay: { position:"absolute", inset:0, zIndex:0, background:"linear-gradient(to bottom, rgba(253,246,248,0.75) 0%, rgba(253,246,248,0.45) 40%, rgba(253,246,248,0.82) 100%)" },
   chatHeader: { position:"relative", zIndex:10, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 16px", background:"rgba(253,246,248,0.95)", backdropFilter:"blur(12px)", borderBottom:"1px solid var(--border)", boxShadow:"0 2px 8px var(--shadow)" },
   backBtn: { background:"transparent", border:"none", color:"var(--blue)", cursor:"pointer", fontSize:14, fontWeight:700, padding:"4px 8px" },
