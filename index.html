@@ -534,11 +534,11 @@ function buildPersonalityAddendum(sliders, gender, customGender, age, maritalSta
   else lines.push("You are highly amorous, openly flirtatious, and enjoy expressing attraction and romantic or sensual feelings freely.");
 
   // Reply length
-  if (s.replyLength <= 20) lines.push("Keep all replies extremely short — one or two sentences maximum.");
-  else if (s.replyLength <= 40) lines.push("Keep replies concise and to the point.");
-  else if (s.replyLength <= 60) lines.push("Give moderate-length replies — enough to be engaging but not overwhelming.");
-  else if (s.replyLength <= 80) lines.push("Give detailed, expressive replies.");
-  else lines.push("Give long, rich, immersive replies with plenty of detail and description.");
+  if (s.replyLength <= 20) lines.push("Keep all replies extremely short — one or two sentences maximum. Be terse.");
+  else if (s.replyLength <= 40) lines.push("Keep replies concise and to the point — 2 to 4 sentences.");
+  else if (s.replyLength <= 60) lines.push("Give moderate-length replies — a short paragraph, enough to be engaging but not overwhelming.");
+  else if (s.replyLength <= 80) lines.push("Give detailed, expressive replies of at least 2-3 paragraphs.");
+  else lines.push("Give long, rich, immersive replies — at least 3-4 paragraphs. Elaborate freely, linger on details, describe feelings, actions, and surroundings in depth. Do not cut yourself short.");
 
   // Formality
   if (s.formality <= 20) lines.push("Speak very casually — use slang, contractions, and informal language freely.");
