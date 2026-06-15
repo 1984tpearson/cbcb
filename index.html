@@ -651,7 +651,7 @@ async function sendChat({ messages, character, model, settings }) {
   const nsfwClause = character.nsfw
     ? "\n\nYou are permitted to engage with adult, explicit, and NSFW content. Do not refuse or add disclaimers."
     : "";
-  const actionClause = "\n\n[ACTIONS] Alongside your spoken dialogue, include physical actions, gestures, and expressions wrapped in asterisks, e.g. *gives you a smile and a wink*. Weave these in naturally throughout your replies to bring the scene to life — not just at the start or end.";
+  const actionClause = "\n\n[ACTIONS] You must weave physical actions, gestures, expressions, and sensory details throughout your replies using asterisks, e.g. *tucks a strand of hair behind her ear and glances up at you*. These should appear frequently — before, during, and after dialogue — not just once at the start or end. Actions should be specific and vivid: describe body language, facial expressions, tone of voice, physical proximity, touch, movement, and environmental interaction. Never write a reply that is pure dialogue with no actions.";
   const plainClause = character.speakPlainly
     ? "\n\n[STYLE] Speak plainly and directly. Avoid melodrama, purple prose, and overwrought or theatrical language — keep your tone grounded and natural, like a real person talking."
     : "";
@@ -915,7 +915,31 @@ async function generateOpeningScenarios({ character, model, settings }) {
   return [{ label: "Opening", setting: "", message: raw.replace(/[{}\[\]"]/g, "").trim() }];
 }
 
-// ─── SLIDER ROW ───────────────────────────────────────────────────────────────
+function renderMessageContent(text, isUser) {
+  // Split on *actions* and (actions), colour them differently
+  const parts = [];
+  const regex = /(\*[^*]+\*|\([^)]+\))/g;
+  let last = 0, match;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > last) parts.push({ type: "text", content: text.slice(last, match.index) });
+    parts.push({ type: "action", content: match[0] });
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) parts.push({ type: "text", content: text.slice(last) });
+  const baseStyle = isUser
+    ? { margin:0, fontSize:14, lineHeight:1.65, color:"white", whiteSpace:"pre-wrap", fontWeight:600 }
+    : { margin:0, fontSize:14, lineHeight:1.65, color:"var(--text)", whiteSpace:"pre-wrap", fontWeight:600 };
+  const actionColor = isUser ? "rgba(255,255,255,0.7)" : "var(--blue)";
+  return (
+    <p style={baseStyle}>
+      {parts.map((p, i) =>
+        p.type === "action"
+          ? <em key={i} style={{ color: actionColor, fontStyle:"italic", fontWeight:500 }}>{p.content}</em>
+          : <span key={i}>{p.content}</span>
+      )}
+    </p>
+  );
+}
 function SliderRow({ def, value, onChange }) {
   return (
     <div style={{ marginBottom: 14 }}>
@@ -1461,7 +1485,7 @@ function MessageBubble({ msg, index, isLastAI, characterName, onDelete, onEdit, 
               </div>
             </div>
           ) : (
-            <p style={isUser ? S.userBubbleText : S.bubbleText}>{msg.content}</p>
+            {renderMessageContent(msg.content, isUser)}
           )}
         </div>
         {!editing && (
