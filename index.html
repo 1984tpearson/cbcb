@@ -1090,7 +1090,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       const baseDesc = imgPrompt.trim() ? imgPrompt.trim() : (form.name ? form.name : "person");
       const fullPrompt = charDesc ? `${baseDesc}, ${charDesc}` : baseDesc;
       const stylePrompt = `${fullPrompt}, photorealistic, natural lighting, full body shot, standing, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
-      const seed = form.seed || Math.floor(Math.random() * 2147483647);
+      const seed = Math.floor(Math.random() * 2147483647);
       const url = await generateImageDezgo({ prompt: stylePrompt, nsfw: form.nsfw, seed, model: settings.imageModel });
       setForm(f => ({ ...f, referenceImage: url, backgroundImage: url, seed }));
     } catch (e) { setError(e.message); }
@@ -1198,7 +1198,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
 
           {/* Image */}
           <label style={S.label}>Reference / Background Image</label>
-          {form.referenceImage && <img src={form.referenceImage} alt="ref" style={{ width: "100%", height: 160, objectFit: "cover", borderRadius: 8, marginBottom: 8 }} />}
+          {form.referenceImage && <img src={form.referenceImage} alt="ref" style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 8, marginBottom: 8, background: "var(--bg3)" }} />}
           <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
             <button style={S.btnSecondary} onClick={() => fileRef.current.click()}>Upload Image</button>
             <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileUpload} />
@@ -1206,7 +1206,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
           <div style={{ display: "flex", gap: 8 }}>
             <input style={{ ...S.input, flex: 1, marginBottom: 0 }} placeholder="Optional — leave blank to use appearance settings"
               value={imgPrompt} onChange={e => setImgPrompt(e.target.value)} />
-            <button style={S.btnPrimary} onClick={handleGenerateImage} disabled={imgLoading}>{imgLoading ? "Generating…" : "Gen Image"}</button>
+            <button style={S.btnPrimary} onClick={handleGenerateImage} disabled={imgLoading}>{imgLoading ? "Generating…" : form.referenceImage ? "↺ Regen" : "Gen Image"}</button>
           </div>
 
           {error && <p style={S.error}>{error}</p>}
