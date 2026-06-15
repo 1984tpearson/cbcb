@@ -451,7 +451,7 @@ function buildUserPersonaNote(persona) {
   return `\n\n[ABOUT THE PERSON YOU'RE TALKING TO] ${parts.join("; ")}. Address and refer to them accordingly.`;
 }
 
-function buildPersonalityAddendum(sliders, gender, customGender, age, maritalStatus) {
+function buildPersonalityAddendum(sliders, gender, customGender, age, maritalStatus, relationship, relationshipCustom) {
   const s = sliders;
   const lines = [];
 
@@ -459,6 +459,10 @@ function buildPersonalityAddendum(sliders, gender, customGender, age, maritalSta
   lines.push(`Your gender identity is: ${genderStr}.`);
   if (age) lines.push(`You are ${age} years old.`);
   if (maritalStatus) lines.push(`Your marital status is: ${maritalStatus}.`);
+  if (relationship) {
+    const relStr = relationship === "Custom" ? (relationshipCustom || "") : relationship;
+    if (relStr) lines.push(`Your relationship to the user is: ${relStr}. Embody this relationship naturally in how you speak and interact.`);
+  }
 
   // Amorous
   if (s.amorous <= 20) lines.push("You are not flirtatious or romantic in any way — keep all interactions platonic and professional.");
@@ -568,7 +572,9 @@ async function sendChat({ messages, character, model, settings }) {
     character.gender || "Female",
     character.customGender || "",
     character.age || "",
-    character.maritalStatus || ""
+    character.maritalStatus || "",
+    character.relationship || "",
+    character.relationshipCustom || ""
   );
   const basePrompt = character.persona || `You are ${character.name}.`;
   const appearanceNote = buildAppearanceSystemNote(character.appearance);
@@ -659,6 +665,14 @@ async function buildImagePromptFromContext({ messages, character, model }) {
 
 const MARITAL_STATUSES = ["Single", "Married", "Divorced", "Widowed", "In a relationship", "It's complicated"];
 
+const RELATIONSHIP_TYPES = [
+  { group: "Romantic", options: ["Girlfriend", "Boyfriend", "Wife", "Husband", "Partner", "Ex-girlfriend", "Ex-wife", "Childhood sweetheart", "Secret admirer", "Friends with benefits"] },
+  { group: "Forbidden / Taboo", options: ["Best friend's wife", "Best friend's husband", "Stepmother", "Stepfather", "Stepdaughter", "Stepson", "Boss's wife", "Boss's husband", "Neighbour's wife", "Neighbour's husband"] },
+  { group: "Social", options: ["Neighbour", "Roommate", "Best friend", "Childhood friend", "Work colleague", "Boss", "Employee", "Doctor / Nurse", "Personal trainer", "Babysitter"] },
+  { group: "Other", options: ["Teacher", "Student", "Stranger", "Online friend", "Pen pal", "Custom"] },
+];
+const RELATIONSHIP_ALL = RELATIONSHIP_TYPES.flatMap(g => g.options);
+
 const HAIR_COLOURS = ["Black", "Dark brown", "Brown", "Auburn", "Dirty blonde", "Blonde", "Platinum blonde", "Red", "Strawberry blonde", "Grey", "White", "Coloured", "Custom"];
 const EYE_COLOURS = ["Brown", "Dark brown", "Hazel", "Green", "Blue", "Grey", "Amber", "Custom"];
 const SKIN_TONES = ["Fair", "Light", "Medium", "Olive", "Tan", "Brown", "Dark brown", "Ebony", "Custom"];
@@ -719,24 +733,52 @@ function randomiseAppearance(parsed) {
   };
 }
 
-async function autoGenerateCharacter({ vibe, model }) {
+async function autoGenerateCharacter({ vibe, model, constraints = {} }) {
+  // Build constraint instructions from any pre-filled fields
+  const constraintLines = [];
+  if (constraints.gender && constraints.gender !== "Custom") constraintLines.push(`Gender: ${constraints.gender} (do not change this)`);
+  else if (constraints.gender === "Custom" && constraints.customGender) constraintLines.push(`Gender: ${constraints.customGender} (do not change this)`);
+  if (constraints.name) constraintLines.push(`Name: "${constraints.name}" (use this exact name)`);
+  if (constraints.age) constraintLines.push(`Age: ${constraints.age} (use this exact age)`);
+  if (constraints.maritalStatus) constraintLines.push(`Marital status: ${constraints.maritalStatus} (use this exact status)`);
+  if (constraints.relationship) constraintLines.push(`Relationship to user: ${constraints.relationship === "Custom" ? (constraints.relationshipCustom || "") : constraints.relationship} (reflect this in the persona)`);
+  if (constraints.persona) constraintLines.push(`Personality/system prompt already set: "${constraints.persona}" — build on this, do not contradict it`);
+
+  const constraintBlock = constraintLines.length > 0
+    ? `\n\nIMPORTANT — the following fields are pre-filled by the user and must be respected:\n${constraintLines.map(l => `- ${l}`).join("\n")}`
+    : "";
+
+  const genderForJSON = constraints.gender && constraints.gender !== "Custom"
+    ? constraints.gender
+    : (constraints.gender === "Custom" && constraints.customGender ? constraints.customGender : null);
+
   const res = await fetch(AI_PROXY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages: [{ role: "user", content: `Create a fictional chat companion character based on this vibe: "${vibe}".\nBe CREATIVE with the name — avoid generic names like Emily, Sarah, Jessica, Wilson, Smith. Use culturally diverse, interesting, or unique names that match the character concept.\nReturn ONLY valid JSON with these exact fields:\n{\n  "name": "character name",\n  "persona": "2-3 sentence personality description, how they speak, backstory and quirks",\n  "age": 28,\n  "maritalStatus": "Single",\n  "hairColour": "Brown",\n  "eyeColour": "Brown",\n  "skinTone": "Medium",\n  "ethnicity": "Caucasian"\n}\nFor ethnicity use one of: Caucasian, Black / African, East Asian, South Asian, Southeast Asian, Middle Eastern, Hispanic / Latino, Indigenous, Mixed.\nFor maritalStatus use one of: Single, Married, Divorced, Widowed, In a relationship, It\'s complicated.\nFor hairColour use one of: Black, Dark brown, Brown, Auburn, Dirty blonde, Blonde, Platinum blonde, Red, Strawberry blonde, Grey, White.\nFor eyeColour use one of: Brown, Dark brown, Hazel, Green, Blue, Grey, Amber.\nFor skinTone use one of: Fair, Light, Medium, Olive, Tan, Brown, Dark brown, Ebony.\nNo extra text, no markdown, just the JSON object.` }] }),
+    body: JSON.stringify({ model, messages: [{ role: "user", content: `Create a fictional chat companion character based on this vibe: "${vibe}".${constraintBlock}\nBe CREATIVE with the name — avoid generic names like Emily, Sarah, Jessica, Wilson, Smith. Use culturally diverse, interesting, or unique names that match the character concept.\nReturn ONLY valid JSON with these exact fields:\n{\n  "name": "character name",\n  "persona": "2-3 sentence personality description, how they speak, backstory and quirks — must reflect the gender, marital status, and relationship if provided",\n  "age": 28,\n  "maritalStatus": "Single",\n  "hairColour": "Brown",\n  "eyeColour": "Brown",\n  "skinTone": "Medium",\n  "ethnicity": "Caucasian"\n}\nFor ethnicity use one of: Caucasian, Black / African, East Asian, South Asian, Southeast Asian, Middle Eastern, Hispanic / Latino, Indigenous, Mixed.\nFor maritalStatus use one of: Single, Married, Divorced, Widowed, In a relationship, It\'s complicated.\nFor hairColour use one of: Black, Dark brown, Brown, Auburn, Dirty blonde, Blonde, Platinum blonde, Red, Strawberry blonde, Grey, White.\nFor eyeColour use one of: Brown, Dark brown, Hazel, Green, Blue, Grey, Amber.\nFor skinTone use one of: Fair, Light, Medium, Olive, Tan, Brown, Dark brown, Ebony.\nNo extra text, no markdown, just the JSON object.` }] }),
   });
   const data = await res.json();
   const raw = data.choices[0].message.content.trim();
+
+  const applyConstraints = (parsed) => ({
+    name: constraints.name || parsed.name || "",
+    persona: constraints.persona || parsed.persona || "",
+    age: constraints.age || parsed.age || 25,
+    maritalStatus: constraints.maritalStatus || parsed.maritalStatus || "Single",
+    appearance: {
+      ...DEFAULT_APPEARANCE,
+      hairColour: parsed.hairColour || "Brown",
+      eyeColour: parsed.eyeColour || "Brown",
+      skinTone: parsed.skinTone || "Medium",
+      ethnicity: parsed.ethnicity || ""
+    }
+  });
 
   // 1. Strip markdown fences and try direct parse
   try {
     const clean = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
     const parsed = JSON.parse(clean);
-    return {
-      name: parsed.name || "", persona: parsed.persona || "",
-      age: parsed.age || 25, maritalStatus: parsed.maritalStatus || "Single",
-      appearance: { ...DEFAULT_APPEARANCE, hairColour: parsed.hairColour || "Brown", eyeColour: parsed.eyeColour || "Brown", skinTone: parsed.skinTone || "Medium", ethnicity: parsed.ethnicity || "" }
-    };
+    return applyConstraints(parsed);
   } catch {}
 
   // 2. Extract first { ... } block
@@ -744,11 +786,7 @@ async function autoGenerateCharacter({ vibe, model }) {
     const match = raw.match(/\{[\s\S]*\}/);
     if (match) {
       const parsed = JSON.parse(match[0]);
-      return {
-        name: parsed.name || "", persona: parsed.persona || "",
-        age: parsed.age || 25, maritalStatus: parsed.maritalStatus || "Single",
-        appearance: { ...DEFAULT_APPEARANCE, hairColour: parsed.hairColour || "Brown", eyeColour: parsed.eyeColour || "Brown", skinTone: parsed.skinTone || "Medium", ethnicity: parsed.ethnicity || "" }
-      };
+      return applyConstraints(parsed);
     }
   } catch {}
 
@@ -761,16 +799,16 @@ async function autoGenerateCharacter({ vibe, model }) {
   const eyeMatch = raw.match(/"eyeColour"\s*:\s*"([^"]+)"/);
   const skinMatch = raw.match(/"skinTone"\s*:\s*"([^"]+)"/);
   return {
-    name: nameMatch ? nameMatch[1] : vibe,
-    persona: personaMatch ? personaMatch[1] : raw.replace(/[{}"]/g, "").trim(),
-    age: ageMatch ? parseInt(ageMatch[1]) : 25,
-    maritalStatus: maritalMatch ? maritalMatch[1] : "Single",
+    name: constraints.name || (nameMatch ? nameMatch[1] : vibe),
+    persona: constraints.persona || (personaMatch ? personaMatch[1] : raw.replace(/[{}"]/g, "").trim()),
+    age: constraints.age || (ageMatch ? parseInt(ageMatch[1]) : 25),
+    maritalStatus: constraints.maritalStatus || (maritalMatch ? maritalMatch[1] : "Single"),
     appearance: { ...DEFAULT_APPEARANCE, hairColour: hairMatch ? hairMatch[1] : "Brown", eyeColour: eyeMatch ? eyeMatch[1] : "Brown", skinTone: skinMatch ? skinMatch[1] : "Medium" }
   };
 }
 
 async function generateOpeningScenarios({ character, model, settings }) {
-  const addendum = buildPersonalityAddendum(character.sliders || DEFAULT_SLIDERS, character.gender || "Female", character.customGender || "", character.age || "", character.maritalStatus || "");
+  const addendum = buildPersonalityAddendum(character.sliders || DEFAULT_SLIDERS, character.gender || "Female", character.customGender || "", character.age || "", character.maritalStatus || "", character.relationship || "", character.relationshipCustom || "");
   const personaNote = buildUserPersonaNote(resolveUserPersona(character, settings || {}));
   const plainClause = character.speakPlainly
     ? "\n\n[STYLE] Speak plainly and directly. Avoid melodrama, purple prose, and overwrought or theatrical language — keep your tone grounded and natural, like a real person talking."
@@ -895,6 +933,8 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
   const [customGender, setCustomGender] = useState(character.customGender || "");
   const [age, setAge] = useState(character.age || "");
   const [maritalStatus, setMaritalStatus] = useState(character.maritalStatus || "Single");
+  const [relationship, setRelationship] = useState(character.relationship || "");
+  const [relationshipCustom, setRelationshipCustom] = useState(character.relationshipCustom || "");
   const [appearance, setAppearance] = useState(character.appearance || { ...DEFAULT_APPEARANCE });
   const [showAppearancePanel, setShowAppearancePanel] = useState(false);
   const [nsfw, setNsfw] = useState(character.nsfw || false);
@@ -934,6 +974,20 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
               </select>
             </div>
           </div>
+
+          <label style={S.label}>Relationship to User</label>
+          <select style={S.select} value={relationship} onChange={e => setRelationship(e.target.value)}>
+            <option value="">Not specified</option>
+            {RELATIONSHIP_TYPES.map(group => (
+              <optgroup key={group.group} label={group.group}>
+                {group.options.map(o => <option key={o} value={o}>{o}</option>)}
+              </optgroup>
+            ))}
+          </select>
+          {relationship === "Custom" && (
+            <input style={{ ...S.input, marginTop: 6 }} placeholder="e.g. next door neighbour's daughter..."
+              value={relationshipCustom} onChange={e => setRelationshipCustom(e.target.value)} />
+          )}
 
           <div style={S.divider} />
           <button style={{ ...S.btnSecondary, width:"100%", textAlign:"center" }}
@@ -992,7 +1046,7 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, gender, customGender, age, maritalStatus, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
+          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
         </div>
       </div>
     </div>
@@ -1048,7 +1102,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
     id: Date.now().toString(), name: "", persona: "", nsfw: false,
     referenceImage: null, backgroundImage: null, autoImage: false,
     gender: "Female", customGender: "", sliders: { ...DEFAULT_SLIDERS },
-    age: "", maritalStatus: "Single",
+    age: "", maritalStatus: "Single", relationship: "", relationshipCustom: "",
     appearance: { ...DEFAULT_APPEARANCE },
   });
   const [vibe, setVibe] = useState("");
@@ -1066,8 +1120,25 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
     if (!vibe.trim()) { setError("Enter a vibe word first."); return; }
     setVibeLoading(true); setError("");
     try {
-      const result = await autoGenerateCharacter({ vibe, model: settings.selectedModel });
-      setForm(f => ({ ...f, name: result.name, persona: result.persona, age: result.age || "", maritalStatus: result.maritalStatus || "Single", appearance: randomiseAppearance(result.appearance) }));
+      const constraints = {
+        gender: form.gender,
+        customGender: form.customGender,
+        name: form.name.trim() || null,
+        age: form.age || null,
+        maritalStatus: form.maritalStatus !== "Single" ? form.maritalStatus : null,
+        relationship: form.relationship || null,
+        relationshipCustom: form.relationshipCustom || null,
+        persona: form.persona.trim() || null,
+      };
+      const result = await autoGenerateCharacter({ vibe, model: settings.selectedModel, constraints });
+      setForm(f => ({
+        ...f,
+        name: f.name.trim() || result.name,
+        persona: f.persona.trim() || result.persona,
+        age: f.age || result.age || "",
+        maritalStatus: f.maritalStatus !== "Single" ? f.maritalStatus : (result.maritalStatus || "Single"),
+        appearance: randomiseAppearance(result.appearance),
+      }));
     } catch (e) { setError("Failed to generate character. Try again."); }
     setVibeLoading(false);
   };
@@ -1146,6 +1217,21 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
               </select>
             </div>
           </div>
+
+          {/* Relationship to User */}
+          <label style={S.label}>Relationship to User</label>
+          <select style={S.select} value={form.relationship || ""} onChange={e => setForm(f => ({ ...f, relationship: e.target.value }))}>
+            <option value="">Not specified</option>
+            {RELATIONSHIP_TYPES.map(group => (
+              <optgroup key={group.group} label={group.group}>
+                {group.options.map(o => <option key={o} value={o}>{o}</option>)}
+              </optgroup>
+            ))}
+          </select>
+          {form.relationship === "Custom" && (
+            <input style={{ ...S.input, marginTop: 6 }} placeholder="e.g. next door neighbour's daughter..."
+              value={form.relationshipCustom || ""} onChange={e => setForm(f => ({ ...f, relationshipCustom: e.target.value }))} />
+          )}
 
           {/* Persona */}
           <label style={S.label}>Personality / System Prompt</label>
