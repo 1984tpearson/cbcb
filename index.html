@@ -289,6 +289,7 @@ const DEFAULT_SLIDERS = {
   jealousy: 30,
   openness: 50,
   neediness: 30,
+  confidence: 55,
   // Reactive relationship sliders
   familiarity: 10,
   likesUser: 50,
@@ -299,7 +300,7 @@ const DEFAULT_SLIDERS = {
 const REACTIVE_SLIDER_KEYS = [
   "amorous", "playfulness", "assertiveness", "emotionalDepth",
   "profanity", "dirtyTalk", "petNames", "forwardness",
-  "jealousy", "openness", "neediness", "formality",
+  "jealousy", "openness", "neediness", "confidence", "formality",
   "familiarity", "likesUser", "attractionToUser",
 ];
 
@@ -319,6 +320,7 @@ const REACTIVE_MAX_DRIFT = {
   jealousy: 3,
   openness: 3,
   neediness: 2,
+  confidence: 3,
   formality: 2,
 };
 
@@ -336,7 +338,8 @@ const SLIDER_DEFS = [
   { key: "forwardness",      label: "Sexual Forwardness", left: "Waits for move", right: "Makes first move", section: "Behaviour" },
   { key: "jealousy",         label: "Jealousy",           left: "Unbothered",     right: "Very Possessive", section: "Behaviour" },
   { key: "openness",         label: "Openness",           left: "Very Guarded",   right: "Overshares",     section: "Behaviour" },
-  { key: "neediness",        label: "Neediness",          left: "Independent",    right: "Clingy",         section: "Behaviour" },
+  { key: "neediness",   label: "Neediness",  left: "Independent", right: "Clingy",            section: "Behaviour" },
+  { key: "confidence", label: "Confidence", left: "Vulnerable / Insecure", right: "Confident / Secure", section: "Behaviour" },
   // Reactive relationship sliders
   { key: "familiarity",      label: "Familiarity",        left: "Complete Stranger", right: "Knows User Deeply", section: "Relationship", reactive: true },
   { key: "likesUser",        label: "Likes User",         left: "Dislikes",       right: "Loves",          section: "Relationship", reactive: true },
@@ -620,6 +623,13 @@ function buildPersonalityAddendum(sliders, gender, customGender, age, maritalSta
   else if (s.neediness <= 60) lines.push("You enjoy closeness and appreciate regular attention.");
   else if (s.neediness <= 80) lines.push("You crave attention and affection and show it.");
   else lines.push("You are very clingy and needy — you constantly seek reassurance, attention, and closeness.");
+
+  // Confidence
+  if (s.confidence <= 20) lines.push("You are deeply insecure and vulnerable — prone to self-doubt, easily hurt, and quick to question your own worth.");
+  else if (s.confidence <= 40) lines.push("You tend to be self-conscious and uncertain — you second-guess yourself and need some reassurance.");
+  else if (s.confidence <= 60) lines.push("You have a fairly balanced sense of self — confident in some areas, uncertain in others.");
+  else if (s.confidence <= 80) lines.push("You are generally confident and secure in yourself — you don't need external validation.");
+  else lines.push("You are highly confident and self-assured — comfortable in your own skin, difficult to rattle, and unbothered by criticism.");
 
   return "\n\n[PERSONALITY PARAMETERS]\n" + lines.join(" ");
 }
