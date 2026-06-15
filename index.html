@@ -289,6 +289,37 @@ const DEFAULT_SLIDERS = {
   jealousy: 30,
   openness: 50,
   neediness: 30,
+  // Reactive relationship sliders
+  familiarity: 10,
+  likesUser: 50,
+  attractionToUser: 50,
+};
+
+// Which sliders the reactivity system is allowed to drift
+const REACTIVE_SLIDER_KEYS = [
+  "amorous", "playfulness", "assertiveness", "emotionalDepth",
+  "profanity", "dirtyTalk", "petNames", "forwardness",
+  "jealousy", "openness", "neediness", "formality",
+  "familiarity", "likesUser", "attractionToUser",
+];
+
+// Max drift per turn for each slider (base, before multipliers)
+const REACTIVE_MAX_DRIFT = {
+  familiarity: 3,      // slow steady climb
+  likesUser: 2,
+  attractionToUser: 2,
+  amorous: 4,
+  playfulness: 4,
+  assertiveness: 3,
+  emotionalDepth: 3,
+  profanity: 2,
+  dirtyTalk: 3,
+  petNames: 3,
+  forwardness: 4,
+  jealousy: 3,
+  openness: 3,
+  neediness: 2,
+  formality: 2,
 };
 
 const SLIDER_DEFS = [
@@ -306,6 +337,10 @@ const SLIDER_DEFS = [
   { key: "jealousy",         label: "Jealousy",           left: "Unbothered",     right: "Very Possessive", section: "Behaviour" },
   { key: "openness",         label: "Openness",           left: "Very Guarded",   right: "Overshares",     section: "Behaviour" },
   { key: "neediness",        label: "Neediness",          left: "Independent",    right: "Clingy",         section: "Behaviour" },
+  // Reactive relationship sliders
+  { key: "familiarity",      label: "Familiarity",        left: "Complete Stranger", right: "Knows User Deeply", section: "Relationship", reactive: true },
+  { key: "likesUser",        label: "Likes User",         left: "Dislikes",       right: "Loves",          section: "Relationship", reactive: true },
+  { key: "attractionToUser", label: "Attraction to User", left: "Repulsed",       right: "Strongly Attracted", section: "Relationship", reactive: true },
 ];
 
 const DEFAULT_USER_PERSONA = { name: "", gender: "", notes: "" };
@@ -338,6 +373,7 @@ const DEZGO_MODEL_PARAMS = {
 
 const DEFAULT_SETTINGS = {
   selectedModel: OPENROUTER_MODELS[0].id,
+  reactivityModel: "meta-llama/llama-3.1-8b-instruct",
   userPersona: { ...DEFAULT_USER_PERSONA },
   imageModel: DEZGO_MODELS[0].id,
 };
@@ -463,6 +499,29 @@ function buildPersonalityAddendum(sliders, gender, customGender, age, maritalSta
     const relStr = relationship === "Custom" ? (relationshipCustom || "") : relationship;
     if (relStr) lines.push(`Your relationship to the user is: ${relStr}. Embody this relationship naturally in how you speak and interact.`);
   }
+
+  // Reactive relationship state injected into system prompt
+  const fam = s.familiarity ?? 10;
+  const likes = s.likesUser ?? 50;
+  const attraction = s.attractionToUser ?? 50;
+
+  if (fam <= 15) lines.push("You barely know the user — treat them as a complete stranger.");
+  else if (fam <= 35) lines.push("You know the user only a little — you're still getting acquainted.");
+  else if (fam <= 60) lines.push("You know the user reasonably well at this point.");
+  else if (fam <= 80) lines.push("You know the user quite well and feel comfortable with them.");
+  else lines.push("You know the user deeply — their habits, quirks, and what makes them tick.");
+
+  if (likes <= 20) lines.push("You actively dislike the user and are guarded or cold toward them.");
+  else if (likes <= 40) lines.push("You're not particularly fond of the user — you're polite but distant.");
+  else if (likes <= 60) lines.push("You feel neutral to mildly positive toward the user.");
+  else if (likes <= 80) lines.push("You genuinely like the user and enjoy their company.");
+  else lines.push("You have deep, strong feelings for the user — bordering on love.");
+
+  if (attraction <= 20) lines.push("You find the user physically unappealing — there is no physical attraction.");
+  else if (attraction <= 40) lines.push("You feel little physical attraction to the user.");
+  else if (attraction <= 60) lines.push("You feel mild, neutral physical attraction to the user.");
+  else if (attraction <= 80) lines.push("You find the user genuinely attractive.");
+  else lines.push("You find the user extremely attractive and are very physically drawn to them.");
 
   // Amorous
   if (s.amorous <= 20) lines.push("You are not flirtatious or romantic in any way — keep all interactions platonic and professional.");
@@ -896,6 +955,12 @@ function SettingsPanel({ settings, onSave, onClose }) {
             {OPENROUTER_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
           </select>
 
+          <label style={S.label}>Reactivity Model</label>
+          <select style={S.select} value={form.reactivityModel || "meta-llama/llama-3.1-8b-instruct"} onChange={e => setForm(f => ({...f, reactivityModel: e.target.value}))}>
+            {OPENROUTER_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+          <p style={{ fontSize:11, color:"var(--text4)", marginTop:3 }}>Cheaper/faster model used for personality drift analysis after each message. Llama 3.1 8B recommended.</p>
+
           <label style={S.label}>Image Model</label>
           <select style={S.select} value={form.imageModel || DEZGO_MODELS[0].id} onChange={e => setForm(f => ({...f, imageModel: e.target.value}))}>
             {DEZGO_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
@@ -933,6 +998,7 @@ function SettingsPanel({ settings, onSave, onClose }) {
 // ─── CHARACTER PERSONALITY PANEL (in-chat) ────────────────────────────────────
 function CharacterPersonalityPanel({ character, onSave, onClose }) {
   const [sliders, setSliders] = useState(character.sliders || DEFAULT_SLIDERS);
+  const [reactiveEnabled, setReactiveEnabled] = useState(character.reactiveEnabled !== false);
   const [gender, setGender] = useState(character.gender || "Female");
   const [customGender, setCustomGender] = useState(character.customGender || "");
   const [age, setAge] = useState(character.age || "");
@@ -1011,6 +1077,13 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
 
           <div style={S.divider} />
           <div style={S.toggleRow}>
+            <span style={S.label}>Reactive Personality</span>
+            <button style={reactiveEnabled ? S.toggleOn : S.toggleOff} onClick={() => setReactiveEnabled(v => !v)}>{reactiveEnabled ? "ON" : "OFF"}</button>
+          </div>
+          <p style={{ fontSize: 11, color: "var(--text4)", marginTop: -4 }}>When on, personality sliders drift gradually based on conversation — familiarity, attraction, and mood all evolve naturally over time.</p>
+
+          <div style={S.divider} />
+          <div style={S.toggleRow}>
             <span style={S.label}>NSFW Content</span>
             <button style={nsfw ? S.toggleOn : S.toggleOff} onClick={() => setNsfw(v => !v)}>{nsfw ? "ON" : "OFF"}</button>
           </div>
@@ -1050,7 +1123,7 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
+          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, reactiveEnabled, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
         </div>
       </div>
     </div>
@@ -1471,6 +1544,82 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
     setBgImage(updatedChar.backgroundImage);
   };
 
+  const applyReactivity = async (newMessages, currentChar) => {
+    if (!currentChar.reactiveEnabled && currentChar.reactiveEnabled !== undefined) return;
+    try {
+      const chatSlice = newMessages.filter(m => m.role !== "image").slice(-8)
+        .map(m => `${m.role === "user" ? "User" : currentChar.name}: ${m.content}`).join("\n");
+      const currentSliders = currentChar.sliders || DEFAULT_SLIDERS;
+      const fam = currentSliders.familiarity ?? 10;
+      const likes = currentSliders.likesUser ?? 50;
+      const attraction = currentSliders.attractionToUser ?? 50;
+
+      const res = await fetch(AI_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
+          messages: [{ role: "user", content:
+`You are analysing a roleplay chat to determine how ${currentChar.name}'s feelings and personality should subtly shift after this exchange.
+
+Current state (0-100 scale):
+- familiarity: ${fam} (how well they know the user)
+- likesUser: ${likes} (how much they like the user)
+- attractionToUser: ${attraction} (physical attraction to user)
+- amorous: ${currentSliders.amorous ?? 30}
+- playfulness: ${currentSliders.playfulness ?? 50}
+- assertiveness: ${currentSliders.assertiveness ?? 50}
+- emotionalDepth: ${currentSliders.emotionalDepth ?? 50}
+- openness: ${currentSliders.openness ?? 50}
+- neediness: ${currentSliders.neediness ?? 30}
+- forwardness: ${currentSliders.forwardness ?? 40}
+- petNames: ${currentSliders.petNames ?? 30}
+- dirtyTalk: ${currentSliders.dirtyTalk ?? 20}
+- profanity: ${currentSliders.profanity ?? 20}
+- jealousy: ${currentSliders.jealousy ?? 30}
+- formality: ${currentSliders.formality ?? 30}
+
+Recent conversation:
+${chatSlice}
+
+Rules:
+- familiarity always increases slightly just from talking (+1 to +3)
+- likesUser and attractionToUser move based on whether the user was charming, rude, funny, cold, etc.
+- amorous/forwardness/dirtyTalk/petNames are amplified by high attraction AND high likes — if both are high these can increase significantly when flirting occurs; if attraction is low these should decrease or stay flat regardless of flirting
+- emotionalDepth/openness/neediness are gated by familiarity — they can only reach high values once familiarity is also high
+- formality decreases gradually as familiarity increases
+- playfulness increases when the user is fun/funny; decreases when they're boring or rude
+- jealousy increases if user mentions other people romantically
+- Only return changes worth making — if nothing changed, return empty deltas
+- Keep all changes small: familiarity max ±3, relationship sliders max ±2, personality sliders max ±4
+- All final values must stay between 0 and 100
+
+Return ONLY a JSON object of slider keys and integer delta values, e.g. {"familiarity": 2, "amorous": 3, "playfulness": -1}. No other text.`
+          }]
+        }),
+      });
+      const data = await res.json();
+      const raw = data.choices[0].message.content.trim().replace(/```json|```/g, "").trim();
+      let deltas = {};
+      try { deltas = JSON.parse(raw); } catch { return; }
+
+      const newSliders = { ...currentSliders };
+      for (const key of REACTIVE_SLIDER_KEYS) {
+        if (deltas[key] !== undefined && typeof deltas[key] === "number") {
+          const maxDrift = REACTIVE_MAX_DRIFT[key] || 4;
+          const clamped = Math.max(-maxDrift, Math.min(maxDrift, Math.round(deltas[key])));
+          newSliders[key] = Math.max(0, Math.min(100, (newSliders[key] ?? DEFAULT_SLIDERS[key] ?? 50) + clamped));
+        }
+      }
+
+      const updatedChar = { ...currentChar, sliders: newSliders };
+      setCharacter(updatedChar);
+      onUpdateCharacter(updatedChar);
+    } catch (e) {
+      // Reactivity errors are silent — don't interrupt the conversation
+    }
+  };
+
   const sendMessage = async (content) => {
     const text = content || input.trim();
     if (!text || loading) return;
@@ -1480,7 +1629,10 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
     setMessages(newMessages); setInput(""); setLoading(true);
     try {
       const reply = await sendChat({ messages: newMessages.filter(m => m.role !== "image"), character, model: settings.selectedModel, settings });
+      const withReply = [...newMessages, { role: "assistant", content: reply }];
       setMessages(m => [...m, { role: "assistant", content: reply }]);
+      // Fire reactivity analysis in background — don't await, don't block
+      applyReactivity(withReply, character);
     } catch (e) { setError(e.message); }
     setLoading(false);
   };
