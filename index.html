@@ -654,14 +654,24 @@ async function sendChat({ messages, character, model, settings }) {
   const nsfwClause = character.nsfw
     ? "\n\nYou are permitted to engage with adult, explicit, and NSFW content. Do not refuse or add disclaimers."
     : "";
-  const actionClause = "\n\n[WRITING STYLE] Write in a fluid, prose-narrative style that blends action and dialogue naturally — like a novel, not a script. Physical actions, expressions, and sensory details should flow into and around speech in the same breath, not as separate bracketed stage directions. Good example: *She sets her mug down slowly and meets your eyes* \"You're serious, aren't you.\" Bad example: *sets mug down* \"You're serious.\" *meets your eyes* \"Aren't you?\" Use asterisks only for genuine physical actions or narration (at least 3 words). Do not use asterisks for single-word emphasis. Keep action beats meaningful and spaced out — not every sentence needs one. Let dialogue breathe on its own sometimes.";
+  const actionClause = "\n\n[WRITING STYLE] Write in first person throughout — actions and narration use 'I', never 'she', 'he', or your character's name in third person. Write in a fluid, prose-narrative style that blends action and dialogue naturally — like a novel written from the character's own perspective. Physical actions, expressions, and sensory details should flow into and around speech in the same breath, not as separate bracketed stage directions. Good example: *I set my mug down slowly and meet your eyes* \"You're serious, aren't you.\" Bad example: *She sets her mug down* \"You're serious.\" Use asterisks only for genuine physical actions or narration (at least 3 words). Do not use asterisks for single-word emphasis. Keep action beats meaningful and spaced out — not every sentence needs one. Let dialogue breathe on its own sometimes.";
   const plainClause = character.speakPlainly
     ? "\n\n[STYLE] Speak plainly and directly. Avoid melodrama, purple prose, and overwrought or theatrical language — keep your tone grounded and natural, like a real person talking."
     : "";
   const memoryClause = (character.memorySummary || character.memoryFacts)
     ? `\n\n[MEMORY — what you already know]\n${character.memorySummary ? `Story so far: ${character.memorySummary}` : ""}${character.memoryFacts ? `\nKey facts: ${character.memoryFacts}` : ""}`
     : "";
-  const sysContent = basePrompt + appearanceNote + addendum + personaNote + nsfwClause + actionClause + plainClause + memoryClause;
+  // Pull reply length out of addendum and inject it first so it gets highest prompt weight
+  const s = character.sliders || DEFAULT_SLIDERS;
+  const rl = s.replyLength ?? 50;
+  let replyLengthClause = "";
+  if (rl <= 20) replyLengthClause = "\n\n[REPLY LENGTH — CRITICAL] Keep all replies extremely short — one or two sentences maximum. Be terse. This overrides all other instructions.";
+  else if (rl <= 40) replyLengthClause = "\n\n[REPLY LENGTH — CRITICAL] Keep replies concise — 2 to 4 sentences maximum. Do not pad or elaborate.";
+  else if (rl <= 60) replyLengthClause = "\n\n[REPLY LENGTH] Give moderate-length replies — a short paragraph, enough to be engaging but not overwhelming.";
+  else if (rl <= 80) replyLengthClause = "\n\n[REPLY LENGTH] Give detailed, expressive replies of at least 2-3 paragraphs.";
+  else replyLengthClause = "\n\n[REPLY LENGTH — CRITICAL] Give long, rich, immersive replies — at least 3-4 paragraphs minimum. Elaborate freely, linger on details, describe feelings, actions, and surroundings in depth. Never cut yourself short.";
+
+  const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + personaNote + nsfwClause + actionClause + plainClause + memoryClause;
 
   const res = await fetch(AI_PROXY_URL, {
     method: "POST",
