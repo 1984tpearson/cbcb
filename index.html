@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AV Clinical Pathway Tool — Dev Build</title>
-  <link rel="manifest" href="/cbcb/manifest.json">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -2304,10 +2303,17 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
             </button>
           </div>
         )}
-        <input style={S.chatInput} className={discreetMode ? "discreet-input" : ""} placeholder={`Message ${character.name}…`} value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} />
-        <button style={S.sendBtn} className={discreetMode ? "discreet-send-btn" : ""} onClick={() => sendMessage()} disabled={loading || !input.trim()}>{discreetMode ? "↑" : "Send"}</button>
+        <textarea style={{ ...S.chatInput, resize: "none", overflowY: "hidden", minHeight: 40, maxHeight: 120, lineHeight: "1.4", padding: "10px 14px" }}
+          className={`chat-textarea ${discreetMode ? "discreet-input" : ""}`}
+          placeholder={`Message ${character.name}…`} value={input}
+          rows={1}
+          onChange={e => {
+            setInput(e.target.value);
+            e.target.style.height = "auto";
+            e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
+          }}
+          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); e.target.style.height = "40px"; } }} />
+        <button style={S.sendBtn} className={discreetMode ? "discreet-send-btn" : ""} onClick={() => { sendMessage(); const ta = document.querySelector(".chat-textarea"); if (ta) ta.style.height = "40px"; }} disabled={loading || !input.trim()}>{discreetMode ? "↑" : "Send"}</button>
       </div>
 
       {showCustomScenario && (
