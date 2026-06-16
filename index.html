@@ -1772,9 +1772,41 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       .finally(() => { setOpeningLoading(false); setMessagesLoaded(true); });
   };
 
+  const inferScenarioOutfit = async (scenario, currentChar) => {
+    try {
+      const appearanceDesc = buildAppearancePrompt(currentChar.appearance);
+      const res = await fetch(AI_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
+          messages: [{ role: "user", content:
+`Given this scenario, infer what ${currentChar.name} would plausibly be wearing. Base it on the setting and context — be specific and realistic.
+
+Character: ${currentChar.name}, ${currentChar.age || ""} ${currentChar.gender || ""}, ${appearanceDesc}
+Persona: ${currentChar.persona || ""}
+Scenario: ${scenario.label}
+Setting: ${scenario.setting}
+Opening: ${scenario.message}
+
+Return ONLY valid JSON: {"charOutfit": "brief specific description of what they are wearing"}
+No other text.` }]
+        }),
+      });
+      const data = await res.json();
+      const raw = data.choices[0].message.content.trim().replace(/```json|```/g, "").trim();
+      let parsed;
+      try { parsed = JSON.parse(raw); } catch { return; }
+      if (!parsed?.charOutfit) return;
+      const updatedChar = { ...currentChar, charOutfit: parsed.charOutfit };
+      setCharacter(updatedChar);
+      onUpdateCharacter(updatedChar);
+    } catch {}
+  };
+
   const applyWardrobe = async (newMessages, currentChar) => {
     try {
-      const recent = newMessages.filter(m => m.role !== "image").slice(-6)
+      const recent = newMessages.filter(m => m.role !== "image").slice(-3)
         .map(m => `${m.role === "user" ? "User" : currentChar.name}: ${m.content}`).join("\n");
       const res = await fetch(AI_PROXY_URL, {
         method: "POST",
@@ -2083,7 +2115,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                     <p style={S.scenarioHeading}>Choose how to start with {character.name}:</p>
                     {openingScenarios.map((sc, i) => (
                       <button key={i} style={S.scenarioCard}
-                        onClick={() => { setMessages([{ role: "assistant", content: sc.message }]); setOpeningScenarios(null); }}>
+                        onClick={() => { setMessages([{ role: "assistant", content: sc.message }]); setOpeningScenarios(null); inferScenarioOutfit(sc, character); }}>
                         <span style={S.scenarioLabel}>{sc.label}</span>
                         {sc.setting && <span style={S.scenarioSetting}>{sc.setting}</span>}
                         <span style={S.scenarioMessage}>"{sc.message}"</span>
