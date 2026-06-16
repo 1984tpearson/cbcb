@@ -1892,8 +1892,8 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const ageDesc = character.age ? `${character.age} year old` : "";
       const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
       const styleModifiers = "photorealistic, natural lighting, cinematic, Canon EOS, 50mm lens, sharp focus, high detail";
-      // Scene context goes FIRST so SD weights it highest, appearance after as supporting context
-      const fullImgPrompt = charDesc ? `${prompt}, ${charDesc}, ${styleModifiers}` : `${prompt}, ${styleModifiers}`;
+      // Appearance goes FIRST so SD weights it highest, scene context after
+      const fullImgPrompt = charDesc ? `${charDesc}, ${prompt}, ${styleModifiers}` : `${prompt}, ${styleModifiers}`;
       // Context images: only NSFW if auto-image is on (user has opted in to continuous NSFW)
       const contextNsfw = auto ? character.nsfw : false;
       const url = await generateImageDezgo({
