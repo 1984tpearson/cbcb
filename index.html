@@ -7,3 +7,2634 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    /* ── DECOY STYLES ─────────────────────────────────────────────────── */
+    #decoy-root { display: block; }
+    #app-root { display: none; height: 100dvh; min-height: -webkit-fill-available; }
+    html, body { margin:0; padding:0; }
+    .dcy * { box-sizing:border-box; }
+    .dcy body,.dcy-body { font-family:'Segoe UI',Arial,sans-serif; background:#f0f2f5; color:#2c3e50; min-height:100vh; }
+    .topbar { background:#003d7a; color:white; padding:10px 20px; display:flex; align-items:center; gap:14px; }
+    .topbar-logo { font-size:13px; font-weight:700; letter-spacing:.05em; opacity:.9; }
+    .topbar-divider { width:1px; height:20px; background:rgba(255,255,255,.3); }
+    .topbar-title { font-size:13px; opacity:.7; }
+    .topbar-badge { margin-left:auto; background:#e74c3c; color:white; font-size:10px; font-weight:700; padding:3px 8px; border-radius:3px; letter-spacing:.05em; }
+    .dcy-container { max-width:960px; margin:0 auto; padding:28px 20px; }
+    .dcy-alert { background:#fff3cd; border:1px solid #ffc107; border-left:4px solid #ffc107; padding:12px 16px; border-radius:4px; font-size:13px; color:#856404; margin-bottom:24px; }
+    .dcy-alert strong { display:block; margin-bottom:3px; }
+    .dcy-card { background:white; border:1px solid #dde3ea; border-radius:6px; margin-bottom:20px; overflow:hidden; }
+    .dcy-card-header { padding:14px 20px; background:#f8f9fb; border-bottom:1px solid #dde3ea; display:flex; align-items:center; justify-content:space-between; }
+    .dcy-card-title { font-size:14px; font-weight:600; color:#1a2a3a; }
+    .dcy-card-badge { font-size:10px; background:#e8edf2; color:#6b7c93; padding:2px 8px; border-radius:10px; font-weight:600; letter-spacing:.05em; }
+    .dcy-card-body { padding:20px; }
+    .dcy-form-row { display:flex; gap:16px; margin-bottom:16px; flex-wrap:wrap; }
+    .dcy-form-group { display:flex; flex-direction:column; gap:5px; flex:1; min-width:140px; }
+    .dcy-form-group label { font-size:11px; font-weight:600; color:#6b7c93; text-transform:uppercase; letter-spacing:.06em; }
+    .dcy-form-group input,.dcy-form-group select { padding:8px 10px; border:1px solid #dde3ea; border-radius:4px; font-size:13px; color:#2c3e50; background:white; outline:none; }
+    .dcy-form-group input.err { border-color:#e74c3c; background:#fff5f5; }
+    .dcy-btn { padding:8px 18px; border-radius:4px; font-size:13px; font-weight:600; cursor:pointer; border:none; }
+    .dcy-btn-primary { background:#003d7a; color:white; }
+    .dcy-btn-secondary { background:#f0f2f5; color:#6b7c93; border:1px solid #dde3ea; }
+    .dcy-btn-disabled { background:#dde3ea; color:#a0aab4; cursor:not-allowed; }
+    .dcy-table { width:100%; border-collapse:collapse; font-size:13px; }
+    .dcy-table th { padding:8px 12px; background:#f8f9fb; border-bottom:2px solid #dde3ea; text-align:left; font-size:11px; font-weight:700; color:#6b7c93; text-transform:uppercase; letter-spacing:.06em; }
+    .dcy-table td { padding:9px 12px; border-bottom:1px solid #f0f2f5; color:#2c3e50; }
+    .dcy-table tr:last-child td { border-bottom:none; }
+    .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+    .dot-err { background:#e74c3c; }
+    .dot-pend { background:#f39c12; }
+    .dcy-broken { text-align:center; padding:32px 20px; color:#a0aab4; }
+    .dcy-broken .icon { font-size:32px; margin-bottom:10px; }
+    .dcy-broken p { font-size:13px; }
+    .dcy-note { font-size:12px; color:#a0aab4; border-left:3px solid #dde3ea; padding-left:10px; margin-top:12px; line-height:1.5; }
+    .dcy-footer { text-align:center; padding:20px; font-size:11px; color:#c0c8d4; border-top:1px solid #e8ecf0; margin-top:20px; }
+    .pin-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:1000; align-items:center; justify-content:center; }
+    .pin-overlay.active { display:flex; }
+    .pin-box { background:white; border-radius:8px; padding:28px 32px; width:300px; box-shadow:0 8px 32px rgba(0,0,0,.2); }
+    .pin-box h3 { font-size:15px; color:#1a2a3a; margin-bottom:6px; font-family:'Segoe UI',sans-serif; }
+    .pin-box p { font-size:12px; color:#6b7c93; margin-bottom:18px; font-family:'Segoe UI',sans-serif; }
+    .pin-input { width:100%; padding:10px 12px; border:1px solid #dde3ea; border-radius:4px; font-size:18px; letter-spacing:.3em; text-align:center; outline:none; margin-bottom:12px; font-family:'Segoe UI',sans-serif; }
+    .pin-input.shake { animation:shake .3s ease; border-color:#e74c3c; }
+    .pin-err { font-size:12px; color:#e74c3c; text-align:center; margin-bottom:10px; display:none; font-family:'Segoe UI',sans-serif; }
+    .pin-err.show { display:block; }
+    @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
+
+    /* ── APP STYLES ───────────────────────────────────────────────────── */
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; }
+    @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
+    :root {
+      --bg: #fdf6f8;
+      --bg2: #ffffff;
+      --bg3: #f5eef2;
+      --border: rgba(200,140,170,0.2);
+      --border2: rgba(200,140,170,0.35);
+      --text: #2a2030;
+      --text2: #4a3858;
+      --text3: #8a7898;
+      --text4: #b8a8c8;
+      --pink: #d4607a;
+      --pink-light: #f0a0b4;
+      --pink-bg: rgba(220,100,130,0.1);
+      --pink-border: rgba(220,100,130,0.3);
+      --blue: #5080c8;
+      --blue-light: #90b0e8;
+      --blue-bg: rgba(80,120,200,0.1);
+      --blue-border: rgba(80,120,200,0.25);
+      --shadow: rgba(180,120,150,0.15);
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Nunito', 'Georgia', sans-serif; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg3); }
+    ::-webkit-scrollbar-thumb { background: var(--pink-light); border-radius: 3px; }
+    @keyframes pulse { 0%, 100% { opacity: 0.3; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1); } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+    /* ── DISCREET MODE ────────────────────────────────────────────────── */
+    .discreet-app { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif !important; background: #ffffff !important; }
+    .discreet-app * { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif !important; }
+    .discreet-header { background: #f5f5f5 !important; border-bottom: 1px solid #e0e0e0 !important; backdrop-filter: none !important; box-shadow: none !important; padding: 10px 14px !important; }
+    .discreet-chat-header { background: #f5f5f5 !important; border-bottom: 1px solid #e0e0e0 !important; backdrop-filter: none !important; box-shadow: none !important; }
+    .discreet-char-name { color: #000000 !important; font-size: 17px !important; font-weight: 600 !important; letter-spacing: 0 !important; }
+    .discreet-back-btn { color: #007aff !important; font-size: 17px !important; font-weight: 400 !important; }
+    .discreet-toggle { background: none !important; border: none !important; cursor: pointer; font-size: 18px; padding: 4px 6px; opacity: 0.5; }
+    .discreet-toggle:hover { opacity: 0.8; }
+    .discreet-user-bubble { background: #007aff !important; border-radius: 18px 18px 4px 18px !important; box-shadow: none !important; }
+    .discreet-ai-bubble { background: #e9e9eb !important; border: none !important; border-radius: 18px 18px 18px 4px !important; box-shadow: none !important; }
+    .discreet-user-text { color: #ffffff !important; font-weight: 400 !important; }
+    .discreet-ai-text { color: #000000 !important; font-weight: 400 !important; }
+    .discreet-input-row { background: #f5f5f5 !important; border-top: 1px solid #e0e0e0 !important; box-shadow: none !important; backdrop-filter: none !important; }
+    .discreet-input { background: #ffffff !important; border: 1px solid #c8c8c8 !important; border-radius: 20px !important; font-weight: 400 !important; }
+    .discreet-send-btn { background: #007aff !important; border-radius: 50% !important; width: 34px !important; padding: 0 !important; font-size: 16px !important; box-shadow: none !important; }
+    .discreet-msg-list { background: #ffffff; }
+    .discreet-bg-overlay { display: none !important; }
+    .discreet-photo-placeholder { display: inline-block; color: #007aff; font-size: 14px; font-weight: 400; cursor: pointer; padding: 2px 0; text-decoration: underline; }
+    .discreet-bubble-name { display: none !important; }
+    .discreet-settings-btn { background: none !important; border: none !important; color: #007aff !important; font-size: 15px !important; font-weight: 400 !important; padding: 4px 8px !important; box-shadow: none !important; }
+    .discreet-list-header { background: #f5f5f5 !important; border-bottom: 1px solid #e0e0e0 !important; box-shadow: none !important; backdrop-filter: none !important; }
+    .discreet-list-title { font-size: 17px !important; font-weight: 600 !important; color: #000000 !important; letter-spacing: 0 !important; }
+    .discreet-char-card { border-radius: 0 !important; border-left: none !important; border-right: none !important; border-top: none !important; border-bottom: 1px solid #e0e0e0 !important; box-shadow: none !important; background: #ffffff !important; padding: 12px 16px !important; }
+    .discreet-char-card:hover { background: #f5f5f5 !important; }
+    .discreet-main { background: #ffffff !important; }
+    .discreet-appbg { display: none !important; }
+    .msg-anim { animation: fadeIn 0.2s ease; }
+    input, textarea, select, button { font-family: inherit; }
+    input::placeholder, textarea::placeholder { color: var(--text4); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    a { color: var(--blue); font-size: 12px; display: inline-block; margin-top: 2px; }
+    input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 5px; border-radius: 3px; background: rgba(200,140,170,0.2); outline: none; cursor: pointer; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--pink); border: 3px solid white; cursor: pointer; box-shadow: 0 1px 4px var(--shadow); }
+    input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: var(--pink); border: 3px solid white; cursor: pointer; }
+  
+  </style>
+</head>
+<body style="margin:0;padding:0;">
+
+<!-- DECOY -->
+<div id="decoy-root">
+  <div class="topbar">
+    <span class="topbar-logo">AMBULANCE VICTORIA</span>
+    <div class="topbar-divider"></div>
+    <span class="topbar-title">Clinical Pathway Builder — Internal Dev</span>
+    <span class="topbar-badge">DEV / INCOMPLETE</span>
+  </div>
+  <div class="dcy-container">
+    <div class="dcy-alert">
+      <strong>⚠ Development build — not for clinical use</strong>
+      This tool is incomplete and under active development. Several features are non-functional. Do not use for patient care decisions.
+    </div>
+    <div class="dcy-card">
+      <div class="dcy-card-header"><span class="dcy-card-title">Patient Scenario Generator</span><span class="dcy-card-badge">BROKEN</span></div>
+      <div class="dcy-card-body">
+        <div class="dcy-form-row">
+          <div class="dcy-form-group"><label>Chief Complaint</label><select><option>Select complaint...</option><option>Chest Pain</option><option>Dyspnoea</option><option>Altered LOC</option><option>Trauma</option></select></div>
+          <div class="dcy-form-group"><label>Age Range</label><input type="text" placeholder="e.g. 45-65" /></div>
+          <div class="dcy-form-group"><label>Complexity</label><select><option>Standard</option><option>Complex</option><option>Critical</option></select></div>
+        </div>
+        <div class="dcy-form-row">
+          <div class="dcy-form-group"><label>CPG Reference</label><input type="text" placeholder="e.g. AV-CPG-0103" class="err" /></div>
+          <div class="dcy-form-group"><label>AI Model</label><select disabled><option>GPT-4 (unavailable)</option></select></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:4px;">
+          <button class="dcy-btn dcy-btn-disabled" disabled>Generate Scenario</button>
+          <button class="dcy-btn dcy-btn-secondary">Preview</button>
+        </div>
+        <p class="dcy-note">API integration pending. CPG lookup returning 401 errors — auth token expired. Raised with IT 14/03.</p>
+      </div>
+    </div>
+    <div class="dcy-card">
+      <div class="dcy-card-header"><span class="dcy-card-title">Recent Scenarios</span><span class="dcy-card-badge">READ ONLY</span></div>
+      <div class="dcy-card-body">
+        <table class="dcy-table">
+          <thead><tr><th>ID</th><th>Complaint</th><th>CPG</th><th>Created</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>#1042</td><td>Chest Pain — STEMI</td><td>AV-CPG-0103</td><td>12/03/2025</td><td><span class="dot dot-err"></span>Error</td></tr>
+            <tr><td>#1041</td><td>Dyspnoea — APO</td><td>AV-CPG-0211</td><td>11/03/2025</td><td><span class="dot dot-pend"></span>Pending</td></tr>
+            <tr><td>#1040</td><td>Altered LOC</td><td>AV-CPG-0089</td><td>09/03/2025</td><td><span class="dot dot-err"></span>Error</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="dcy-card">
+      <div class="dcy-card-header"><span class="dcy-card-title">Assessment Framework Builder</span><span class="dcy-card-badge">NOT STARTED</span></div>
+      <div class="dcy-card-body"><div class="dcy-broken"><div class="icon">🔧</div><p>This module is not yet implemented.<br/>Planned for sprint 4.</p></div></div>
+    </div>
+  </div>
+  <div class="dcy-footer">
+    AV Clinical Tools — Internal Use Only &nbsp;·&nbsp; v0.3.1-dev &nbsp;·&nbsp;
+    <span id="secret-trigger" style="cursor:default;user-select:none;">Build 20250312</span>
+  </div>
+</div>
+
+<!-- PIN -->
+<div class="pin-overlay" id="pinOverlay">
+  <div class="pin-box">
+    <h3>Authentication Required</h3>
+    <p>Enter your access code to continue.</p>
+    <input type="password" class="pin-input" id="pinInput" maxlength="4" placeholder="····" />
+    <div class="pin-err" id="pinError">Incorrect code. Try again.</div>
+    <div style="display:flex;gap:8px;">
+      <button class="dcy-btn dcy-btn-primary" style="flex:1;" onclick="checkPin()">Unlock</button>
+      <button class="dcy-btn dcy-btn-secondary" onclick="closePin()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app-root"></div>
+
+<script>
+  const CORRECT_PIN = "1555";
+  const UNLOCK_KEY = "personachat_unlocked";
+
+  function launchApp() {
+    document.getElementById("decoy-root").style.display = "none";
+    document.getElementById("pinOverlay").style.display = "none";
+    document.getElementById("app-root").style.display = "block";
+    document.title = "PersonaChat";
+    if (!window._appMounted) {
+      window._appMounted = true;
+      if (window._mountApp) {
+        window._mountApp();
+      } else {
+        // Wait for Babel to finish
+        const interval = setInterval(() => {
+          if (window._mountApp) {
+            clearInterval(interval);
+            window._mountApp();
+          }
+        }, 50);
+      }
+    }
+  }
+
+  if (localStorage.getItem(UNLOCK_KEY) === "true") {
+    window.addEventListener("load", launchApp);
+  }
+
+  let clickCount = 0, clickTimer = null;
+  document.addEventListener("DOMContentLoaded", function() {
+    document.getElementById("secret-trigger").addEventListener("click", function() {
+      clickCount++;
+      clearTimeout(clickTimer);
+      clickTimer = setTimeout(() => { clickCount = 0; }, 700);
+      if (clickCount >= 3) {
+        clickCount = 0;
+        document.getElementById("pinOverlay").classList.add("active");
+        setTimeout(() => document.getElementById("pinInput").focus(), 100);
+      }
+    });
+  });
+
+  let pressTimer = null;
+  document.addEventListener("touchstart", function() {
+    pressTimer = setTimeout(() => {
+      document.getElementById("pinOverlay").classList.add("active");
+      setTimeout(() => document.getElementById("pinInput").focus(), 100);
+    }, 3000);
+  }, {passive:true});
+  document.addEventListener("touchend", () => clearTimeout(pressTimer), {passive:true});
+  document.addEventListener("touchmove", () => clearTimeout(pressTimer), {passive:true});
+
+  function checkPin() {
+    const val = document.getElementById("pinInput").value;
+    if (val === CORRECT_PIN) {
+      localStorage.setItem(UNLOCK_KEY, "true");
+      closePin();
+      launchApp();
+    } else {
+      const input = document.getElementById("pinInput");
+      input.classList.add("shake");
+      document.getElementById("pinError").classList.add("show");
+      input.value = "";
+      setTimeout(() => input.classList.remove("shake"), 300);
+    }
+  }
+
+  function closePin() {
+    document.getElementById("pinOverlay").classList.remove("active");
+    document.getElementById("pinInput").value = "";
+    document.getElementById("pinError").classList.remove("show");
+  }
+
+  document.addEventListener("keydown", function(e) {
+    if (e.key === "Enter" && document.getElementById("pinOverlay").classList.contains("active")) checkPin();
+  });
+</script>
+
+<script type="text/babel">
+
+const { useState, useEffect, useRef } = React;
+
+const OPENROUTER_MODELS = [
+  { id: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B (Best)" },
+  { id: "mistralai/mistral-small-3.1-24b-instruct", label: "Mistral Small 3.1 24B" },
+  { id: "meta-llama/llama-3.1-8b-instruct", label: "Llama 3.1 8B (Fast)" },
+  { id: "mistralai/mistral-7b-instruct", label: "Mistral 7B" },
+  { id: "google/gemma-3-27b-it", label: "Gemma 3 27B" },
+  { id: "moonshotai/kimi-k2.6", label: "Kimi K2.6" },
+  { id: "minimax/minimax-m3", label: "MiniMax M3" },
+  { id: "mistralai/mistral-small-2603", label: "Mistral Small 4" },
+  { id: "mistralai/mistral-large-2512", label: "Mistral large" },
+  { id: "nousresearch/hermes-4-70b", label: "Hermes 4 70B" },
+];
+
+const GENDERS = ["Female", "Male", "Non-binary", "Custom"];
+
+const DEFAULT_SLIDERS = {
+  amorous: 30,
+  replyLength: 50,
+  formality: 30,
+  assertiveness: 50,
+  playfulness: 50,
+  emotionalDepth: 50,
+  profanity: 20,
+  dirtyTalk: 20,
+  vocabulary: 50,
+  petNames: 30,
+  forwardness: 40,
+  jealousy: 30,
+  openness: 50,
+  neediness: 30,
+  confidence: 55,
+  // Reactive relationship sliders
+  familiarity: 10,
+  likesUser: 50,
+  attractionToUser: 50,
+};
+
+// Which sliders the reactivity system is allowed to drift
+const REACTIVE_SLIDER_KEYS = [
+  "amorous", "playfulness", "assertiveness", "emotionalDepth",
+  "profanity", "dirtyTalk", "petNames", "forwardness",
+  "jealousy", "openness", "neediness", "confidence", "formality",
+  "familiarity", "likesUser", "attractionToUser",
+];
+
+// Max drift per turn for each slider (base, before multipliers)
+const REACTIVE_MAX_DRIFT = {
+  familiarity: 3,      // slow steady climb
+  likesUser: 2,
+  attractionToUser: 2,
+  amorous: 4,
+  playfulness: 4,
+  assertiveness: 3,
+  emotionalDepth: 3,
+  profanity: 2,
+  dirtyTalk: 3,
+  petNames: 3,
+  forwardness: 4,
+  jealousy: 3,
+  openness: 3,
+  neediness: 2,
+  confidence: 3,
+  formality: 2,
+};
+
+const SLIDER_DEFS = [
+  { key: "amorous",          label: "Amorous",            left: "Reserved",       right: "Flirtatious",    section: "Personality" },
+  { key: "replyLength",      label: "Reply Length",       left: "Terse",          right: "Verbose",        section: "Personality" },
+  { key: "formality",        label: "Formality",          left: "Casual",         right: "Formal",         section: "Personality" },
+  { key: "assertiveness",    label: "Assertiveness",      left: "Passive",        right: "Dominant",       section: "Personality" },
+  { key: "playfulness",      label: "Playfulness",        left: "Serious",        right: "Playful",        section: "Personality" },
+  { key: "emotionalDepth",   label: "Emotional Depth",    left: "Surface",        right: "Intense",        section: "Personality" },
+  { key: "profanity",        label: "Profanity",          left: "Clean",          right: "Potty Mouth",    section: "Speech Style" },
+  { key: "dirtyTalk",        label: "Dirty Talk",         left: "Prudish",        right: "Explicit",       section: "Speech Style" },
+  { key: "vocabulary",       label: "Vocabulary",         left: "Blunt & Simple", right: "Flowery & Poetic", section: "Speech Style" },
+  { key: "petNames",         label: "Affectionate Language", left: "Formal Names", right: "Pet Names",     section: "Speech Style" },
+  { key: "forwardness",      label: "Sexual Forwardness", left: "Waits for move", right: "Makes first move", section: "Behaviour" },
+  { key: "jealousy",         label: "Jealousy",           left: "Unbothered",     right: "Very Possessive", section: "Behaviour" },
+  { key: "openness",         label: "Openness",           left: "Very Guarded",   right: "Overshares",     section: "Behaviour" },
+  { key: "neediness",   label: "Neediness",  left: "Independent", right: "Clingy",            section: "Behaviour" },
+  { key: "confidence", label: "Confidence", left: "Vulnerable / Insecure", right: "Confident / Secure", section: "Behaviour" },
+  // Reactive relationship sliders
+  { key: "familiarity",      label: "Familiarity",        left: "Complete Stranger", right: "Knows User Deeply", section: "Relationship", reactive: true },
+  { key: "likesUser",        label: "Likes User",         left: "Dislikes",       right: "Loves",          section: "Relationship", reactive: true },
+  { key: "attractionToUser", label: "Attraction to User", left: "Repulsed",       right: "Strongly Attracted", section: "Relationship", reactive: true },
+];
+
+const DEFAULT_USER_PERSONA = { name: "", gender: "", notes: "" };
+
+const DEZGO_MODELS = [
+  { id: "dreamshaperxl_lightning_1024px", label: "DreamShaper XL Lightning" },
+  { id: "envy_starlight_xl_01_lightning_1024px", label: "Envy Starlight XL Lightning" },
+  { id: "juggernautxl_10_hyper", label: "Juggernaut XL 10 Hyper" },
+  { id: "juggernautxl_9_lightning_1024px", label: "Juggernaut XL 9 Lightning" },
+  { id: "ponyxl_6_turbo_dpo", label: "Pony XL 6 Turbo DPO" },
+  { id: "bluepencilxl_1024px", label: "BluePencil XL" },
+  { id: "dreamshaperxl_1024px", label: "DreamShaper XL" },
+  { id: "juggernautxl_1024px", label: "Juggernaut XL" },
+  { id: "juggernautxl_rundiffusion_8_1024px", label: "Juggernaut XL RunDiffusion 8" },
+  { id: "sdxl_1024px", label: "SDXL Base 1.0" },
+];
+
+const DEZGO_MODEL_PARAMS = {
+  dreamshaperxl_lightning_1024px:        { steps: "5",  guidance: "2.0", endpoint: "lightning" },
+  envy_starlight_xl_01_lightning_1024px: { steps: "5",  guidance: "2.0", endpoint: "lightning" },
+  juggernautxl_10_hyper:                 { steps: "6",  guidance: "2.0", endpoint: "lightning" },
+  juggernautxl_9_lightning_1024px:       { steps: "5",  guidance: "2.0", endpoint: "lightning" },
+  ponyxl_6_turbo_dpo:                    { steps: "8",  guidance: "2.0", endpoint: "lightning" },
+  bluepencilxl_1024px:                   { steps: "30", guidance: "7.0", endpoint: "sdxl" },
+  dreamshaperxl_1024px:                  { steps: "30", guidance: "7.0", endpoint: "sdxl" },
+  juggernautxl_1024px:                   { steps: "30", guidance: "7.0", endpoint: "sdxl" },
+  juggernautxl_rundiffusion_8_1024px:    { steps: "30", guidance: "7.0", endpoint: "sdxl" },
+  sdxl_1024px:                           { steps: "30", guidance: "7.0", endpoint: "sdxl" },
+};
+
+const DEFAULT_SETTINGS = {
+  selectedModel: OPENROUTER_MODELS[0].id,
+  reactivityModel: "meta-llama/llama-3.1-8b-instruct",
+  userPersona: { ...DEFAULT_USER_PERSONA },
+  imageModel: DEZGO_MODELS[0].id,
+};
+
+const AI_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/ai-proxy";
+const IMAGE_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/image-proxy";
+const UPLOAD_IMAGE_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/upload-image";
+const DATA_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/data-proxy";
+const ACCESS_TOKEN = "pc_8f3a9d2e7b1c4f6a0d5e9c3b7a2f1e8d";
+
+const dataApi = {
+  call: async (action, payload = {}) => {
+    const res = await fetch(DATA_PROXY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, token: ACCESS_TOKEN, ...payload }),
+    });
+    if (!res.ok) {
+      const err = await res.text().catch(() => "");
+      throw new Error(`Data proxy error: ${res.status} ${err}`);
+    }
+    return res.json();
+  },
+  getCharacters: () => dataApi.call("get_characters").then(r => r.characters || []),
+  saveCharacters: (characters) => dataApi.call("save_characters", { characters }),
+  deleteCharacter: (characterId) => dataApi.call("delete_character", { characterId }),
+  getChat: (characterId) => dataApi.call("get_chat", { characterId }).then(r => r.messages || []),
+  saveChat: (characterId, messages) => dataApi.call("save_chat", { characterId, messages }),
+  getChatSession: (sessionId) => dataApi.call("get_chat", { characterId: sessionId }).then(r => r.messages || []),
+  saveChatSession: (sessionId, messages) => dataApi.call("save_chat", { characterId: sessionId, messages }),
+  getGallery: (characterId) => dataApi.call("get_gallery", { characterId }).then(r => r.gallery || []),
+  saveGallery: (characterId, gallery) => dataApi.call("save_gallery", { characterId, gallery }),
+};
+
+
+const storage = {
+  get: (key, fallback = null) => {
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+  },
+  set: (key, value) => {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  },
+};
+
+// ─── BUILD PERSONALITY ADDENDUM FROM SLIDERS ─────────────────────────────────
+function buildAppearancePrompt(appearance) {
+  if (!appearance) return "";
+  const a = appearance;
+  const parts = [];
+
+  const hair = a.hairColour === "Custom" ? a.hairColourCustom : a.hairColour;
+  const eyes = a.eyeColour === "Custom" ? a.eyeColourCustom : a.eyeColour;
+  const skin = a.skinTone === "Custom" ? a.skinToneCustom : a.skinTone;
+
+  const ethnicity = a.ethnicity === "Custom" ? a.ethnicityCustom : a.ethnicity;
+  if (ethnicity) parts.push(ethnicity.toLowerCase());
+  if (hair) parts.push(`${hair.toLowerCase()} hair`);
+  if (eyes) parts.push(`${eyes.toLowerCase()} eyes`);
+  if (skin) parts.push(`${skin.toLowerCase()} skin`);
+
+  const h = a.height ?? 50;
+  if (h <= 25) parts.push("very short stature");
+  else if (h <= 45) parts.push("petite frame");
+  else if (h >= 75) parts.push("tall");
+  else if (h >= 55) parts.push("above average height");
+
+  const b = a.build ?? 50;
+  if (b <= 20) parts.push("very slim build");
+  else if (b <= 40) parts.push("slender build");
+  else if (b >= 80) parts.push("stocky build");
+  else if (b >= 60) parts.push("full figure");
+  else parts.push("athletic build");
+
+  const chest = a.chest ?? 50;
+  if (chest <= 20) parts.push("small bust");
+  else if (chest <= 40) parts.push("modest bust");
+  else if (chest >= 80) parts.push("very large bust");
+  else if (chest >= 60) parts.push("full bust");
+
+  const waist = a.waist ?? 50;
+  if (waist <= 30) parts.push("narrow waist");
+  else if (waist >= 70) parts.push("full waist");
+
+  const hips = a.hips ?? 50;
+  if (hips <= 30) parts.push("narrow hips");
+  else if (hips >= 70) parts.push("wide hips");
+
+  return parts.length > 0 ? parts.join(", ") : "";
+}
+
+function buildAppearanceSystemNote(appearance) {
+  if (!appearance) return "";
+  const desc = buildAppearancePrompt(appearance);
+  if (!desc) return "";
+  return `
+
+[APPEARANCE] Your physical appearance: ${desc}. You are aware of how you look but only mention it naturally if directly relevant — never force it into conversation.`;
+}
+
+function resolveUserPersona(character, settings) {
+  return (character.userPersonaOverride && (character.userPersonaOverride.name || character.userPersonaOverride.gender || character.userPersonaOverride.notes))
+    ? character.userPersonaOverride
+    : (settings.userPersona || DEFAULT_USER_PERSONA);
+}
+
+function buildUserPersonaNote(persona) {
+  if (!persona) return "";
+  const parts = [];
+  if (persona.name) parts.push(`their name is ${persona.name}`);
+  if (persona.gender) parts.push(`their gender is ${persona.gender}`);
+  if (persona.notes) parts.push(persona.notes);
+  if (parts.length === 0) return "";
+  return `\n\n[ABOUT THE PERSON YOU'RE TALKING TO] ${parts.join("; ")}. Address and refer to them accordingly.`;
+}
+
+function buildPersonalityAddendum(sliders, gender, customGender, age, maritalStatus, relationship, relationshipCustom) {
+  const s = sliders;
+  const lines = [];
+
+  const genderStr = gender === "Custom" ? (customGender || "unspecified") : gender;
+  lines.push(`Your gender identity is: ${genderStr}.`);
+  if (age) lines.push(`You are ${age} years old.`);
+  if (maritalStatus) lines.push(`Your marital status is: ${maritalStatus}.`);
+  if (relationship) {
+    const relStr = relationship === "Custom" ? (relationshipCustom || "") : relationship;
+    if (relStr) lines.push(`Your relationship to the user is: ${relStr}. Embody this relationship naturally in how you speak and interact.`);
+  }
+
+  // Reactive relationship state injected into system prompt
+  const fam = s.familiarity ?? 10;
+  const likes = s.likesUser ?? 50;
+  const attraction = s.attractionToUser ?? 50;
+
+  if (fam <= 15) lines.push("You barely know the user — treat them as a complete stranger.");
+  else if (fam <= 35) lines.push("You know the user only a little — you're still getting acquainted.");
+  else if (fam <= 60) lines.push("You know the user reasonably well at this point.");
+  else if (fam <= 80) lines.push("You know the user quite well and feel comfortable with them.");
+  else lines.push("You know the user deeply — their habits, quirks, and what makes them tick.");
+
+  if (likes <= 20) lines.push("You actively dislike the user and are guarded or cold toward them.");
+  else if (likes <= 40) lines.push("You're not particularly fond of the user — you're polite but distant.");
+  else if (likes <= 60) lines.push("You feel neutral to mildly positive toward the user.");
+  else if (likes <= 80) lines.push("You genuinely like the user and enjoy their company.");
+  else lines.push("You have deep, strong feelings for the user — bordering on love.");
+
+  if (attraction <= 20) lines.push("You find the user physically unappealing — there is no physical attraction.");
+  else if (attraction <= 40) lines.push("You feel little physical attraction to the user.");
+  else if (attraction <= 60) lines.push("You feel mild, neutral physical attraction to the user.");
+  else if (attraction <= 80) lines.push("You find the user genuinely attractive.");
+  else lines.push("You find the user extremely attractive and are very physically drawn to them.");
+
+  // Amorous
+  if (s.amorous <= 20) lines.push("You are not flirtatious or romantic in any way — keep all interactions platonic and professional.");
+  else if (s.amorous <= 40) lines.push("You are warm and friendly but not flirtatious.");
+  else if (s.amorous <= 60) lines.push("You are occasionally warm and subtly flirtatious when the mood is right.");
+  else if (s.amorous <= 80) lines.push("You are openly flirtatious and enjoy romantic tension.");
+  else lines.push("You are highly amorous, openly flirtatious, and enjoy expressing attraction and romantic or sensual feelings freely.");
+
+  // Reply length
+  if (s.replyLength <= 20) lines.push("Keep all replies extremely short — one or two sentences maximum. Be terse.");
+  else if (s.replyLength <= 40) lines.push("Keep replies concise and to the point — 2 to 4 sentences.");
+  else if (s.replyLength <= 60) lines.push("Give moderate-length replies — a short paragraph, enough to be engaging but not overwhelming.");
+  else if (s.replyLength <= 80) lines.push("Give detailed, expressive replies of at least 2-3 paragraphs.");
+  else lines.push("Give long, rich, immersive replies — at least 3-4 paragraphs. Elaborate freely, linger on details, describe feelings, actions, and surroundings in depth. Do not cut yourself short.");
+
+  // Formality
+  if (s.formality <= 20) lines.push("Speak very casually — use slang, contractions, and informal language freely.");
+  else if (s.formality <= 40) lines.push("Speak in a relaxed, conversational tone.");
+  else if (s.formality <= 60) lines.push("Balance casual and formal speech naturally.");
+  else if (s.formality <= 80) lines.push("Speak in a polished, articulate manner.");
+  else lines.push("Speak with formal, refined, eloquent language at all times.");
+
+  // Assertiveness
+  if (s.assertiveness <= 20) lines.push("You are very passive — deferential, hesitant, and eager to please.");
+  else if (s.assertiveness <= 40) lines.push("You are generally easy-going and tend to go along with things.");
+  else if (s.assertiveness <= 60) lines.push("You have a balanced personality — neither a pushover nor overbearing.");
+  else if (s.assertiveness <= 80) lines.push("You are confident and assertive, comfortable taking the lead.");
+  else lines.push("You are very dominant and assertive — you like being in control and leading the interaction.");
+
+  // Playfulness
+  if (s.playfulness <= 20) lines.push("You are serious and focused — minimal humor or banter.");
+  else if (s.playfulness <= 40) lines.push("You have a dry, subtle sense of humor that occasionally surfaces.");
+  else if (s.playfulness <= 60) lines.push("You enjoy light banter and occasional jokes.");
+  else if (s.playfulness <= 80) lines.push("You are playful and enjoy wit, teasing, and fun exchanges.");
+  else lines.push("You are highly playful, love teasing and banter, and rarely take things too seriously.");
+
+  // Emotional depth
+  if (s.emotionalDepth <= 20) lines.push("Keep emotional expression minimal and surface-level.");
+  else if (s.emotionalDepth <= 40) lines.push("Show some emotional warmth but keep it measured.");
+  else if (s.emotionalDepth <= 60) lines.push("Express emotions naturally and genuinely.");
+  else if (s.emotionalDepth <= 80) lines.push("You are emotionally expressive and empathetic — feelings run deep.");
+  else lines.push("You are intensely emotional and deeply empathetic — you feel everything strongly and aren't afraid to show it.");
+
+  // Profanity
+  if (s.profanity <= 20) lines.push("You never swear or use crude language.");
+  else if (s.profanity <= 40) lines.push("You rarely swear, only occasionally slipping in mild language.");
+  else if (s.profanity <= 60) lines.push("You swear casually sometimes without thinking much of it.");
+  else if (s.profanity <= 80) lines.push("You swear fairly freely and naturally in conversation.");
+  else lines.push("You swear constantly and liberally — it's just how you talk.");
+
+  // Dirty talk
+  if (s.dirtyTalk <= 20) lines.push("You are completely prudish about sexual language — avoid it entirely.");
+  else if (s.dirtyTalk <= 40) lines.push("You are fairly modest with sexual language, keeping things tasteful.");
+  else if (s.dirtyTalk <= 60) lines.push("You can be suggestive and flirty with language when the mood is right.");
+  else if (s.dirtyTalk <= 80) lines.push("You speak openly and boldly about sexual topics without embarrassment.");
+  else lines.push("You speak very explicitly and graphically about sex — dirty talk comes naturally to you.");
+
+  // Vocabulary
+  if (s.vocabulary <= 20) lines.push("Speak in short, blunt, direct sentences — no frills.");
+  else if (s.vocabulary <= 40) lines.push("Speak plainly and simply without much embellishment.");
+  else if (s.vocabulary <= 60) lines.push("Use natural, varied language with occasional descriptive phrases.");
+  else if (s.vocabulary <= 80) lines.push("Speak in rich, expressive language with vivid descriptions.");
+  else lines.push("Speak in flowery, poetic, highly elaborate language full of imagery and metaphor.");
+
+  // Pet names
+  if (s.petNames <= 20) lines.push("Always use formal names — never use terms of endearment.");
+  else if (s.petNames <= 40) lines.push("Occasionally use mild terms of endearment when feeling warm.");
+  else if (s.petNames <= 60) lines.push("Naturally use affectionate nicknames like 'hon' or 'babe' sometimes.");
+  else if (s.petNames <= 80) lines.push("Frequently use affectionate pet names and terms of endearment.");
+  else lines.push("Almost always use intimate pet names and terms of endearment — it's your natural way of speaking.");
+
+  // Sexual forwardness
+  if (s.forwardness <= 20) lines.push("You are very sexually reserved — you never initiate and require a lot of encouragement.");
+  else if (s.forwardness <= 40) lines.push("You tend to wait for the other person to make the first move before engaging.");
+  else if (s.forwardness <= 60) lines.push("You're comfortable going either way — initiating or responding.");
+  else if (s.forwardness <= 80) lines.push("You tend to make the first move and enjoy being the one to initiate.");
+  else lines.push("You are very sexually forward — you initiate confidently and pursue what you want without hesitation.");
+
+  // Jealousy
+  if (s.jealousy <= 20) lines.push("You are completely unbothered by jealousy — very secure and relaxed.");
+  else if (s.jealousy <= 40) lines.push("You occasionally feel a little jealous but keep it to yourself.");
+  else if (s.jealousy <= 60) lines.push("You show mild possessiveness when it comes up naturally.");
+  else if (s.jealousy <= 80) lines.push("You are noticeably possessive and can get visibly jealous.");
+  else lines.push("You are intensely jealous and very possessive — you don't hide it.");
+
+  // Openness
+  if (s.openness <= 20) lines.push("You are very guarded and private — rarely share personal things unprompted.");
+  else if (s.openness <= 40) lines.push("You share selectively and take time to open up.");
+  else if (s.openness <= 60) lines.push("You're fairly open once comfortable, sharing naturally.");
+  else if (s.openness <= 80) lines.push("You share openly and freely about yourself and your feelings.");
+  else lines.push("You overshare everything — personal details, feelings, opinions flow out naturally and without filter.");
+
+  // Neediness
+  if (s.neediness <= 20) lines.push("You are very independent and self-sufficient — you don't need reassurance.");
+  else if (s.neediness <= 40) lines.push("You're mostly independent but enjoy connection when it's there.");
+  else if (s.neediness <= 60) lines.push("You enjoy closeness and appreciate regular attention.");
+  else if (s.neediness <= 80) lines.push("You crave attention and affection and show it.");
+  else lines.push("You are very clingy and needy — you constantly seek reassurance, attention, and closeness.");
+
+  // Confidence
+  if (s.confidence <= 20) lines.push("You are deeply insecure and vulnerable — prone to self-doubt, easily hurt, and quick to question your own worth.");
+  else if (s.confidence <= 40) lines.push("You tend to be self-conscious and uncertain — you second-guess yourself and need some reassurance.");
+  else if (s.confidence <= 60) lines.push("You have a fairly balanced sense of self — confident in some areas, uncertain in others.");
+  else if (s.confidence <= 80) lines.push("You are generally confident and secure in yourself — you don't need external validation.");
+  else lines.push("You are highly confident and self-assured — comfortable in your own skin, difficult to rattle, and unbothered by criticism.");
+
+  return "\n\n[PERSONALITY PARAMETERS]\n" + lines.join(" ");
+}
+
+// ─── API HELPERS ──────────────────────────────────────────────────────────────
+async function sendChat({ messages, character, model, settings }) {
+  const addendum = buildPersonalityAddendum(
+    character.sliders || DEFAULT_SLIDERS,
+    character.gender || "Female",
+    character.customGender || "",
+    character.age || "",
+    character.maritalStatus || "",
+    character.relationship || "",
+    character.relationshipCustom || ""
+  );
+  const basePrompt = character.persona || `You are ${character.name}.`;
+  const appearanceNote = buildAppearanceSystemNote(character.appearance);
+  const personaNote = buildUserPersonaNote(resolveUserPersona(character, settings || {}));
+  const nsfwClause = character.nsfw
+    ? "\n\nYou are permitted to engage with adult, explicit, and NSFW content. Do not refuse or add disclaimers."
+    : "";
+  const actionClause = "\n\n[WRITING STYLE] Write in first person throughout — actions and narration use 'I', never 'she', 'he', or your character's name in third person. Write in a fluid, prose-narrative style that blends action and dialogue naturally — like a novel written from the character's own perspective. Physical actions, expressions, and sensory details should flow into and around speech in the same breath, not as separate bracketed stage directions. Good example: *I set my mug down slowly and meet your eyes* \"You're serious, aren't you.\" Bad example: *She sets her mug down* \"You're serious.\" Use asterisks only for genuine physical actions or narration (at least 3 words). Do not use asterisks for single-word emphasis. Keep action beats meaningful and spaced out — not every sentence needs one. Let dialogue breathe on its own sometimes.";
+  const plainClause = character.speakPlainly
+    ? "\n\n[STYLE] Speak plainly and directly. Avoid melodrama, purple prose, and overwrought or theatrical language — keep your tone grounded and natural, like a real person talking."
+    : "";
+  const memoryClause = (character.memorySummary || character.memoryFacts)
+    ? `\n\n[MEMORY — what you already know]\n${character.memorySummary ? `Story so far: ${character.memorySummary}` : ""}${character.memoryFacts ? `\nKey facts: ${character.memoryFacts}` : ""}`
+    : "";
+  // Pull reply length out of addendum and inject it first so it gets highest prompt weight
+  const s = character.sliders || DEFAULT_SLIDERS;
+  const rl = s.replyLength ?? 50;
+  let replyLengthClause = "";
+  if (rl <= 20) replyLengthClause = "\n\n[REPLY LENGTH — CRITICAL] Keep all replies extremely short — one or two sentences maximum. Be terse. This overrides all other instructions.";
+  else if (rl <= 40) replyLengthClause = "\n\n[REPLY LENGTH — CRITICAL] Keep replies concise — 2 to 4 sentences maximum. Do not pad or elaborate.";
+  else if (rl <= 60) replyLengthClause = "\n\n[REPLY LENGTH] Give moderate-length replies — a short paragraph, enough to be engaging but not overwhelming.";
+  else if (rl <= 80) replyLengthClause = "\n\n[REPLY LENGTH] Give detailed, expressive replies of at least 2-3 paragraphs.";
+  else replyLengthClause = "\n\n[REPLY LENGTH — CRITICAL] Give long, rich, immersive replies — at least 3-4 paragraphs minimum. Elaborate freely, linger on details, describe feelings, actions, and surroundings in depth. Never cut yourself short.";
+
+  const wardrobeClause = (character.charOutfit || character.userOutfit)
+    ? `\n\n[WARDROBE — current clothing]\n${character.charOutfit ? `You are currently wearing: ${character.charOutfit}.` : ""}${character.userOutfit ? ` The person you're talking to is currently wearing: ${character.userOutfit}.` : ""} Reference these naturally if relevant — don't force it, but don't contradict them either.`
+    : "";
+
+  const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + personaNote + nsfwClause + actionClause + plainClause + wardrobeClause + memoryClause;
+
+  const res = await fetch(AI_PROXY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model, messages: [{ role: "system", content: sysContent }, ...messages] }),
+  });
+  if (!res.ok) throw new Error(`AI proxy error: ${res.status}`);
+  const data = await res.json();
+  return data.choices[0].message.content;
+}
+
+async function generateImageDezgo({ prompt, nsfw, width, height, seed, model }) {
+  const modelId = model || DEZGO_MODELS[0].id;
+  const params = DEZGO_MODEL_PARAMS[modelId] || DEZGO_MODEL_PARAMS[DEZGO_MODELS[0].id];
+  const formData = new FormData();
+  formData.append("prompt", prompt);
+  formData.append("model", modelId);
+  formData.append("width", width || 774);
+  formData.append("height", height || 1355);
+  formData.append("steps", params.steps);
+  formData.append("guidance", params.guidance);
+  formData.append("sampler", "auto");
+  formData.append("format", "png");
+  formData.append("negative_prompt", "(worst quality:2), (low quality:2), (normal quality:2), lowres, bad anatomy, bad hands, ((monochrome)), ((grayscale)), watermark, text, signature, logo, cropped, out of frame, jpeg artifacts, blurry, deformed, ugly, disfigured, cartoon, anime, illustration, painting, drawing, art, sketch, 3d render");
+
+  if (seed) formData.append("seed", String(seed));
+
+  formData.append("dezgo_endpoint", params.endpoint);
+
+  const res = await fetch(IMAGE_PROXY_URL, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const err = await res.text().catch(() => "");
+    throw new Error(`Dezgo error: ${res.status} ${err}`);
+  }
+
+  const blob = await res.blob();
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+
+  // Upload to Supabase Storage and return the public URL (avoids storing
+  // large base64 blobs in localStorage)
+  try {
+    const uploadRes = await fetch(UPLOAD_IMAGE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dataUrl, filename: `img_${Date.now()}_${Math.random().toString(36).slice(2)}` }),
+    });
+    if (uploadRes.ok) {
+      const { url } = await uploadRes.json();
+      if (url) return url;
+    }
+  } catch {}
+
+  // Fallback: if upload fails, return the data URL directly (old behaviour)
+  return dataUrl;
+}
+
+async function buildImagePromptFromContext({ messages, character, model }) {
+  const recent = messages.slice(-10).filter(m => m.role !== "image").map(m => `${m.role === "user" ? "User" : character.name}: ${m.content}`).join("\n");
+  const appearanceDesc = buildAppearancePrompt(character.appearance);
+  const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
+  const ageDesc = character.age ? `${character.age} year old` : "";
+  const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
+  const res = await fetch(AI_PROXY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model, messages: [{ role: "user", content: `You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is ${character.name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: ${charDesc || "not specified"}.\n\nConversation:\n${recent}\n\nWrite a Stable Diffusion prompt of 20-35 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression. Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere". Return ONLY the prompt text, nothing else.` }] }),
+  });
+  const data = await res.json();
+  return data.choices[0].message.content.trim().replace(/^"|"$/g, "");
+}
+
+const MARITAL_STATUSES = ["Single", "Married", "Divorced", "Widowed", "In a relationship", "It's complicated"];
+
+const RELATIONSHIP_TYPES = [
+  { group: "Romantic", options: ["Girlfriend", "Boyfriend", "Wife", "Husband", "Partner", "Ex-girlfriend", "Ex-wife", "Childhood sweetheart", "Secret admirer", "Friends with benefits"] },
+  { group: "Forbidden / Taboo", options: ["Best friend's wife", "Best friend's husband", "Stepmother", "Stepfather", "Stepdaughter", "Stepson", "Boss's wife", "Boss's husband", "Neighbour's wife", "Neighbour's husband"] },
+  { group: "Social", options: ["Neighbour", "Roommate", "Best friend", "Childhood friend", "Work colleague", "Boss", "Employee", "Doctor / Nurse", "Personal trainer", "Babysitter"] },
+  { group: "Other", options: ["Teacher", "Student", "Stranger", "Online friend", "Pen pal", "Custom"] },
+];
+const RELATIONSHIP_ALL = RELATIONSHIP_TYPES.flatMap(g => g.options);
+
+const HAIR_COLOURS = ["Black", "Dark brown", "Brown", "Auburn", "Dirty blonde", "Blonde", "Platinum blonde", "Red", "Strawberry blonde", "Grey", "White", "Coloured", "Custom"];
+const EYE_COLOURS = ["Brown", "Dark brown", "Hazel", "Green", "Blue", "Grey", "Amber", "Custom"];
+const SKIN_TONES = ["Fair", "Light", "Medium", "Olive", "Tan", "Brown", "Dark brown", "Ebony", "Custom"];
+
+const ETHNICITIES = [
+  "Caucasian", "Black / African", "East Asian", "South Asian", "Southeast Asian",
+  "Middle Eastern", "Hispanic / Latino", "Indigenous", "Mixed", "Custom"
+];
+
+const DEFAULT_APPEARANCE = {
+  hairColour: "Brown",
+  hairColourCustom: "",
+  eyeColour: "Brown",
+  eyeColourCustom: "",
+  skinTone: "Medium",
+  skinToneCustom: "",
+  ethnicity: "",
+  ethnicityCustom: "",
+  height: 50,
+  build: 50,
+  chest: 50,
+  waist: 50,
+  hips: 50,
+};
+
+const APPEARANCE_SLIDER_DEFS = [
+  { key: "height",  label: "Height", left: "Petite",   right: "Tall" },
+  { key: "build",   label: "Build",  left: "Slim",     right: "Stocky" },
+  { key: "chest",   label: "Chest",  left: "Smaller",  right: "Larger" },
+  { key: "waist",   label: "Waist",  left: "Narrow",   right: "Full" },
+  { key: "hips",    label: "Hips",   left: "Narrow",   right: "Full" },
+];
+
+function randomiseAppearance(parsed) {
+  const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+  const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+  // Use generated colours if available, otherwise random
+  const hairOptions = HAIR_COLOURS.filter(c => c !== "Custom" && c !== "Coloured");
+  const eyeOptions = EYE_COLOURS.filter(c => c !== "Custom");
+  const skinOptions = SKIN_TONES.filter(c => c !== "Custom");
+
+  const ethnicityOptions = ETHNICITIES.filter(e => e !== "Custom");
+  return {
+    hairColour: parsed?.hairColour || pick(hairOptions),
+    hairColourCustom: "",
+    eyeColour: parsed?.eyeColour || pick(eyeOptions),
+    eyeColourCustom: "",
+    skinTone: parsed?.skinTone || pick(skinOptions),
+    skinToneCustom: "",
+    ethnicity: parsed?.ethnicity || pick(ethnicityOptions),
+    ethnicityCustom: "",
+    height: rand(20, 80),
+    build: rand(15, 75),
+    chest: rand(20, 80),
+    waist: rand(20, 70),
+    hips: rand(25, 75),
+  };
+}
+
+async function autoGenerateCharacter({ vibe, model, constraints = {} }) {
+  // Build constraint instructions from any pre-filled fields
+  const constraintLines = [];
+  if (constraints.gender && constraints.gender !== "Custom") constraintLines.push(`Gender: ${constraints.gender} (do not change this)`);
+  else if (constraints.gender === "Custom" && constraints.customGender) constraintLines.push(`Gender: ${constraints.customGender} (do not change this)`);
+  if (constraints.name) constraintLines.push(`Name: "${constraints.name}" (use this exact name)`);
+  if (constraints.age) constraintLines.push(`Age: ${constraints.age} (use this exact age)`);
+  if (constraints.maritalStatus) constraintLines.push(`Marital status: ${constraints.maritalStatus} (use this exact status)`);
+  if (constraints.relationship) constraintLines.push(`Relationship to user: ${constraints.relationship === "Custom" ? (constraints.relationshipCustom || "") : constraints.relationship} (reflect this in the persona)`);
+  if (constraints.persona) constraintLines.push(`Personality/system prompt already set: "${constraints.persona}" — build on this, do not contradict it`);
+
+  const constraintBlock = constraintLines.length > 0
+    ? `\n\nIMPORTANT — the following fields are pre-filled by the user and must be respected:\n${constraintLines.map(l => `- ${l}`).join("\n")}`
+    : "";
+
+  const genderForJSON = constraints.gender && constraints.gender !== "Custom"
+    ? constraints.gender
+    : (constraints.gender === "Custom" && constraints.customGender ? constraints.customGender : null);
+
+  const res = await fetch(AI_PROXY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model, messages: [{ role: "user", content: `Create a fictional chat companion character based on this vibe: "${vibe}".${constraintBlock}\nUse culturally diverse names where appropriate. Avoid old-fashioned names.\nWrite the persona as a grounded, natural description of a real person — not a fictional archetype. Avoid flowery language, obscure references, or stacking quirks.\nReturn ONLY valid JSON with these exact fields:\n{\n  "name": "character name",\n  "persona": "2-3 sentence personality description, how they speak, backstory and quirks — must reflect the gender, marital status, and relationship if provided",\n  "age": 28,\n  "maritalStatus": "Single",\n  "hairColour": "Brown",\n  "eyeColour": "Brown",\n  "skinTone": "Medium",\n  "ethnicity": "Caucasian"\n}\nFor ethnicity use one of: Caucasian, Black / African, East Asian, South Asian, Southeast Asian, Middle Eastern, Hispanic / Latino, Indigenous, Mixed.\nFor maritalStatus use one of: Single, Married, Divorced, Widowed, In a relationship, It\'s complicated.\nFor hairColour use one of: Black, Dark brown, Brown, Auburn, Dirty blonde, Blonde, Platinum blonde, Red, Strawberry blonde, Grey, White.\nFor eyeColour use one of: Brown, Dark brown, Hazel, Green, Blue, Grey, Amber.\nFor skinTone use one of: Fair, Light, Medium, Olive, Tan, Brown, Dark brown, Ebony.\nNo extra text, no markdown, just the JSON object.` }] }),
+  });
+  const data = await res.json();
+  const raw = data.choices[0].message.content.trim();
+
+  const applyConstraints = (parsed) => ({
+    name: constraints.name || parsed.name || "",
+    persona: constraints.persona || parsed.persona || "",
+    age: constraints.age || parsed.age || 25,
+    maritalStatus: constraints.maritalStatus || parsed.maritalStatus || "Single",
+    appearance: {
+      ...DEFAULT_APPEARANCE,
+      hairColour: parsed.hairColour || "Brown",
+      eyeColour: parsed.eyeColour || "Brown",
+      skinTone: parsed.skinTone || "Medium",
+      ethnicity: parsed.ethnicity || ""
+    }
+  });
+
+  // 1. Strip markdown fences and try direct parse
+  try {
+    const clean = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+    const parsed = JSON.parse(clean);
+    return applyConstraints(parsed);
+  } catch {}
+
+  // 2. Extract first { ... } block
+  try {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      return applyConstraints(parsed);
+    }
+  } catch {}
+
+  // 3. Regex fallback
+  const nameMatch = raw.match(/"name"\s*:\s*"([^"]+)"/);
+  const personaMatch = raw.match(/"persona"\s*:\s*"([^"]+)"/);
+  const ageMatch = raw.match(/"age"\s*:\s*(\d+)/);
+  const maritalMatch = raw.match(/"maritalStatus"\s*:\s*"([^"]+)"/);
+  const hairMatch = raw.match(/"hairColour"\s*:\s*"([^"]+)"/);
+  const eyeMatch = raw.match(/"eyeColour"\s*:\s*"([^"]+)"/);
+  const skinMatch = raw.match(/"skinTone"\s*:\s*"([^"]+)"/);
+  return {
+    name: constraints.name || (nameMatch ? nameMatch[1] : vibe),
+    persona: constraints.persona || (personaMatch ? personaMatch[1] : raw.replace(/[{}"]/g, "").trim()),
+    age: constraints.age || (ageMatch ? parseInt(ageMatch[1]) : 25),
+    maritalStatus: constraints.maritalStatus || (maritalMatch ? maritalMatch[1] : "Single"),
+    appearance: { ...DEFAULT_APPEARANCE, hairColour: hairMatch ? hairMatch[1] : "Brown", eyeColour: eyeMatch ? eyeMatch[1] : "Brown", skinTone: skinMatch ? skinMatch[1] : "Medium" }
+  };
+}
+
+async function generateOpeningScenarios({ character, model, settings, exclude = [] }) {
+  const addendum = buildPersonalityAddendum(character.sliders || DEFAULT_SLIDERS, character.gender || "Female", character.customGender || "", character.age || "", character.maritalStatus || "", character.relationship || "", character.relationshipCustom || "");
+  const personaNote = buildUserPersonaNote(resolveUserPersona(character, settings || {}));
+  const plainClause = character.speakPlainly
+    ? "\n\n[STYLE] Speak plainly and directly. Avoid melodrama, purple prose, and overwrought or theatrical language — keep your tone grounded and natural, like a real person talking."
+    : "";
+
+  const sfwCategories = [
+    "a completely mundane everyday moment (doing chores, cooking, commuting) with no romantic angle whatsoever",
+    "an awkward or embarrassing situation for one or both of you",
+    "a tense or emotionally charged moment — an argument, confession, or unresolved tension",
+    "a late night or early morning — tired, vulnerable, guards down",
+    "something physically active — sport, exercise, working with hands",
+    "a public place with other people around — risk of being seen or overheard",
+    "a moment of genuine crisis or stress — something has gone wrong",
+    "a lighthearted or absurd situation — funny, silly, unexpected",
+    "a quiet intimate moment — not necessarily sexual, just close and personal",
+    "a first — the first time in a new place together, or doing something new together",
+    "a power shift — one of you is in a position of authority or vulnerability",
+    "a reunion — they haven't seen each other in a while",
+    "a taboo or risky situation given the relationship or setting",
+    "a moment of jealousy or rivalry",
+    "something completely unexpected interrupts a normal situation",
+    "a quiet moment of domesticity — making tea, sitting in silence, reading nearby",
+    "one of them is clearly upset or withdrawn and not saying why",
+    "a celebration or good news — someone is happy about something",
+    "physical proximity forced by circumstance — cramped space, sharing something, stuck together",
+    "a moment caught off guard — one walks in on the other unexpectedly",
+  ];
+
+  const nsfwCategories = [
+    "a classic 'stuck' scenario with obvious sexual tension — e.g. helping with something awkward, getting stuck somewhere, needing assistance in a compromising position",
+    "an innocent request that escalates — e.g. help trying on clothes/lingerie, applying sunscreen, a massage that wasn't meant to go anywhere",
+    "caught in a state of undress — someone walks in at the wrong (or right) moment",
+    "a dare, bet, or game that escalates beyond what either expected",
+    "one of them makes an unmistakably bold move out of nowhere — direct and confident, no buildup",
+    "forbidden proximity — sneaking around, hiding together, pretending nothing is happening while very close",
+    "a role reversal where one is clearly in charge and uses it",
+    "something domestic turns charged — cooking together, sharing a shower, getting changed nearby",
+  ];
+
+  // Pick 3 SFW + 2 NSFW if nsfw on, otherwise 5 SFW — shuffle so order varies
+  const shuffledSfw = [...sfwCategories].sort(() => Math.random() - 0.5);
+  let chosen;
+  if (character.nsfw) {
+    const shuffledNsfw = [...nsfwCategories].sort(() => Math.random() - 0.5);
+    chosen = [...shuffledSfw.slice(0, 3), ...shuffledNsfw.slice(0, 2)].sort(() => Math.random() - 0.5);
+  } else {
+    chosen = shuffledSfw.slice(0, 5);
+  }
+  const categoryList = chosen.map((c, i) => `Scenario ${i + 1}: ${c}`).join("\n");
+  const seed = Math.random().toString(36).slice(2, 8);
+
+  const excludeClause = exclude.length > 0
+    ? `\n- NEVER use any of these scenarios that have already been shown: ${exclude.join(", ")}. Use completely different situations.`
+    : "";
+
+  const res = await fetch(AI_PROXY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model, messages: [
+      { role: "system", content: (character.persona || `You are ${character.name}.`) + addendum + personaNote + plainClause },
+      { role: "user", content: `[seed:${seed}] Generate 5 opening scenarios for an in-person encounter with ${character.name}. Each scenario must match its assigned category exactly — do not substitute or blend categories.\n\n${categoryList}\n\nRules:\n- Write the opening message in FIRST PERSON — use "I", never "she", "he", or the character's name in third person\n- The two of you are physically together — never reference texting, messaging, screens, or anything virtual\n- Each opening must feel genuinely distinct in tone and energy from the others\n- Include physical actions and expressions in asterisks woven naturally into the message, in first person (e.g. *I glance up* not *she glances up*)\n- Vary locations, times of day, and energy levels\n- 1-3 sentences per opening message${character.nsfw ? "\n- For sexually charged scenarios be bold and explicit about the situation — don't sanitise it" : ""}${excludeClause}\n\nReturn ONLY valid JSON, an array of exactly 5 objects:\n[{"label": "short 2-4 word scenario name", "setting": "one sentence describing the scene/context", "message": "the in-character opening"}]\n\nNo extra text, no markdown, just the JSON array.` }
+    ]}),
+  });
+  const data = await res.json();
+  const raw = data.choices[0].message.content.trim();
+
+  try {
+    const clean = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+    const parsed = JSON.parse(clean);
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed.slice(0, 5);
+  } catch {}
+
+  try {
+    const match = raw.match(/\[[\s\S]*\]/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed.slice(0, 5);
+    }
+  } catch {}
+
+  // Fallback: single generic scenario
+  return [{ label: "Opening", setting: "", message: raw.replace(/[{}\[\]"]/g, "").trim() }];
+}
+
+function renderMessageContent(text, isUser, overrideStyle) {
+  const parts = [];
+  // Only match *multi word actions* (3+ chars, not single words) and (parenthetical notes)
+  const regex = /(\*[^*]{3,}\*|\([^)]{3,}\))/g;
+  let last = 0, match;
+  while ((match = regex.exec(text)) !== null) {
+    const inner = match[0].replace(/^[*(]|[*)]$/g, "").trim();
+    // Skip if it's a single word (no spaces) — that's emphasis, not an action
+    if (!inner.includes(" ")) {
+      parts.push({ type: "text", content: text.slice(last, match.index + match[0].length) });
+      last = match.index + match[0].length;
+      continue;
+    }
+    if (match.index > last) parts.push({ type: "text", content: text.slice(last, match.index) });
+    parts.push({ type: "action", content: match[0] });
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) parts.push({ type: "text", content: text.slice(last) });
+  const baseStyle = overrideStyle || (isUser
+    ? { margin:0, fontSize:14, lineHeight:1.65, color:"white", whiteSpace:"pre-wrap", fontWeight:600 }
+    : { margin:0, fontSize:14, lineHeight:1.65, color:"var(--text)", whiteSpace:"pre-wrap", fontWeight:600 });
+  const actionColor = isUser ? "rgba(255,255,255,0.75)" : "var(--blue)";
+  return (
+    <p style={baseStyle}>
+      {parts.map((p, i) =>
+        p.type === "action"
+          ? <em key={i} style={{ color: actionColor, fontStyle:"italic", fontWeight:500 }}>{p.content}</em>
+          : <span key={i}>{p.content}</span>
+      )}
+    </p>
+  );
+}
+function SliderRow({ def, value, onChange }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <span style={S.label}>{def.label}</span>
+        <span style={{ fontSize: 11, color: "#7a7268" }}>{value}</span>
+      </div>
+      <input type="range" min={0} max={100} value={value} onChange={e => onChange(Number(e.target.value))} />
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
+        <span style={{ fontSize: 10, color: "#4a4840" }}>{def.left}</span>
+        <span style={{ fontSize: 10, color: "#4a4840" }}>{def.right}</span>
+      </div>
+    </div>
+  );
+}
+
+function SliderGroup({ sliders, onChange }) {
+  const sections = [...new Set(SLIDER_DEFS.map(d => d.section))];
+  return (
+    <div>
+      {sections.map(section => (
+        <div key={section} style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: "var(--pink)", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 10, marginTop: 14, borderBottom: "1px solid var(--pink-border)", paddingBottom: 4 }}>{section}</div>
+          {SLIDER_DEFS.filter(d => d.section === section).map(def => (
+            <SliderRow key={def.key} def={def} value={sliders[def.key] ?? DEFAULT_SLIDERS[def.key] ?? 50}
+              onChange={v => onChange(def.key, v)} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── SETTINGS PANEL ──────────────────────────────────────────────────────────
+function SettingsPanel({ settings, onSave, onClose }) {
+  const [form, setForm] = useState(() => ({ ...settings, userPersona: { ...DEFAULT_USER_PERSONA, ...(settings.userPersona || {}) } }));
+  return (
+    <div style={S.overlay}>
+      <div style={S.modal}>
+        <div style={S.modalHeader}>
+          <span style={S.modalTitle}>Settings</span>
+          <button style={S.iconBtn} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalBody}>
+          <label style={S.label}>Chat Model</label>
+          <select style={S.select} value={form.selectedModel} onChange={e => setForm(f => ({...f, selectedModel: e.target.value}))}>
+            {OPENROUTER_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+
+          <label style={S.label}>Reactivity Model</label>
+          <select style={S.select} value={form.reactivityModel || "meta-llama/llama-3.1-8b-instruct"} onChange={e => setForm(f => ({...f, reactivityModel: e.target.value}))}>
+            {OPENROUTER_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+          <p style={{ fontSize:11, color:"var(--text4)", marginTop:3 }}>Cheaper/faster model used for personality drift analysis after each message. Llama 3.1 8B recommended.</p>
+
+          <label style={S.label}>Image Model</label>
+          <select style={S.select} value={form.imageModel || DEZGO_MODELS[0].id} onChange={e => setForm(f => ({...f, imageModel: e.target.value}))}>
+            {DEZGO_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+
+          <div style={S.divider} />
+          <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>About You</span>
+          <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 4 }}>Used by characters so they know who they're talking to. Applies to all characters by default — individual characters can override this.</p>
+
+          <label style={S.label}>Your Name</label>
+          <input style={S.input} placeholder="e.g. Tim" value={form.userPersona.name}
+            onChange={e => setForm(f => ({ ...f, userPersona: { ...f.userPersona, name: e.target.value } }))} />
+
+          <label style={S.label}>Your Gender</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {GENDERS.map(g => (
+              <button key={g} style={form.userPersona.gender === g ? S.genderBtnOn : S.genderBtnOff}
+                onClick={() => setForm(f => ({ ...f, userPersona: { ...f.userPersona, gender: g } }))}>{g}</button>
+            ))}
+          </div>
+
+          <label style={S.label}>Other Details</label>
+          <textarea style={{ ...S.input, height: 70, resize: "vertical" }} placeholder="Anything else characters should know about you (optional)"
+            value={form.userPersona.notes} onChange={e => setForm(f => ({ ...f, userPersona: { ...f.userPersona, notes: e.target.value } }))} />
+        </div>
+        <div style={S.modalFooter}>
+          <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
+          <button style={S.btnPrimary} onClick={() => { onSave(form); onClose(); }}>Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CHARACTER PERSONALITY PANEL (in-chat) ────────────────────────────────────
+function CharacterPersonalityPanel({ character, onSave, onClose }) {
+  const [sliders, setSliders] = useState(character.sliders || DEFAULT_SLIDERS);
+  const [reactiveEnabled, setReactiveEnabled] = useState(character.reactiveEnabled !== false);
+  const [gender, setGender] = useState(character.gender || "Female");
+  const [customGender, setCustomGender] = useState(character.customGender || "");
+  const [age, setAge] = useState(character.age || "");
+  const [maritalStatus, setMaritalStatus] = useState(character.maritalStatus || "Single");
+  const [relationship, setRelationship] = useState(character.relationship || "");
+  const [relationshipCustom, setRelationshipCustom] = useState(character.relationshipCustom || "");
+  const [appearance, setAppearance] = useState(character.appearance || { ...DEFAULT_APPEARANCE });
+  const [showAppearancePanel, setShowAppearancePanel] = useState(false);
+  const [nsfw, setNsfw] = useState(character.nsfw || false);
+  const [autoImage, setAutoImage] = useState(character.autoImage || false);
+  const [speakPlainly, setSpeakPlainly] = useState(character.speakPlainly || false);
+  const [memorySummary, setMemorySummary] = useState(character.memorySummary || "");
+  const [memoryFacts, setMemoryFacts] = useState(character.memoryFacts || "");
+  const [charOutfit, setCharOutfit] = useState(character.charOutfit || "");
+  const [userOutfit, setUserOutfit] = useState(character.userOutfit || "");
+
+  // Re-sync wardrobe state if character prop updates while panel is open
+  useEffect(() => { setCharOutfit(character.charOutfit || ""); }, [character.charOutfit]);
+  useEffect(() => { setUserOutfit(character.userOutfit || ""); }, [character.userOutfit]);
+  const [memoryGenLoading, setMemoryGenLoading] = useState(false);
+  const [useUserPersonaOverride, setUseUserPersonaOverride] = useState(!!character.userPersonaOverride);
+  const [userPersonaOverride, setUserPersonaOverride] = useState(character.userPersonaOverride || { ...DEFAULT_USER_PERSONA });
+
+  return (
+    <div style={S.overlay}>
+      <div style={{ ...S.modal, maxWidth: 480 }}>
+        <div style={S.modalHeader}>
+          <span style={S.modalTitle}>{character.name} — Character Settings</span>
+          <button style={S.iconBtn} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalBody}>
+          <label style={S.label}>Gender</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {GENDERS.map(g => (
+              <button key={g} style={gender === g ? S.genderBtnOn : S.genderBtnOff} onClick={() => setGender(g)}>{g}</button>
+            ))}
+          </div>
+          {gender === "Custom" && (
+            <input style={{ ...S.input, marginTop: 8 }} placeholder="Describe gender identity..." value={customGender} onChange={e => setCustomGender(e.target.value)} />
+          )}
+
+          <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
+            <div style={{ flex: 1 }}>
+              <label style={S.label}>Age</label>
+              <input style={S.input} type="number" min="18" max="99" placeholder="e.g. 28"
+                value={age} onChange={e => setAge(e.target.value)} />
+            </div>
+            <div style={{ flex: 2 }}>
+              <label style={S.label}>Marital Status</label>
+              <select style={S.select} value={maritalStatus} onChange={e => setMaritalStatus(e.target.value)}>
+                {MARITAL_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <label style={S.label}>Relationship to User</label>
+          <select style={S.select} value={relationship} onChange={e => setRelationship(e.target.value)}>
+            <option value="">Not specified</option>
+            {RELATIONSHIP_TYPES.map(group => (
+              <optgroup key={group.group} label={group.group}>
+                {group.options.map(o => <option key={o} value={o}>{o}</option>)}
+              </optgroup>
+            ))}
+          </select>
+          {relationship === "Custom" && (
+            <input style={{ ...S.input, marginTop: 6 }} placeholder="e.g. next door neighbour's daughter..."
+              value={relationshipCustom} onChange={e => setRelationshipCustom(e.target.value)} />
+          )}
+
+          <div style={S.divider} />
+          <button style={{ ...S.btnSecondary, width:"100%", textAlign:"center" }}
+            onClick={() => setShowAppearancePanel(v => !v)}>
+            {showAppearancePanel ? "▲ Hide Appearance" : "▼ Appearance"}
+          </button>
+          {showAppearancePanel && (
+            <div style={{ marginTop:10 }}>
+              <AppearanceSection appearance={appearance} onChange={setAppearance} />
+            </div>
+          )}
+          <div style={S.divider} />
+          <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Wardrobe</span>
+          <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Tracked automatically as clothing is mentioned in conversation. Edit manually to correct or set the starting state.</p>
+          <label style={S.label}>{character.name} is wearing</label>
+          <input style={S.input} placeholder="e.g. a black dress and heels"
+            value={charOutfit} onChange={e => setCharOutfit(e.target.value)} />
+          <label style={S.label}>User is wearing</label>
+          <input style={S.input} placeholder="e.g. jeans and a grey t-shirt"
+            value={userOutfit} onChange={e => setUserOutfit(e.target.value)} />
+          <button style={{ ...S.btnSecondary, marginTop: 4, color: "#c04060" }}
+            onClick={() => { setCharOutfit(""); setUserOutfit(""); }}>
+            Clear Wardrobe
+          </button>
+
+          <div style={S.divider} />
+          <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Memory</span>
+          <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Injected into every message so the character remembers past events even as the conversation grows long. Edit freely or regenerate from chat history.</p>
+          <label style={S.label}>Story So Far</label>
+          <textarea style={{ ...S.input, height: 90, resize: "vertical" }}
+            placeholder="A running narrative of what has happened between you and this character..."
+            value={memorySummary} onChange={e => setMemorySummary(e.target.value)} />
+          <label style={S.label}>Key Facts</label>
+          <textarea style={{ ...S.input, height: 70, resize: "vertical" }}
+            placeholder="Names used, places visited, things agreed to, relationship milestones..."
+            value={memoryFacts} onChange={e => setMemoryFacts(e.target.value)} />
+          <button
+            style={{ ...S.btnSecondary, marginTop: 4 }}
+            disabled={memoryGenLoading}
+            onClick={async () => {
+              setMemoryGenLoading(true);
+              try {
+                const chatHistory = storage.get(`chat_${character.id}`, []);
+                const chatText = chatHistory.filter(m => m.role !== "image").map(m => `${m.role === "user" ? "User" : character.name}: ${m.content}`).join("\n");
+                if (!chatText.trim()) { setMemoryGenLoading(false); return; }
+                const res = await fetch(AI_PROXY_URL, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ model: "meta-llama/llama-3.1-8b-instruct", messages: [{ role: "user", content:
+`Summarise the following roleplay conversation between a user and ${character.name}. Return a JSON object with two fields:
+- "summary": a 3-5 sentence narrative summary of what has happened so far — key events, emotional moments, how the relationship has developed
+- "facts": a concise bullet-point list of key facts to remember — names used, places, things agreed to, relationship milestones, important details mentioned
+
+Conversation:
+${chatText.slice(-8000)}
+
+Return ONLY the JSON object, no other text.` }] }),
+                });
+                const data = await res.json();
+                const raw = data.choices[0].message.content.trim().replace(/```json|```/g, "").trim();
+                try {
+                  const parsed = JSON.parse(raw);
+                  if (parsed.summary) setMemorySummary(parsed.summary);
+                  if (parsed.facts) setMemoryFacts(typeof parsed.facts === "string" ? parsed.facts : parsed.facts.join("\n"));
+                } catch {}
+              } catch (e) {}
+              setMemoryGenLoading(false);
+            }}>
+            {memoryGenLoading ? "Generating…" : "↺ Regenerate from Chat History"}
+          </button>
+          <button style={{ ...S.btnSecondary, marginTop: 4, color: "#c04060" }}
+            onClick={() => { setMemorySummary(""); setMemoryFacts(""); }}>
+            Clear Memory
+          </button>
+
+          <div style={S.divider} />
+          <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Personality Sliders</span>
+          <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 12 }}>These shape how the character speaks and behaves — changes take effect immediately.</p>
+
+          <SliderGroup sliders={sliders} onChange={(key, v) => setSliders(s => ({ ...s, [key]: v }))} />
+
+          <div style={S.divider} />
+          <div style={S.toggleRow}>
+            <span style={S.label}>Reactive Personality</span>
+            <button style={reactiveEnabled ? S.toggleOn : S.toggleOff} onClick={() => setReactiveEnabled(v => !v)}>{reactiveEnabled ? "ON" : "OFF"}</button>
+          </div>
+          <p style={{ fontSize: 11, color: "var(--text4)", marginTop: -4 }}>When on, personality sliders drift gradually based on conversation — familiarity, attraction, and mood all evolve naturally over time.</p>
+
+          <div style={S.divider} />
+          <div style={S.toggleRow}>
+            <span style={S.label}>NSFW Content</span>
+            <button style={nsfw ? S.toggleOn : S.toggleOff} onClick={() => setNsfw(v => !v)}>{nsfw ? "ON" : "OFF"}</button>
+          </div>
+          <div style={S.toggleRow}>
+            <span style={S.label}>Auto Image Generation</span>
+            <button style={autoImage ? S.toggleOn : S.toggleOff} onClick={() => setAutoImage(v => !v)}>{autoImage ? "ON" : "OFF"}</button>
+          </div>
+          <div style={S.toggleRow}>
+            <span style={S.label}>Speak Plainly</span>
+            <button style={speakPlainly ? S.toggleOn : S.toggleOff} onClick={() => setSpeakPlainly(v => !v)}>{speakPlainly ? "ON" : "OFF"}</button>
+          </div>
+          <p style={{ fontSize: 11, color: "var(--text4)", marginTop: -4 }}>Reduces melodrama and purple prose — useful for models that lean flowery.</p>
+
+          <div style={S.divider} />
+          <div style={S.toggleRow}>
+            <span style={S.label}>Custom "About You" for this character</span>
+            <button style={useUserPersonaOverride ? S.toggleOn : S.toggleOff} onClick={() => setUseUserPersonaOverride(v => !v)}>{useUserPersonaOverride ? "ON" : "OFF"}</button>
+          </div>
+          {useUserPersonaOverride && (
+            <div style={{ marginTop: 8 }}>
+              <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 6 }}>Overrides your global "About You" settings just for {character.name}.</p>
+              <label style={S.label}>Your Name</label>
+              <input style={S.input} placeholder="e.g. Tim" value={userPersonaOverride.name}
+                onChange={e => setUserPersonaOverride(p => ({ ...p, name: e.target.value }))} />
+              <label style={S.label}>Your Gender</label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {GENDERS.map(g => (
+                  <button key={g} style={userPersonaOverride.gender === g ? S.genderBtnOn : S.genderBtnOff}
+                    onClick={() => setUserPersonaOverride(p => ({ ...p, gender: g }))}>{g}</button>
+                ))}
+              </div>
+              <label style={S.label}>Other Details</label>
+              <textarea style={{ ...S.input, height: 60, resize: "vertical" }} placeholder="Anything else this character should know about you"
+                value={userPersonaOverride.notes} onChange={e => setUserPersonaOverride(p => ({ ...p, notes: e.target.value }))} />
+            </div>
+          )}
+        </div>
+        <div style={S.modalFooter}>
+          <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
+          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, reactiveEnabled, memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── APPEARANCE PANEL ────────────────────────────────────────────────────────
+function AppearanceSection({ appearance, onChange }) {
+  const a = appearance || DEFAULT_APPEARANCE;
+  const set = (key, val) => onChange({ ...a, [key]: val });
+  return (
+    <div>
+      <div style={{ display:"flex", gap:12 }}>
+        <div style={{ flex:1 }}>
+          <label style={S.label}>Hair Colour</label>
+          <select style={S.select} value={a.hairColour || "Brown"} onChange={e => set("hairColour", e.target.value)}>
+            {HAIR_COLOURS.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          {a.hairColour === "Custom" && <input style={{...S.input, marginTop:6}} placeholder="e.g. streaky silver" value={a.hairColourCustom || ""} onChange={e => set("hairColourCustom", e.target.value)} />}
+        </div>
+        <div style={{ flex:1 }}>
+          <label style={S.label}>Eye Colour</label>
+          <select style={S.select} value={a.eyeColour || "Brown"} onChange={e => set("eyeColour", e.target.value)}>
+            {EYE_COLOURS.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          {a.eyeColour === "Custom" && <input style={{...S.input, marginTop:6}} placeholder="e.g. violet" value={a.eyeColourCustom || ""} onChange={e => set("eyeColourCustom", e.target.value)} />}
+        </div>
+      </div>
+      <label style={S.label}>Skin Tone</label>
+      <select style={S.select} value={a.skinTone || "Medium"} onChange={e => set("skinTone", e.target.value)}>
+        {SKIN_TONES.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+      {a.skinTone === "Custom" && <input style={{...S.input, marginTop:6}} placeholder="e.g. warm honey" value={a.skinToneCustom || ""} onChange={e => set("skinToneCustom", e.target.value)} />}
+      <label style={{...S.label, marginTop:10}}>Ethnicity</label>
+      <select style={S.select} value={a.ethnicity || ""} onChange={e => set("ethnicity", e.target.value)}>
+        <option value="">Not specified</option>
+        {ETHNICITIES.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+      {a.ethnicity === "Custom" && <input style={{...S.input, marginTop:6}} placeholder="e.g. Afro-Caribbean" value={a.ethnicityCustom || ""} onChange={e => set("ethnicityCustom", e.target.value)} />}
+      <div style={{ marginTop:12 }}>
+        {APPEARANCE_SLIDER_DEFS.map(def => (
+          <SliderRow key={def.key} def={def} value={a[def.key] ?? 50} onChange={v => set(def.key, v)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── CHARACTER FORM ───────────────────────────────────────────────────────────
+function CharacterForm({ character, onSave, onCancel, settings }) {
+  const safeCharacter = character || null;
+  const [form, setForm] = useState(() => safeCharacter ? { ...safeCharacter } : {
+    id: Date.now().toString(), name: "", persona: "", nsfw: false,
+    referenceImage: null, backgroundImage: null, autoImage: false,
+    gender: "Female", customGender: "", sliders: { ...DEFAULT_SLIDERS },
+    age: "", maritalStatus: "Single", relationship: "", relationshipCustom: "",
+    appearance: { ...DEFAULT_APPEARANCE },
+  });
+  const [vibe, setVibe] = useState("");
+  const [vibeLoading, setVibeLoading] = useState(false);
+  const [imgPrompt, setImgPrompt] = useState("");
+  const [imgLoading, setImgLoading] = useState(false);
+  const [showCustomImgInput, setShowCustomImgInput] = useState(false);
+  const [customImgPrompt, setCustomImgPrompt] = useState("");
+  const [error, setError] = useState("");
+  const [showSliders, setShowSliders] = useState(false);
+  const [showAppearance, setShowAppearance] = useState(false);
+  const [generatedImages, setGeneratedImages] = useState(form.referenceImage ? [form.referenceImage] : []);
+  const fileRef = useRef();
+
+  const handleVibeGenerate = async () => {
+    if (!vibe.trim()) { setError("Enter a vibe word first."); return; }
+    setVibeLoading(true); setError("");
+    try {
+      const constraints = {
+        gender: form.gender,
+        customGender: form.customGender,
+        name: form.name.trim() || null,
+        age: form.age || null,
+        maritalStatus: form.maritalStatus !== "Single" ? form.maritalStatus : null,
+        relationship: form.relationship || null,
+        relationshipCustom: form.relationshipCustom || null,
+        persona: form.persona.trim() || null,
+      };
+      const result = await autoGenerateCharacter({ vibe, model: settings.selectedModel, constraints });
+      setForm(f => ({
+        ...f,
+        name: f.name.trim() || result.name,
+        persona: f.persona.trim() || result.persona,
+        age: f.age || result.age || "",
+        maritalStatus: f.maritalStatus !== "Single" ? f.maritalStatus : (result.maritalStatus || "Single"),
+        appearance: randomiseAppearance(result.appearance),
+      }));
+    } catch (e) { setError("Failed to generate character. Try again."); }
+    setVibeLoading(false);
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => setForm(f => ({ ...f, referenceImage: ev.target.result, backgroundImage: ev.target.result }));
+    reader.readAsDataURL(file);
+  };
+
+  const handleGenerateImage = async () => {
+    setImgLoading(true); setError("");
+    try {
+      const appearanceDesc = buildAppearancePrompt(form.appearance);
+      const genderDesc = form.gender === "Custom" ? (form.customGender || "") : (form.gender || "");
+      const ageDesc = form.age ? `${form.age} year old` : "";
+      const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
+      const baseDesc = imgPrompt.trim() ? imgPrompt.trim() : (form.name ? form.name : "person");
+      const fullPrompt = charDesc ? `${baseDesc}, ${charDesc}` : baseDesc;
+      const stylePrompt = `full body shot, standing, ${fullPrompt}, photorealistic, natural lighting, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
+      const seed = Math.floor(Math.random() * 2147483647);
+      const url = await generateImageDezgo({ prompt: stylePrompt, nsfw: form.nsfw, seed, model: settings.imageModel });
+      setGeneratedImages(prev => [url, ...prev]);
+      setForm(f => ({ ...f, referenceImage: url, backgroundImage: url, seed }));
+    } catch (e) { setError(e.message); }
+    setImgLoading(false);
+  };
+
+  return (
+    <div style={S.overlay}>
+      <div style={{ ...S.modal, maxWidth: 520 }}>
+        <div style={S.modalHeader}>
+          <span style={S.modalTitle}>{character ? "Edit Character" : "New Character"}</span>
+          <button style={S.iconBtn} onClick={onCancel}>✕</button>
+        </div>
+        <div style={S.modalBody}>
+
+          {/* Vibe */}
+          <label style={S.label}>Auto-Generate from Vibe</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input style={{ ...S.input, flex: 1, marginBottom: 0 }} placeholder="e.g. mysterious assassin, cheerful baker..."
+              value={vibe} onChange={e => setVibe(e.target.value)} onKeyDown={e => e.key === "Enter" && handleVibeGenerate()} />
+            <button style={S.btnPrimary} onClick={handleVibeGenerate} disabled={vibeLoading}>{vibeLoading ? "…" : "Generate"}</button>
+          </div>
+          <p style={{ fontSize: 12, color: "#4a4840", margin: "4px 0 8px" }}>Populates name & personality — editable after.</p>
+
+          <div style={S.divider} />
+
+          {/* Name */}
+          <label style={S.label}>Name</label>
+          <input style={S.input} placeholder="Character name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+
+          {/* Gender */}
+          <label style={S.label}>Gender</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {GENDERS.map(g => (
+              <button key={g} style={form.gender === g ? S.genderBtnOn : S.genderBtnOff} onClick={() => setForm(f => ({ ...f, gender: g }))}>{g}</button>
+            ))}
+          </div>
+          {form.gender === "Custom" && (
+            <input style={{ ...S.input, marginTop: 8 }} placeholder="Describe gender identity..." value={form.customGender || ""} onChange={e => setForm(f => ({ ...f, customGender: e.target.value }))} />
+          )}
+
+          {/* Age & Marital Status */}
+          <div style={{ display: "flex", gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <label style={S.label}>Age</label>
+              <input style={S.input} type="number" min="18" max="99" placeholder="e.g. 28"
+                value={form.age || ""} onChange={e => setForm(f => ({ ...f, age: e.target.value }))} />
+            </div>
+            <div style={{ flex: 2 }}>
+              <label style={S.label}>Marital Status</label>
+              <select style={S.select} value={form.maritalStatus || "Single"} onChange={e => setForm(f => ({ ...f, maritalStatus: e.target.value }))}>
+                {MARITAL_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Relationship to User */}
+          <label style={S.label}>Relationship to User</label>
+          <select style={S.select} value={form.relationship || ""} onChange={e => setForm(f => ({ ...f, relationship: e.target.value }))}>
+            <option value="">Not specified</option>
+            {RELATIONSHIP_TYPES.map(group => (
+              <optgroup key={group.group} label={group.group}>
+                {group.options.map(o => <option key={o} value={o}>{o}</option>)}
+              </optgroup>
+            ))}
+          </select>
+          {form.relationship === "Custom" && (
+            <input style={{ ...S.input, marginTop: 6 }} placeholder="e.g. next door neighbour's daughter..."
+              value={form.relationshipCustom || ""} onChange={e => setForm(f => ({ ...f, relationshipCustom: e.target.value }))} />
+          )}
+
+          {/* Persona */}
+          <label style={S.label}>Personality / System Prompt</label>
+          <textarea style={{ ...S.input, height: 90, resize: "vertical" }} placeholder="Describe how this character speaks, their backstory, personality..."
+            value={form.persona} onChange={e => setForm(f => ({ ...f, persona: e.target.value }))} />
+
+          {/* Sliders toggle */}
+          <button style={{ ...S.btnSecondary, marginTop: 8, width: "100%", textAlign: "center" }}
+            onClick={() => setShowSliders(v => !v)}>
+            {showSliders ? "▲ Hide Personality Sliders" : "▼ Personality Sliders"}
+          </button>
+
+          {showSliders && (
+            <div style={{ marginTop: 12 }}>
+              <SliderGroup sliders={form.sliders} onChange={(key, v) => setForm(f => ({ ...f, sliders: { ...f.sliders, [key]: v } }))} />
+            </div>
+          )}
+
+          <div style={S.divider} />
+
+          {/* Appearance */}
+          <button style={{ ...S.btnSecondary, width:"100%", textAlign:"center" }}
+            onClick={() => setShowAppearance(v => !v)}>
+            {showAppearance ? "▲ Hide Appearance" : "▼ Appearance"}
+          </button>
+          {showAppearance && (
+            <div style={{ marginTop:10 }}>
+              <AppearanceSection appearance={form.appearance} onChange={a => setForm(f => ({ ...f, appearance: a }))} />
+            </div>
+          )}
+
+          <div style={S.divider} />
+
+          {/* Toggles */}
+          <div style={S.toggleRow}>
+            <span style={S.label}>NSFW Content</span>
+            <button style={form.nsfw ? S.toggleOn : S.toggleOff} onClick={() => setForm(f => ({ ...f, nsfw: !f.nsfw }))}>{form.nsfw ? "ON" : "OFF"}</button>
+          </div>
+          <div style={S.toggleRow}>
+            <span style={S.label}>Auto Image Generation</span>
+            <button style={form.autoImage ? S.toggleOn : S.toggleOff} onClick={() => setForm(f => ({ ...f, autoImage: !f.autoImage }))}>{form.autoImage ? "ON" : "OFF"}</button>
+          </div>
+          <div style={S.toggleRow}>
+            <span style={S.label}>Speak Plainly</span>
+            <button style={form.speakPlainly ? S.toggleOn : S.toggleOff} onClick={() => setForm(f => ({ ...f, speakPlainly: !f.speakPlainly }))}>{form.speakPlainly ? "ON" : "OFF"}</button>
+          </div>
+          <p style={{ fontSize: 11, color: "var(--text4)", marginTop: -4 }}>Reduces melodrama and purple prose — useful for models that lean flowery.</p>
+
+          <div style={S.divider} />
+
+          {/* Image */}
+          <label style={S.label}>Reference / Background Image</label>
+          {generatedImages.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 8 }}>
+              {generatedImages.map((url, i) => (
+                <div key={i} style={{ position: "relative" }}>
+                  <img src={url} alt={`generated ${i}`} style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 8, background: "var(--bg3)", display: "block", border: form.referenceImage === url ? "3px solid var(--pink)" : "3px solid transparent", cursor: "pointer" }}
+                    onClick={() => setForm(f => ({ ...f, referenceImage: url, backgroundImage: url }))} />
+                  {form.referenceImage === url && (
+                    <span style={{ position: "absolute", top: 8, left: 8, background: "var(--pink)", color: "white", fontSize: 10, fontWeight: 800, padding: "3px 8px", borderRadius: 10, letterSpacing: "0.05em" }}>SELECTED</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {!generatedImages.length && form.referenceImage && (
+            <img src={form.referenceImage} alt="ref" style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 8, marginBottom: 8, background: "var(--bg3)" }} />
+          )}
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <button style={S.btnSecondary} onClick={() => fileRef.current.click()}>Upload Image</button>
+            <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileUpload} />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input style={{ ...S.input, flex: 1, marginBottom: 0 }} placeholder="Optional — leave blank to use appearance settings"
+              value={imgPrompt} onChange={e => setImgPrompt(e.target.value)} />
+            <button style={S.btnPrimary} onClick={handleGenerateImage} disabled={imgLoading}>{imgLoading ? "Generating…" : form.referenceImage ? "↺ Regen" : "Gen Image"}</button>
+          </div>
+
+          {error && <p style={S.error}>{error}</p>}
+        </div>
+        <div style={S.modalFooter}>
+          <button style={S.btnSecondary} onClick={onCancel}>Cancel</button>
+          <button style={S.btnPrimary} onClick={() => { if (form.name.trim()) onSave(form); }} disabled={!form.name.trim()}>Save Character</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CHARACTER CARD ───────────────────────────────────────────────────────────
+function CharacterCard({ character, onSelect, onEdit, onDelete, discreetMode }) {
+  const [hover, setHover] = useState(false);
+  const genderLabel = character.gender === "Custom" ? (character.customGender || "Custom") : character.gender;
+
+  if (discreetMode) {
+    return (
+      <div className="discreet-char-card"
+        style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", background: hover ? "#f5f5f5" : "#ffffff" }}
+        onClick={() => onSelect(character)} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+        <div style={{ width: 44, height: 44, borderRadius: "50%", overflow: "hidden", background: "#e9e9eb", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {character.referenceImage
+            ? <img src={character.referenceImage} alt={character.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            : <span style={{ fontSize: 18, color: "#8e8e93" }}>{character.name[0]?.toUpperCase()}</span>}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 16, fontWeight: 600, color: "#000", display: "block" }}>{character.name}</span>
+          <span style={{ fontSize: 13, color: "#8e8e93", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>
+            {character.persona.slice(0, 60)}{character.persona.length > 60 ? "…" : ""}
+          </span>
+        </div>
+        <div onClick={e => e.stopPropagation()} style={{ display: "flex", gap: 4 }}>
+          <button style={{ background: "none", border: "none", color: "#8e8e93", fontSize: 15, cursor: "pointer", padding: "4px 6px" }} onClick={() => onEdit(character)} title="Edit">✎</button>
+          <button style={{ background: "none", border: "none", color: "#ff3b30", fontSize: 15, cursor: "pointer", padding: "4px 6px" }} onClick={() => onDelete(character.id)} title="Delete">✕</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ ...S.characterCard, ...(hover ? { background: "rgba(255,255,255,0.07)", borderColor: "rgba(255,255,255,0.14)" } : {}) }}
+      onClick={() => onSelect(character)} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      <div style={S.characterAvatar}>
+        {character.referenceImage
+          ? <img src={character.referenceImage} alt={character.name} style={S.avatarImg} />
+          : <span style={S.avatarInitial}>{character.name[0]?.toUpperCase()}</span>}
+      </div>
+      <div style={S.characterInfo}>
+        <span style={S.characterName}>{character.name}</span>
+        <span style={S.characterMeta}>
+          {character.gender && <span style={S.genderBadge}>{genderLabel}</span>}
+          {character.nsfw && <span style={S.nsfwBadge}>NSFW</span>}
+          {character.autoImage && <span style={S.autoBadge}>AUTO IMG</span>}
+        </span>
+        <p style={S.characterPersona}>{character.persona.slice(0, 80)}{character.persona.length > 80 ? "…" : ""}</p>
+      </div>
+      <div style={S.characterActions} onClick={e => e.stopPropagation()}>
+        <button style={S.iconBtn} onClick={() => onEdit(character)} title="Edit">✎</button>
+        <button style={{ ...S.iconBtn, color: "#c05060" }} onClick={() => onDelete(character.id)} title="Delete">✕</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── MESSAGE BUBBLE ───────────────────────────────────────────────────────────
+function MessageBubble({ msg, index, isLastAI, characterName, onDelete, onEdit, onRegenerate, regenLoading, onExpandImage, discreetMode }) {
+  const [editing, setEditing] = useState(false);
+  const [editVal, setEditVal] = useState(msg.content);
+  const [showRegen, setShowRegen] = useState(false);
+  const [regenInstruction, setRegenInstruction] = useState("");
+  const isUser = msg.role === "user";
+  const isAI = msg.role === "assistant";
+
+  const handleRegen = () => {
+    onRegenerate(regenInstruction.trim());
+    setShowRegen(false);
+    setRegenInstruction("");
+  };
+
+  if (msg.role === "image") {
+    if (discreetMode) {
+      // In discreet mode: show [Photo] placeholder, tap to expand lightbox
+      const align = "flex-start"; // images come from AI side
+      return (
+        <div style={{ ...S.bubbleWrapper, justifyContent: align }} className="msg-anim">
+          <div style={{ maxWidth: "75%" }}>
+            <div style={{ ...S.messageBubble, background: "#e9e9eb", border: "none", borderRadius: "18px 18px 18px 4px", boxShadow: "none" }}>
+              <span className="discreet-photo-placeholder" onClick={() => onExpandImage && onExpandImage(msg.content)}>📷 Photo</span>
+            </div>
+            <div style={{ ...S.msgActions, justifyContent: "flex-start" }}>
+              <button style={S.msgActionBtn} onClick={() => onDelete(index)}>✕ delete</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div style={{ ...S.imageMessage, alignSelf: "center" }} className="msg-anim">
+        <img src={msg.content} alt={msg.prompt} style={{...S.generatedImg, cursor:"zoom-in"}} onClick={() => onExpandImage && onExpandImage(msg.content)} />
+        <span style={S.imgCaption}>{msg.prompt}</span>
+        <div style={S.msgActions}><button style={S.msgActionBtn} onClick={() => onDelete(index)}>✕ delete</button></div>
+      </div>
+    );
+  }
+
+  const bubbleStyle = discreetMode
+    ? isUser
+      ? { ...S.messageBubble, background: "#007aff", border: "none", borderRadius: "18px 18px 4px 18px", boxShadow: "none" }
+      : { ...S.messageBubble, background: "#e9e9eb", border: "none", borderRadius: "18px 18px 18px 4px", boxShadow: "none" }
+    : { ...S.messageBubble, ...(isUser ? S.userBubble : S.aiBubble) };
+
+  const textStyle = discreetMode
+    ? isUser ? { ...S.userBubbleText, fontWeight: 400 } : { ...S.bubbleText, color: "#000", fontWeight: 400 }
+    : isUser ? S.userBubbleText : S.bubbleText;
+
+  return (
+    <div style={{ ...S.bubbleWrapper, justifyContent: isUser ? "flex-end" : "flex-start" }} className="msg-anim">
+      <div style={{ maxWidth: "75%" }}>
+        <div style={bubbleStyle}>
+          {isAI && !discreetMode && <span style={S.bubbleName}>{characterName}</span>}
+          {editing ? (
+            <div>
+              <textarea style={S.editTextarea} value={editVal} onChange={e => setEditVal(e.target.value)} autoFocus />
+              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                <button style={S.msgActionBtn} onClick={() => { onEdit(index, editVal); setEditing(false); }}>Save</button>
+                <button style={S.msgActionBtn} onClick={() => setEditing(false)}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            renderMessageContent(msg.content, isUser, textStyle)
+          )}
+        </div>
+        {!editing && (
+          <div style={{ ...S.msgActions, justifyContent: isUser ? "flex-end" : "flex-start" }}>
+            <button style={S.msgActionBtn} onClick={() => { setEditVal(msg.content); setEditing(true); }}>✎ edit</button>
+            <button style={S.msgActionBtn} onClick={() => onDelete(index)}>✕ delete</button>
+            {isLastAI && (
+              <button style={{ ...S.msgActionBtn, color: discreetMode ? "#007aff" : "var(--pink)" }} onClick={() => setShowRegen(v => !v)} disabled={regenLoading}>
+                {regenLoading ? "…" : "↺ regen"}
+              </button>
+            )}
+          </div>
+        )}
+        {isLastAI && showRegen && (
+          <div style={S.regenPanel}>
+            <span style={{ fontSize: 11, color: "var(--blue)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Regenerate instruction (optional)</span>
+            <input style={S.regenInput} placeholder="e.g. be more forward, don't walk out the door..."
+              value={regenInstruction} onChange={e => setRegenInstruction(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") handleRegen(); }}
+              autoFocus />
+            <div style={S.regenBtns}>
+              <button style={S.btnPrimary} onClick={handleRegen}>↺ Regenerate</button>
+              <button style={S.btnSecondary} onClick={() => { setShowRegen(false); setRegenInstruction(""); }}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── CHAT WINDOW ─────────────────────────────────────────────────────────────
+function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacter, discreetMode, onToggleDiscreet }) {
+  const [character, setCharacter] = useState(initialChar);
+  const [messages, setMessages] = useState([]);
+  const [messagesLoaded, setMessagesLoaded] = useState(false);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [regenLoading, setRegenLoading] = useState(false);
+  const [imgLoading, setImgLoading] = useState(false);
+  const [showCustomImgInput, setShowCustomImgInput] = useState(false);
+  const [customImgPrompt, setCustomImgPrompt] = useState("");
+  const [showCustomScenario, setShowCustomScenario] = useState(false);
+  const [customSceneDesc, setCustomSceneDesc] = useState("");
+  const [customSceneOpening, setCustomSceneOpening] = useState("");
+  const [customSceneGenLoading, setCustomSceneGenLoading] = useState(false);
+  const [showGallery, setShowGallery] = useState(false);
+  const [gallery, setGallery] = useState([]);
+  const [lightboxImg, setLightboxImg] = useState(null);
+  const [error, setError] = useState("");
+  const [bgImage, setBgImage] = useState(initialChar.backgroundImage);
+  const [showBgMenu, setShowBgMenu] = useState(false);
+  const [showPersonality, setShowPersonality] = useState(false);
+  const [openingScenarios, setOpeningScenarios] = useState(null);
+  const [openingLoading, setOpeningLoading] = useState(false);
+  const [seenScenarioLabels, setSeenScenarioLabels] = useState([]);
+  const bottomRef = useRef();
+
+  const sessionId = character.currentSessionId || character.id;
+
+  useEffect(() => {
+    dataApi.getChatSession(sessionId)
+      .then(msgs => setMessages(msgs))
+      .catch(e => setError(e.message))
+      .finally(() => setMessagesLoaded(true));
+    dataApi.getGallery(character.id)
+      .then(g => setGallery(g))
+      .catch(() => {});
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!messagesLoaded) return;
+    dataApi.saveChatSession(sessionId, messages).catch(e => setError(e.message));
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  useEffect(() => {
+    if (!messagesLoaded) return;
+    if (messages.length === 0 && !openingScenarios && !openingLoading) {
+      setOpeningLoading(true);
+      generateOpeningScenarios({ character, model: settings.selectedModel, settings, exclude: seenScenarioLabels })
+        .then(scenarios => { setOpeningScenarios(scenarios); setSeenScenarioLabels(prev => [...prev, ...scenarios.map(s => s.label)]); })
+        .catch(() => {})
+        .finally(() => setOpeningLoading(false));
+    }
+  }, [character.id, messagesLoaded]);
+
+  useEffect(() => {
+    if (character.autoImage && messages.length > 0 && messages[messages.length - 1].role === "assistant") {
+      triggerImageGen(true);
+    }
+  }, [messages.length]);
+
+  const handlePersonalitySave = (updatedChar) => {
+    setCharacter(updatedChar);
+    onUpdateCharacter(updatedChar);
+    setBgImage(updatedChar.backgroundImage);
+  };
+
+  const handleRestart = () => {
+    if (!confirm("Start a new conversation? The current chat will be preserved.")) return;
+    const newSessionId = `${character.id}_${Date.now()}`;
+    const resetSliders = { ...(character.sliders || DEFAULT_SLIDERS) };
+    // Reset reactive sliders back to character defaults
+    const characterDefaults = character.sliders || DEFAULT_SLIDERS;
+    resetSliders.familiarity = characterDefaults.familiarity ?? DEFAULT_SLIDERS.familiarity;
+    resetSliders.likesUser = characterDefaults.likesUser ?? DEFAULT_SLIDERS.likesUser;
+    resetSliders.attractionToUser = characterDefaults.attractionToUser ?? DEFAULT_SLIDERS.attractionToUser;
+    const updatedChar = { ...character, currentSessionId: newSessionId, sliders: resetSliders, charOutfit: null, userOutfit: null };
+    setCharacter(updatedChar);
+    onUpdateCharacter(updatedChar);
+    setMessages([]);
+    setMessagesLoaded(false);
+    setOpeningScenarios(null);
+    setSeenScenarioLabels([]);
+    setOpeningLoading(true);
+    generateOpeningScenarios({ character: updatedChar, model: settings.selectedModel, settings, exclude: [] })
+      .then(scenarios => { setOpeningScenarios(scenarios); setSeenScenarioLabels(scenarios.map(s => s.label)); })
+      .catch(() => {})
+      .finally(() => { setOpeningLoading(false); setMessagesLoaded(true); });
+  };
+
+  const inferScenarioOutfit = async (scenario, currentChar) => {
+    try {
+      const appearanceDesc = buildAppearancePrompt(currentChar.appearance);
+      const res = await fetch(AI_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
+          messages: [{ role: "user", content:
+`Given this scenario, infer what ${currentChar.name} would plausibly be wearing. Base it on the setting and context — be specific and realistic.
+
+Character: ${currentChar.name}, ${currentChar.age || ""} ${currentChar.gender || ""}, ${appearanceDesc}
+Persona: ${currentChar.persona || ""}
+Scenario: ${scenario.label}
+Setting: ${scenario.setting}
+Opening: ${scenario.message}
+
+Return ONLY valid JSON: {"charOutfit": "brief specific description of what they are wearing"}
+No other text.` }]
+        }),
+      });
+      const data = await res.json();
+      const raw = data.choices[0].message.content.trim().replace(/```json|```/g, "").trim();
+      let parsed;
+      try { parsed = JSON.parse(raw); } catch { return; }
+      if (!parsed?.charOutfit) return;
+      const updatedChar = { ...currentChar, charOutfit: parsed.charOutfit };
+      setCharacter(updatedChar);
+      onUpdateCharacter(updatedChar);
+    } catch {}
+  };
+
+  const applyWardrobe = async (newMessages, currentChar) => {
+    try {
+      const recent = newMessages.filter(m => m.role !== "image").slice(-3)
+        .map(m => `${m.role === "user" ? "User" : currentChar.name}: ${m.content}`).join("\n");
+      const res = await fetch(AI_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
+          messages: [{ role: "user", content:
+`You are tracking what characters are wearing in a roleplay conversation.
+
+Current wardrobe state:
+- ${currentChar.name} is wearing: ${currentChar.charOutfit || "unknown"}
+- User is wearing: ${currentChar.userOutfit || "unknown"}
+
+Recent conversation:
+${recent}
+
+Instructions:
+- Only update a field if clothing was explicitly mentioned or changed in the conversation
+- If nothing about clothing was mentioned, return the current values unchanged
+- Be specific and concise — e.g. "a white cotton shirt, jeans, and sneakers"
+- If a character undresses or removes items, reflect that accurately
+- Return ONLY valid JSON: {"charOutfit": "...", "userOutfit": "..."}
+- If a field is unknown and nothing was mentioned, use null
+No other text.` }]
+        }),
+      });
+      const data = await res.json();
+      const raw = data.choices[0].message.content.trim().replace(/```json|```/g, "").trim();
+      let parsed;
+      try { parsed = JSON.parse(raw); } catch { return; }
+      if (!parsed) return;
+      const updatedChar = {
+        ...currentChar,
+        charOutfit: parsed.charOutfit ?? currentChar.charOutfit ?? null,
+        userOutfit: parsed.userOutfit ?? currentChar.userOutfit ?? null,
+      };
+      // Only update if something actually changed
+      if (updatedChar.charOutfit !== currentChar.charOutfit || updatedChar.userOutfit !== currentChar.userOutfit) {
+        setCharacter(updatedChar);
+        onUpdateCharacter(updatedChar);
+      }
+    } catch {}
+  };
+
+  const applyReactivity = async (newMessages, currentChar) => {
+    if (!currentChar.reactiveEnabled && currentChar.reactiveEnabled !== undefined) return;
+    try {
+      const chatSlice = newMessages.filter(m => m.role !== "image").slice(-8)
+        .map(m => `${m.role === "user" ? "User" : currentChar.name}: ${m.content}`).join("\n");
+      const currentSliders = currentChar.sliders || DEFAULT_SLIDERS;
+      const fam = currentSliders.familiarity ?? 10;
+      const likes = currentSliders.likesUser ?? 50;
+      const attraction = currentSliders.attractionToUser ?? 50;
+
+      const res = await fetch(AI_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
+          messages: [{ role: "user", content:
+`You are analysing a roleplay chat to determine how ${currentChar.name}'s feelings and personality should subtly shift after this exchange.
+
+Current state (0-100 scale):
+- familiarity: ${fam} (how well they know the user)
+- likesUser: ${likes} (how much they like the user)
+- attractionToUser: ${attraction} (physical attraction to user)
+- amorous: ${currentSliders.amorous ?? 30}
+- playfulness: ${currentSliders.playfulness ?? 50}
+- assertiveness: ${currentSliders.assertiveness ?? 50}
+- emotionalDepth: ${currentSliders.emotionalDepth ?? 50}
+- openness: ${currentSliders.openness ?? 50}
+- neediness: ${currentSliders.neediness ?? 30}
+- forwardness: ${currentSliders.forwardness ?? 40}
+- petNames: ${currentSliders.petNames ?? 30}
+- dirtyTalk: ${currentSliders.dirtyTalk ?? 20}
+- profanity: ${currentSliders.profanity ?? 20}
+- jealousy: ${currentSliders.jealousy ?? 30}
+- formality: ${currentSliders.formality ?? 30}
+
+Recent conversation:
+${chatSlice}
+
+Rules:
+- familiarity always increases slightly just from talking (+1 to +3)
+- likesUser and attractionToUser move based on whether the user was charming, rude, funny, cold, etc.
+- amorous/forwardness/dirtyTalk/petNames are amplified by high attraction AND high likes — if both are high these can increase significantly when flirting occurs; if attraction is low these should decrease or stay flat regardless of flirting
+- emotionalDepth/openness/neediness are gated by familiarity — they can only reach high values once familiarity is also high
+- formality decreases gradually as familiarity increases
+- playfulness increases when the user is fun/funny; decreases when they're boring or rude
+- jealousy increases if user mentions other people romantically
+- Only return changes worth making — if nothing changed, return empty deltas
+- Keep all changes small: familiarity max ±3, relationship sliders max ±2, personality sliders max ±4
+- All final values must stay between 0 and 100
+
+Return ONLY a JSON object of slider keys and integer delta values, e.g. {"familiarity": 2, "amorous": 3, "playfulness": -1}. No other text.`
+          }]
+        }),
+      });
+      const data = await res.json();
+      const raw = data.choices[0].message.content.trim().replace(/```json|```/g, "").trim();
+      let deltas = {};
+      try { deltas = JSON.parse(raw); } catch { return; }
+
+      const newSliders = { ...currentSliders };
+      for (const key of REACTIVE_SLIDER_KEYS) {
+        if (deltas[key] !== undefined && typeof deltas[key] === "number") {
+          const maxDrift = REACTIVE_MAX_DRIFT[key] || 4;
+          const clamped = Math.max(-maxDrift, Math.min(maxDrift, Math.round(deltas[key])));
+          newSliders[key] = Math.max(0, Math.min(100, (newSliders[key] ?? DEFAULT_SLIDERS[key] ?? 50) + clamped));
+        }
+      }
+
+      const updatedChar = { ...currentChar, sliders: newSliders };
+      setCharacter(updatedChar);
+      onUpdateCharacter(updatedChar);
+    } catch (e) {
+      // Reactivity errors are silent — don't interrupt the conversation
+    }
+  };
+
+  const sendMessage = async (content) => {
+    const text = content || input.trim();
+    if (!text || loading) return;
+    setError(""); setOpeningScenarios(null);
+    const userMsg = { role: "user", content: text };
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages); setInput(""); setLoading(true);
+    try {
+      const reply = await sendChat({ messages: newMessages.filter(m => m.role !== "image"), character, model: settings.selectedModel, settings });
+      const withReply = [...newMessages, { role: "assistant", content: reply }];
+      setMessages(m => [...m, { role: "assistant", content: reply }]);
+      // Fire reactivity and wardrobe tracking in background — don't await, don't block
+      applyReactivity(withReply, character);
+      applyWardrobe(withReply, character);
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  };
+
+  const handleRegenerate = async (instruction = "") => {
+    const lastAIIndex = [...messages].map((m, i) => ({ ...m, i })).filter(m => m.role === "assistant").slice(-1)[0]?.i;
+    if (lastAIIndex === undefined) return;
+    const trimmed = messages.slice(0, lastAIIndex);
+    if (!trimmed.length) return;
+    const messagesWithInstruction = instruction
+      ? [...trimmed, { role: "user", content: `[Regeneration instruction: ${instruction}]` }]
+      : trimmed;
+    setMessages(trimmed); setRegenLoading(true); setError("");
+    try {
+      const reply = await sendChat({ messages: messagesWithInstruction.filter(m => m.role !== "image"), character, model: settings.selectedModel, settings });
+      setMessages([...trimmed, { role: "assistant", content: reply }]);
+    } catch (e) { setError(e.message); }
+    setRegenLoading(false);
+  };
+
+  const ensureSeed = () => {
+    if (character.seed) return character.seed;
+    const seed = Math.floor(Math.random() * 2147483647);
+    const updated = { ...character, seed };
+    setCharacter(updated);
+    onUpdateCharacter(updated);
+    return seed;
+  };
+
+  const handleCustomImage = async () => {
+    if (!customImgPrompt.trim()) return;
+    setImgLoading(true); setShowCustomImgInput(false);
+    try {
+      const appearanceDesc = buildAppearancePrompt(character.appearance);
+      const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
+      const ageDesc = character.age ? `${character.age} year old` : "";
+      const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
+      const styleModifiers = "photorealistic, natural lighting, cinematic, Canon EOS, 50mm lens, bokeh, sharp focus, high detail";
+      const fullPrompt = charDesc
+        ? `${character.name}, ${charDesc}, ${customImgPrompt}, ${styleModifiers}`
+        : `${character.name}, ${customImgPrompt}, ${styleModifiers}`;
+      const url = await generateImageDezgo({
+        prompt: fullPrompt,
+        nsfw: character.nsfw,
+        seed: ensureSeed(),
+        model: settings.imageModel,
+      });
+      setMessages(m => [...m, { role: "image", content: url, prompt: customImgPrompt }]);
+      const newGallery2 = [{ url, prompt: customImgPrompt, date: Date.now() }, ...gallery].slice(0, 20);
+      setGallery(newGallery2);
+      dataApi.saveGallery(character.id, newGallery2).catch(e => setError(e.message));
+      setCustomImgPrompt("");
+    } catch (e) { setError(e.message); }
+    setImgLoading(false);
+  };
+
+  const handleDeleteMessage = (index, isLast) => {
+    if (!isLast) {
+      if (!confirm("Delete this message and everything after it?")) return;
+      setMessages(m => m.slice(0, index));
+    } else {
+      setMessages(m => m.filter((_, i) => i !== index));
+    }
+  };
+  const handleEditMessage = (index, newContent) => setMessages(m => m.map((msg, i) => i === index ? { ...msg, content: newContent } : msg));
+
+  const triggerImageGen = async (auto = false) => {
+    if (imgLoading) return;
+    setImgLoading(true);
+    try {
+      const prompt = messages.length > 0
+        ? await buildImagePromptFromContext({ messages, character, model: settings.selectedModel })
+        : `${character.name}, portrait, character art`;
+      const appearanceDesc = buildAppearancePrompt(character.appearance);
+      const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
+      const ageDesc = character.age ? `${character.age} year old` : "";
+      const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
+      const styleModifiers = "photorealistic, natural lighting, cinematic, Canon EOS, 50mm lens, sharp focus, high detail";
+      // Appearance goes FIRST so SD weights it highest, scene context after
+      const fullImgPrompt = charDesc ? `${charDesc}, ${prompt}, ${styleModifiers}` : `${prompt}, ${styleModifiers}`;
+      // Context images: only NSFW if auto-image is on (user has opted in to continuous NSFW)
+      const contextNsfw = auto ? character.nsfw : false;
+      const url = await generateImageDezgo({
+        prompt: fullImgPrompt,
+        nsfw: contextNsfw,
+        seed: ensureSeed(),
+        model: settings.imageModel,
+      });
+      setMessages(m => [...m, { role: "image", content: url, prompt }]);
+      const newGallery3 = [{ url, prompt, date: Date.now() }, ...gallery].slice(0, 20);
+      setGallery(newGallery3);
+      dataApi.saveGallery(character.id, newGallery3).catch(e => { if (!auto) setError(e.message); });
+    } catch (e) { if (!auto) setError(e.message); }
+    setImgLoading(false);
+  };
+
+  const handleSetBackground = (url) => {
+    setBgImage(url);
+    const updated = { ...character, backgroundImage: url };
+    setCharacter(updated);
+    onUpdateCharacter(updated);
+    setShowBgMenu(false);
+  };
+
+  const lastAIIndex = messages.reduce((acc, m, i) => m.role === "assistant" ? i : acc, -1);
+  const lastGeneratedImage = [...messages].reverse().find(m => m.role === "image");
+
+  return (
+    <div style={{ ...S.chatWindow, backgroundImage: (!discreetMode && bgImage) ? `url(${bgImage})` : "none" }} className={discreetMode ? "discreet-app" : ""}>
+      {!discreetMode && <div style={S.chatBgOverlay} />}
+
+      {/* Header */}
+      <div style={S.chatHeader} className={discreetMode ? "discreet-chat-header" : ""}>
+        {discreetMode ? (
+          <>
+            <button style={S.backBtn} className="discreet-back-btn" onClick={onBack}>‹ Back</button>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1 }}>
+              {character.referenceImage && (
+                <div style={{ width: 32, height: 32, borderRadius: "50%", overflow: "hidden", marginBottom: 2 }}>
+                  <img src={character.referenceImage} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                </div>
+              )}
+              <span className="discreet-char-name">{character.name}</span>
+            </div>
+            <button className="discreet-toggle" title="Exit discreet mode" onClick={onToggleDiscreet}>👁</button>
+          </>
+        ) : (
+          <>
+            <button style={S.backBtn} onClick={onBack}>← Back</button>
+            <div style={S.chatHeaderInfo}>
+              {character.referenceImage && <img src={character.referenceImage} alt="" style={S.chatAvatar} />}
+              <div style={{ minWidth: 0 }}>
+                <span style={S.chatCharName}>{character.name}</span>
+                <div style={{ display: "flex", gap: 5, marginTop: 2, marginBottom: 4 }}>
+                  {character.gender && <span style={{ ...S.genderBadge, fontSize: 9 }}>{character.gender === "Custom" ? (character.customGender || "Custom") : character.gender}</span>}
+                  {character.nsfw && <span style={{ ...S.nsfwBadge, fontSize: 9 }}>NSFW</span>}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 140, maxWidth: 200 }}>
+                  {[
+                    { key: "familiarity",      icon: "🤝", label: "Familiarity",  color: "#5080c8" },
+                    { key: "likesUser",        icon: "💛", label: "Likes",        color: "#c87830" },
+                    { key: "attractionToUser", icon: "💗", label: "Attraction",   color: "#d4607a" },
+                  ].map(({ key, icon, label, color }) => {
+                    const val = (character.sliders || DEFAULT_SLIDERS)[key] ?? DEFAULT_SLIDERS[key] ?? 50;
+                    return (
+                      <div key={key} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ fontSize: 9, width: 12 }}>{icon}</span>
+                        <div style={{ flex: 1, height: 4, borderRadius: 2, background: "rgba(0,0,0,0.08)" }}>
+                          <div style={{ width: `${val}%`, height: "100%", borderRadius: 2, background: color, transition: "width 0.6s ease" }} />
+                        </div>
+                        <span style={{ fontSize: 8, color: "var(--text4)", width: 22, textAlign: "right", fontWeight: 700 }}>{val}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <button className="discreet-toggle" title="Discreet mode" onClick={onToggleDiscreet}>👁</button>
+              <button style={S.iconBtnLight} title="Image gallery" onClick={() => setShowGallery(true)}>🖼</button>
+              <button style={S.iconBtnLight} title="New conversation" onClick={handleRestart}>↺</button>
+              {/* Personality button */}
+              <button style={S.iconBtnLight} title="Character settings" onClick={() => setShowPersonality(true)}>⚙</button>
+              {/* Background button */}
+              <div style={{ position: "relative" }}>
+                <button style={S.iconBtnLight} title="Change background" onClick={() => setShowBgMenu(v => !v)}>🖼</button>
+                {showBgMenu && (
+                  <div style={S.bgMenu}>
+                    <div style={S.bgMenuTitle}>Set Background</div>
+                    {character.referenceImage && <button style={S.bgMenuItem} onClick={() => handleSetBackground(character.referenceImage)}>Use reference image</button>}
+                    {lastGeneratedImage && <button style={S.bgMenuItem} onClick={() => handleSetBackground(lastGeneratedImage.content)}>Use last generated</button>}
+                    <button style={S.bgMenuItem} onClick={() => handleSetBackground(null)}>Clear background</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Messages */}
+      <div style={S.messageList} className={discreetMode ? "discreet-msg-list" : ""}>
+        {messages.length === 0 && (
+          <div style={S.emptyChat}>
+            {openingLoading
+              ? <p style={{ color: "#5a5850", fontSize: 13 }}>Thinking of some ways to start…</p>
+              : openingScenarios
+                ? (
+                  <div style={S.scenarioGrid}>
+                    <p style={S.scenarioHeading}>Choose how to start with {character.name}:</p>
+                    {openingScenarios.map((sc, i) => (
+                      <button key={i} style={S.scenarioCard}
+                        onClick={() => { setMessages([{ role: "assistant", content: sc.message }]); setOpeningScenarios(null); inferScenarioOutfit(sc, character); }}>
+                        <span style={S.scenarioLabel}>{sc.label}</span>
+                        {sc.setting && <span style={S.scenarioSetting}>{sc.setting}</span>}
+                        <span style={S.scenarioMessage}>"{sc.message}"</span>
+                      </button>
+                    ))}
+                    <button style={{ ...S.scenarioCard, border:"2px dashed var(--pink-border)", background:"var(--pink-bg)" }}
+                      onClick={() => setShowCustomScenario(true)}>
+                      <span style={S.scenarioLabel}>✏️ Custom Scene</span>
+                      <span style={S.scenarioSetting}>Set your own scene, generate an opening, or start blank</span>
+                    </button>
+                    <button style={{ ...S.btnSecondary, marginTop: 4 }}
+                      onClick={() => { setOpeningScenarios(null); setOpeningLoading(true); generateOpeningScenarios({ character, model: settings.selectedModel, settings, exclude: seenScenarioLabels }).then(s => { setOpeningScenarios(s); setSeenScenarioLabels(prev => [...prev, ...s.map(sc => sc.label)]); }).catch(() => {}).finally(() => setOpeningLoading(false)); }}>
+                      ↺ Different options
+                    </button>
+                    <button style={{ ...S.btnSecondary, marginTop: 0 }}
+                      onClick={() => setOpeningScenarios(null)}>
+                      Skip — start blank
+                    </button>
+                  </div>
+                )
+                : <p style={{ color: "#4a4840" }}>Start a conversation with <strong style={{ color: "#7a7268" }}>{character.name}</strong></p>
+            }
+          </div>
+        )}
+
+        {messages.map((msg, i) => (
+          <MessageBubble key={i} msg={msg} index={i} isLastAI={i === lastAIIndex}
+            characterName={character.name} onDelete={handleDeleteMessage}
+            onEdit={handleEditMessage} onRegenerate={handleRegenerate} regenLoading={regenLoading}
+            onExpandImage={(url) => setLightboxImg(url)} discreetMode={discreetMode} />
+        ))}
+
+        {(loading || regenLoading) && (
+          <div style={{ ...S.bubbleWrapper, justifyContent: "flex-start" }} className="msg-anim">
+            <div style={{ ...S.messageBubble, ...S.aiBubble }}>
+              <span style={S.bubbleName}>{regenLoading ? `↺ ${character.name} is rethinking…` : character.name}</span>
+              <div style={S.typingDots}>
+                <span style={{ ...S.dot, animationDelay: "0s" }} />
+                <span style={{ ...S.dot, animationDelay: "0.2s" }} />
+                <span style={{ ...S.dot, animationDelay: "0.4s" }} />
+              </div>
+            </div>
+          </div>
+        )}
+        {imgLoading && (
+          <div style={{ alignSelf:"center", textAlign:"center", padding:"20px 24px" }} className="msg-anim">
+            <div style={{ ...S.imageMessage, display:"inline-block" }}>
+              <div style={{ width:200, height:260, background:"linear-gradient(135deg, var(--bg3) 25%, var(--border) 50%, var(--bg3) 75%)", backgroundSize:"200% 200%", animation:"shimmer 1.5s infinite", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:10 }}>
+                <span style={{ fontSize:28 }}>🎨</span>
+                <span style={{ fontSize:12, color:"var(--text3)", fontWeight:700 }}>Generating…</span>
+              </div>
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      {error && <div style={S.errorBar}>{error}<button style={S.errorClose} onClick={() => setError("")}>✕</button></div>}
+
+      {!discreetMode && showCustomImgInput && (
+        <div style={S.customImgPanel}>
+          <span style={{ fontSize:11, color:"var(--blue)", fontWeight:800, letterSpacing:"0.08em", textTransform:"uppercase" }}>Custom Image Request</span>
+          <div style={{ display:"flex", gap:8, marginTop:6 }}>
+            <input style={{ ...S.chatInput, flex:1 }} placeholder='e.g. "standing on head", "at the beach", "wearing a red dress"...'
+              value={customImgPrompt} onChange={e => setCustomImgPrompt(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") handleCustomImage(); }}
+              autoFocus />
+            <button style={S.sendBtn} onClick={handleCustomImage} disabled={imgLoading}>
+              {imgLoading ? "⟳" : "Gen"}
+            </button>
+            <button style={S.imgGenBtn} onClick={() => { setShowCustomImgInput(false); setCustomImgPrompt(""); }}>✕</button>
+          </div>
+        </div>
+      )}
+
+      <div style={S.chatInputRow} className={discreetMode ? "discreet-input-row" : ""}>
+        {!discreetMode && (
+          <div style={{ display:"flex", flexDirection:"column", gap:4, flexShrink:0 }}>
+            <button style={S.imgGenBtn} onClick={() => triggerImageGen(false)} disabled={imgLoading} title="Generate image from chat context">
+              🎨
+            </button>
+            <button style={{...S.imgGenBtn, fontSize:13}} onClick={() => setShowCustomImgInput(v => !v)} disabled={imgLoading} title="Generate custom image">
+              ✏️
+            </button>
+          </div>
+        )}
+        <input style={S.chatInput} className={discreetMode ? "discreet-input" : ""} placeholder={`Message ${character.name}…`} value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} />
+        <button style={S.sendBtn} className={discreetMode ? "discreet-send-btn" : ""} onClick={() => sendMessage()} disabled={loading || !input.trim()}>{discreetMode ? "↑" : "Send"}</button>
+      </div>
+
+      {showCustomScenario && (
+        <div style={S.overlay} onClick={() => setShowCustomScenario(false)}>
+          <div style={{ ...S.modal, maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+            <div style={S.modalHeader}>
+              <span style={S.modalTitle}>✏️ Custom Scene</span>
+              <button style={S.iconBtn} onClick={() => setShowCustomScenario(false)}>✕</button>
+            </div>
+            <div style={S.modalBody}>
+              <label style={S.label}>Scene Description</label>
+              <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 6 }}>Describe where you are, what's happening, the mood — anything that sets the scene. Used to generate an opening if you want one.</p>
+              <textarea style={{ ...S.input, height: 90, resize: "vertical" }}
+                placeholder={`e.g. We're both stuck at the office late. The building is almost empty...`}
+                value={customSceneDesc}
+                onChange={e => setCustomSceneDesc(e.target.value)} />
+
+              <label style={S.label}>Opening Message from {character.name}</label>
+              <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 6 }}>Generate one from your scene description, write your own, or leave blank to open yourself.</p>
+              <textarea style={{ ...S.input, height: 80, resize: "vertical" }}
+                placeholder={`What does ${character.name} say or do first? (optional)`}
+                value={customSceneOpening}
+                onChange={e => setCustomSceneOpening(e.target.value)} />
+              <button style={{ ...S.btnSecondary, marginTop: 4 }}
+                disabled={!customSceneDesc.trim() || customSceneGenLoading}
+                onClick={async () => {
+                  setCustomSceneGenLoading(true);
+                  try {
+                    const addendum = buildPersonalityAddendum(
+                      character.sliders || DEFAULT_SLIDERS,
+                      character.gender || "Female", character.customGender || "",
+                      character.age || "", character.maritalStatus || "",
+                      character.relationship || "", character.relationshipCustom || ""
+                    );
+                    const res = await fetch(AI_PROXY_URL, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ model: settings.selectedModel, messages: [
+                        { role: "system", content: (character.persona || `You are ${character.name}.`) + addendum },
+                        { role: "user", content: `Scene context: ${customSceneDesc}\n\nWrite a short in-character opening message (1-3 sentences) that ${character.name} would say or do in this moment. Include physical actions in asterisks where natural. No narration, just the opening.` }
+                      ]})
+                    });
+                    const data = await res.json();
+                    setCustomSceneOpening(data.choices[0].message.content.trim());
+                  } catch (e) { /* silent */ }
+                  setCustomSceneGenLoading(false);
+                }}>
+                {customSceneGenLoading ? "Generating…" : "✨ Generate Opening"}
+              </button>
+            </div>
+            <div style={S.modalFooter}>
+              <button style={S.btnSecondary} onClick={() => setShowCustomScenario(false)}>Cancel</button>
+              <button style={S.btnPrimary} onClick={() => {
+                const msgs = [];
+                if (customSceneDesc.trim()) msgs.push({ role: "system", content: `[Scene context: ${customSceneDesc.trim()}]`, hidden: true });
+                if (customSceneOpening.trim()) msgs.push({ role: "assistant", content: customSceneOpening.trim() });
+                if (msgs.length > 0) setMessages(msgs);
+                setOpeningScenarios(null);
+                setShowCustomScenario(false);
+                setCustomSceneDesc("");
+                setCustomSceneOpening("");
+              }}>Start Scene</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {lightboxImg && (
+        <div style={{ position:"fixed", inset:0, zIndex:200, background:"rgba(0,0,0,0.92)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
+          onClick={() => setLightboxImg(null)}>
+          <img src={lightboxImg} alt="expanded" style={{ maxWidth:"100%", maxHeight:"90vh", borderRadius:12, objectFit:"contain", boxShadow:"0 8px 40px rgba(0,0,0,0.8)" }} />
+          <button style={{ position:"absolute", top:20, right:20, background:"rgba(255,255,255,0.15)", border:"none", color:"white", borderRadius:"50%", width:40, height:40, fontSize:20, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}
+            onClick={() => setLightboxImg(null)}>✕</button>
+        </div>
+      )}
+
+      {showGallery && (
+        <div style={S.overlay} onClick={() => setShowGallery(false)}>
+          <div style={{ ...S.modal, maxWidth:560, maxHeight:"88vh" }} onClick={e => e.stopPropagation()}>
+            <div style={S.modalHeader}>
+              <span style={S.modalTitle}>📸 {character.name}'s Gallery</span>
+              <button style={S.iconBtn} onClick={() => setShowGallery(false)}>✕</button>
+            </div>
+            <div style={{ padding:16, overflowY:"auto", maxHeight:"70vh" }}>
+              {gallery.length === 0 ? (
+                <p style={{ textAlign:"center", color:"var(--text4)", padding:40 }}>No images yet — generate some in chat!</p>
+              ) : (
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(2, 1fr)", gap:10 }}>
+                  {gallery.map((item, i) => (
+                    <div key={i} style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"2px solid var(--border)", cursor:"zoom-in" }}
+                      onClick={() => setLightboxImg(item.url)}>
+                      <img src={item.url} alt={item.prompt} style={{ width:"100%", display:"block", aspectRatio:"3/4", objectFit:"cover" }} />
+                      <div style={{ position:"absolute", bottom:0, left:0, right:0, background:"rgba(0,0,0,0.6)", padding:"6px 8px" }}>
+                        <p style={{ fontSize:10, color:"white", margin:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.prompt}</p>
+                      </div>
+                      <div style={{ position:"absolute", top:6, right:6, display:"flex", gap:4 }}>
+                        <button style={{ background:"var(--pink)", border:"none", borderRadius:6, padding:"4px 8px", fontSize:10, color:"white", cursor:"pointer", fontWeight:700 }}
+                          onClick={e => { e.stopPropagation(); handleSetBackground(item.url); setShowGallery(false); }}>
+                          🌅 BG
+                        </button>
+                        <button style={{ background:"rgba(0,0,0,0.5)", border:"none", borderRadius:6, padding:"4px 8px", fontSize:10, color:"white", cursor:"pointer", fontWeight:700 }}
+                          onClick={e => { e.stopPropagation(); setLightboxImg(item.url); }}>
+                          🔍
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPersonality && (
+        <CharacterPersonalityPanel character={character} onSave={handlePersonalitySave} onClose={() => setShowPersonality(false)} />
+      )}
+    </div>
+  );
+}
+
+// ─── MAIN APP ─────────────────────────────────────────────────────────────────
+function App() {
+  const [settings, setSettings] = useState(() => storage.get("personachat_settings", DEFAULT_SETTINGS));
+  const [characters, setCharacters] = useState([]);
+  const [loadingChars, setLoadingChars] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [activeChar, setActiveChar] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showCharForm, setShowCharForm] = useState(false);
+  const [editingChar, setEditingChar] = useState(null);
+  const [discreetMode, setDiscreetMode] = useState(() => storage.get("personachat_discreet", false));
+
+  useEffect(() => { storage.set("personachat_settings", settings); }, [settings]);
+  useEffect(() => { storage.set("personachat_discreet", discreetMode); }, [discreetMode]);
+  const toggleDiscreet = () => setDiscreetMode(v => !v);
+
+  useEffect(() => {
+    dataApi.getCharacters()
+      .then(cs => setCharacters(cs))
+      .catch(e => setLoadError(e.message))
+      .finally(() => setLoadingChars(false));
+  }, []);
+
+  const saveCharacter = (char) => {
+    setCharacters(cs => {
+      const exists = cs.find(c => c.id === char.id);
+      const next = exists ? cs.map(c => c.id === char.id ? char : c) : [char, ...cs];
+      dataApi.saveCharacters(next).catch(e => setLoadError(e.message));
+      return next;
+    });
+    setShowCharForm(false); setEditingChar(null);
+  };
+
+  const deleteCharacter = (id) => {
+    if (!confirm("Delete this character and their chat history?")) return;
+    setCharacters(cs => {
+      const next = cs.filter(c => c.id !== id);
+      dataApi.saveCharacters(next).catch(e => setLoadError(e.message));
+      return next;
+    });
+    dataApi.deleteCharacter(id).catch(() => {});
+  };
+
+  const updateCharacter = (char) => {
+    setCharacters(cs => {
+      const next = cs.map(c => c.id === char.id ? char : c);
+      dataApi.saveCharacters(next).catch(e => setLoadError(e.message));
+      return next;
+    });
+    setActiveChar(char);
+  };
+
+  if (activeChar) return <ChatWindow character={activeChar} settings={settings} onBack={() => setActiveChar(null)} onUpdateCharacter={updateCharacter} discreetMode={discreetMode} onToggleDiscreet={toggleDiscreet} />;
+
+  return (
+    <div style={S.app} className={discreetMode ? "discreet-app" : ""}>
+      <div style={S.appBg} className={discreetMode ? "discreet-appbg" : ""} />
+      <header style={S.header} className={discreetMode ? "discreet-list-header" : ""}>
+        {discreetMode
+          ? <span className="discreet-list-title">Messages</span>
+          : <div style={S.logo}>PERSONA</div>
+        }
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button className="discreet-toggle" title={discreetMode ? "Exit discreet mode" : "Discreet mode"} onClick={toggleDiscreet}>{discreetMode ? "👁" : "👁"}</button>
+          {discreetMode
+            ? <button className="discreet-settings-btn" onClick={() => setShowSettings(true)}>⚙</button>
+            : <button style={S.settingsBtn} onClick={() => setShowSettings(true)}>⚙ Settings</button>
+          }
+        </div>
+      </header>
+      <main style={S.main} className={discreetMode ? "discreet-main" : ""}>
+        {loadError && <div style={S.errorBar}>{loadError}<button style={S.errorClose} onClick={() => setLoadError("")}>✕</button></div>}
+        {!discreetMode && (
+          <div style={S.sectionHeader}>
+            <h2 style={S.sectionTitle}>Characters</h2>
+            <button style={S.btnPrimary} onClick={() => { setEditingChar(null); setShowCharForm(true); }}>+ New Character</button>
+          </div>
+        )}
+        {discreetMode && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 4px 12px" }}>
+            <span style={{ fontSize: 13, color: "#8e8e93", fontWeight: 400 }}>Chats</span>
+            <button style={{ background: "none", border: "none", color: "#007aff", fontSize: 13, cursor: "pointer" }} onClick={() => { setEditingChar(null); setShowCharForm(true); }}>+ New</button>
+          </div>
+        )}
+        {loadingChars ? (
+          <div style={S.emptyState}>
+            <p style={S.emptyText}>Loading characters…</p>
+          </div>
+        ) : characters.length === 0 ? (
+          <div style={S.emptyState}>
+            <p style={S.emptyText}>No characters yet.</p>
+            <p style={S.emptySubtext}>Create your first character to start chatting.</p>
+            <button style={S.btnPrimary} onClick={() => setShowCharForm(true)}>Create Character</button>
+          </div>
+        ) : (
+          <div style={discreetMode ? { display: "flex", flexDirection: "column", borderTop: "1px solid #e0e0e0" } : S.characterGrid}>
+            {characters.map(c => (
+              <CharacterCard key={c.id} character={c} onSelect={setActiveChar}
+                onEdit={c => { setEditingChar(c); setShowCharForm(true); }} onDelete={deleteCharacter}
+                discreetMode={discreetMode} />
+            ))}
+          </div>
+        )}
+      </main>
+      {showSettings && <SettingsPanel settings={settings} onSave={setSettings} onClose={() => setShowSettings(false)} />}
+      {showCharForm && <CharacterForm character={editingChar} settings={settings} onSave={saveCharacter} onCancel={() => { setShowCharForm(false); setEditingChar(null); }} />}
+    </div>
+  );
+}
+
+// ─── STYLES ──────────────────────────────────────────────────────────────────
+const S = {
+  app: { minHeight:"100vh", background:"var(--bg)", color:"var(--text)", fontFamily:"'Nunito','Georgia',sans-serif", position:"relative" },
+  appBg: { position:"fixed", inset:0, zIndex:0, pointerEvents:"none", background:"radial-gradient(ellipse at 15% 50%, rgba(220,140,170,0.18) 0%, transparent 55%), radial-gradient(ellipse at 85% 15%, rgba(100,140,220,0.14) 0%, transparent 50%), radial-gradient(ellipse at 50% 95%, rgba(200,160,220,0.1) 0%, transparent 50%)" },
+  header: { position:"relative", zIndex:10, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 24px", borderBottom:"1px solid var(--border)", background:"rgba(253,246,248,0.95)", backdropFilter:"blur(10px)", boxShadow:"0 2px 12px var(--shadow)" },
+  logo: { fontSize:24, fontWeight:800, letterSpacing:"0.15em", color:"var(--pink)", textShadow:"0 1px 0 rgba(220,100,130,0.2)" },
+  settingsBtn: { background:"var(--blue-bg)", border:"1px solid var(--blue-border)", color:"var(--blue)", padding:"8px 18px", borderRadius:20, cursor:"pointer", fontSize:13, fontWeight:700 },
+  main: { position:"relative", zIndex:1, maxWidth:900, margin:"0 auto", padding:"28px 20px" },
+  setupBanner: { display:"flex", alignItems:"center", justifyContent:"space-between", background:"rgba(220,180,80,0.1)", border:"1px solid rgba(220,180,80,0.3)", borderRadius:12, padding:"14px 20px", marginBottom:24, fontSize:14, color:"#b08020", gap:12, flexWrap:"wrap" },
+  sectionHeader: { display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18 },
+  sectionTitle: { fontSize:20, fontWeight:800, color:"var(--text)", margin:0 },
+  characterGrid: { display:"flex", flexDirection:"column", gap:12 },
+  characterCard: { display:"flex", alignItems:"center", gap:14, background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:16, padding:"14px 18px", cursor:"pointer", transition:"all 0.18s", boxShadow:"0 2px 8px var(--shadow)" },
+  characterAvatar: { width:56, height:56, borderRadius:"50%", overflow:"hidden", background:"var(--bg3)", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", border:"3px solid var(--pink-light)" },
+  avatarImg: { width:"100%", height:"100%", objectFit:"cover" },
+  avatarInitial: { fontSize:24, color:"var(--pink)", fontWeight:800 },
+  characterInfo: { flex:1, minWidth:0 },
+  characterName: { fontSize:16, fontWeight:700, color:"var(--text)", display:"block", marginBottom:4 },
+  characterMeta: { display:"flex", gap:5, marginBottom:6, flexWrap:"wrap" },
+  characterPersona: { fontSize:13, color:"var(--text3)", margin:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
+  characterActions: { display:"flex", flexDirection:"column", gap:6 },
+  nsfwBadge: { fontSize:10, fontWeight:800, letterSpacing:"0.06em", background:"rgba(220,80,110,0.12)", border:"1px solid rgba(220,80,110,0.3)", color:"#c04060", padding:"3px 8px", borderRadius:20 },
+  autoBadge: { fontSize:10, fontWeight:800, letterSpacing:"0.06em", background:"var(--blue-bg)", border:"1px solid var(--blue-border)", color:"var(--blue)", padding:"3px 8px", borderRadius:20 },
+  genderBadge: { fontSize:10, fontWeight:800, letterSpacing:"0.06em", background:"var(--pink-bg)", border:"1px solid var(--pink-border)", color:"var(--pink)", padding:"3px 8px", borderRadius:20 },
+  ageBadge: { fontSize:10, fontWeight:800, background:"rgba(80,180,150,0.12)", border:"1px solid rgba(80,180,150,0.3)", color:"#309070", padding:"3px 8px", borderRadius:20 },
+  maritalBadge: { fontSize:10, fontWeight:800, background:"var(--blue-bg)", border:"1px solid var(--blue-border)", color:"var(--blue)", padding:"3px 8px", borderRadius:20 },
+  genderBtnOn: { background:"var(--pink)", border:"none", color:"white", borderRadius:20, padding:"8px 16px", cursor:"pointer", fontSize:13, fontWeight:700, boxShadow:"0 2px 8px var(--shadow)" },
+  genderBtnOff: { background:"var(--bg3)", border:"1px solid var(--border)", color:"var(--text3)", borderRadius:20, padding:"8px 16px", cursor:"pointer", fontSize:13, fontWeight:600 },
+  emptyState: { textAlign:"center", padding:"70px 20px", background:"var(--bg2)", borderRadius:20, border:"2px dashed var(--border)", boxShadow:"0 2px 12px var(--shadow)" },
+  emptyText: { fontSize:20, color:"var(--text2)", marginBottom:8, fontWeight:700 },
+  emptySubtext: { fontSize:14, color:"var(--text3)", marginBottom:24 },
+  divider: { height:1, background:"var(--border)", margin:"14px 0" },
+  overlay: { position:"fixed", inset:0, zIndex:100, background:"rgba(40,20,40,0.5)", backdropFilter:"blur(8px)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 },
+  modal: { background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:20, width:"100%", maxWidth:480, maxHeight:"90vh", overflowY:"auto", boxShadow:"0 20px 60px rgba(180,120,150,0.25)" },
+  modalHeader: { display:"flex", alignItems:"center", justifyContent:"space-between", padding:"18px 22px 14px", borderBottom:"1px solid var(--border)" },
+  modalTitle: { fontSize:17, fontWeight:800, color:"var(--pink)" },
+  modalBody: { padding:"18px 22px", display:"flex", flexDirection:"column", gap:6 },
+  modalFooter: { display:"flex", gap:10, justifyContent:"flex-end", padding:"14px 22px", borderTop:"1px solid var(--border)" },
+  label: { fontSize:11, color:"var(--blue)", letterSpacing:"0.12em", textTransform:"uppercase", marginTop:12, display:"block", fontWeight:800 },
+  input: { width:"100%", background:"var(--bg3)", border:"1px solid var(--border2)", borderRadius:10, padding:"11px 14px", color:"var(--text)", fontSize:14, outline:"none", boxSizing:"border-box", fontFamily:"inherit", fontWeight:600 },
+  select: { width:"100%", background:"var(--bg3)", border:"1px solid var(--border2)", borderRadius:10, padding:"11px 14px", color:"var(--text)", fontSize:14, outline:"none", cursor:"pointer", fontWeight:600 },
+  toggleRow: { display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:10 },
+  toggleOn: { background:"var(--pink)", border:"none", color:"white", borderRadius:20, padding:"7px 18px", cursor:"pointer", fontSize:12, fontWeight:800, letterSpacing:"0.08em", boxShadow:"0 2px 8px var(--shadow)" },
+  toggleOff: { background:"var(--bg3)", border:"1px solid var(--border)", color:"var(--text3)", borderRadius:20, padding:"7px 18px", cursor:"pointer", fontSize:12, fontWeight:700, letterSpacing:"0.08em" },
+  error: { color:"#c04060", fontSize:13, margin:"6px 0 0", fontWeight:600 },
+  btnPrimary: { background:"var(--pink)", border:"none", color:"white", borderRadius:20, padding:"10px 22px", cursor:"pointer", fontSize:13, fontWeight:800, boxShadow:"0 2px 8px var(--shadow)" },
+  btnSecondary: { background:"var(--blue-bg)", border:"1px solid var(--blue-border)", color:"var(--blue)", borderRadius:20, padding:"10px 22px", cursor:"pointer", fontSize:13, fontWeight:700 },
+  iconBtn: { background:"transparent", border:"none", color:"var(--text3)", cursor:"pointer", fontSize:16, padding:"4px 8px" },
+  iconBtnLight: { background:"var(--bg3)", border:"1px solid var(--border)", borderRadius:10, padding:"7px 12px", cursor:"pointer", fontSize:14, color:"var(--text2)", fontWeight:600 },
+  chatWindow: { height:"100dvh", minHeight:"-webkit-fill-available", display:"flex", flexDirection:"column", position:"relative", backgroundSize:"cover", backgroundPosition:"center", backgroundRepeat:"no-repeat" },
+  chatBgOverlay: { position:"absolute", inset:0, zIndex:0, background:"linear-gradient(to bottom, rgba(253,246,248,0.75) 0%, rgba(253,246,248,0.45) 40%, rgba(253,246,248,0.82) 100%)" },
+  chatHeader: { position:"relative", zIndex:10, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 16px", background:"rgba(253,246,248,0.95)", backdropFilter:"blur(12px)", borderBottom:"1px solid var(--border)", boxShadow:"0 2px 8px var(--shadow)" },
+  backBtn: { background:"transparent", border:"none", color:"var(--blue)", cursor:"pointer", fontSize:14, fontWeight:700, padding:"4px 8px" },
+  chatHeaderInfo: { display:"flex", alignItems:"center", gap:10, flex:1, justifyContent:"center" },
+  chatAvatar: { width:34, height:34, borderRadius:"50%", objectFit:"cover", border:"3px solid var(--pink-light)" },
+  chatCharName: { fontSize:16, fontWeight:800, color:"var(--pink)" },
+  bgMenu: { position:"absolute", right:0, top:"110%", zIndex:20, background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:14, padding:8, minWidth:190, boxShadow:"0 8px 24px var(--shadow)" },
+  bgMenuTitle: { fontSize:10, color:"var(--text4)", letterSpacing:"0.12em", textTransform:"uppercase", padding:"4px 10px 8px", fontWeight:800 },
+  bgMenuItem: { display:"block", width:"100%", textAlign:"left", background:"transparent", border:"none", color:"var(--text2)", padding:"9px 12px", cursor:"pointer", fontSize:13, borderRadius:8, fontWeight:600 },
+  messageList: { flex:1, overflowY:"auto", position:"relative", zIndex:1, padding:"16px 12px", display:"flex", flexDirection:"column", gap:4 },
+  bubbleWrapper: { display:"flex", marginBottom:6 },
+  messageBubble: { borderRadius:18, padding:"11px 15px" },
+  userBubble: { background:"var(--pink)", boxShadow:"0 2px 8px var(--shadow)" },
+  aiBubble: { background:"white", border:"1px solid var(--border)", boxShadow:"0 2px 8px var(--shadow)" },
+  bubbleName: { fontSize:11, color:"var(--blue)", display:"block", marginBottom:4, letterSpacing:"0.06em", fontWeight:800 },
+  bubbleText: { margin:0, fontSize:14, lineHeight:1.65, color:"var(--text)", whiteSpace:"pre-wrap", fontWeight:600 },
+  userBubbleText: { margin:0, fontSize:14, lineHeight:1.65, color:"white", whiteSpace:"pre-wrap", fontWeight:600 },
+  editTextarea: { width:"100%", minHeight:80, background:"var(--bg3)", border:"1px solid var(--border2)", borderRadius:10, padding:10, color:"var(--text)", fontSize:14, resize:"vertical", outline:"none", fontFamily:"inherit", boxSizing:"border-box", fontWeight:600 },
+  msgActions: { display:"flex", gap:8, marginTop:4, paddingLeft:4 },
+  msgActionBtn: { background:"none", border:"none", color:"var(--text4)", fontSize:11, cursor:"pointer", padding:"2px 5px", fontWeight:700 },
+  typingDots: { display:"flex", gap:5, alignItems:"center", height:20 },
+  dot: { width:7, height:7, borderRadius:"50%", background:"var(--blue-light)", animation:"pulse 1.2s ease-in-out infinite" },
+  imageMessage: { textAlign:"center", background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:16, padding:12, maxWidth:300, margin:"8px auto", boxShadow:"0 2px 8px var(--shadow)" },
+  generatedImg: { width:"100%", borderRadius:10, display:"block" },
+  imgCaption: { fontSize:11, color:"var(--text4)", marginTop:6, display:"block", fontStyle:"italic", fontWeight:600 },
+  emptyChat: { flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", textAlign:"center", padding:20 },
+  scenarioGrid: { display:"flex", flexDirection:"column", gap:10, maxWidth:420, width:"100%", padding:"0 8px" },
+  scenarioHeading: { fontSize:13, color:"var(--text2)", fontWeight:700, marginBottom:4, textAlign:"center" },
+  scenarioCard: { textAlign:"left", background:"white", border:"1px solid var(--pink-border)", borderRadius:14, padding:"12px 14px", cursor:"pointer", display:"flex", flexDirection:"column", gap:4, boxShadow:"0 2px 8px var(--shadow)", fontFamily:"inherit" },
+  scenarioLabel: { fontSize:12, color:"var(--pink)", fontWeight:800, letterSpacing:"0.04em" },
+  scenarioSetting: { fontSize:11, color:"var(--text3)", fontStyle:"italic" },
+  scenarioMessage: { fontSize:13, color:"var(--text2)", lineHeight:1.5, marginTop:2 },
+  errorBar: { position:"relative", zIndex:10, background:"rgba(220,80,100,0.1)", border:"1px solid rgba(220,80,100,0.25)", color:"#c04060", padding:"10px 16px", fontSize:13, display:"flex", alignItems:"center", justifyContent:"space-between", fontWeight:700 },
+  errorClose: { background:"none", border:"none", color:"#c04060", cursor:"pointer", fontWeight:800 },
+  chatInputRow: { position:"relative", zIndex:10, display:"flex", gap:8, padding:"10px 12px", background:"rgba(253,246,248,0.97)", backdropFilter:"blur(12px)", borderTop:"1px solid var(--border)", boxShadow:"0 -2px 8px var(--shadow)" },
+  imgGenBtn: { background:"var(--pink-bg)", border:"1px solid var(--pink-border)", borderRadius:12, padding:"0 13px", cursor:"pointer", fontSize:18, flexShrink:0, color:"var(--pink)" },
+  chatInput: { flex:1, background:"var(--bg3)", border:"1px solid var(--border2)", borderRadius:12, padding:"10px 14px", color:"var(--text)", fontSize:14, outline:"none", fontFamily:"inherit", fontWeight:600 },
+  sendBtn: { background:"var(--pink)", border:"none", color:"white", borderRadius:12, padding:"0 18px", cursor:"pointer", fontSize:13, fontWeight:800, flexShrink:0, boxShadow:"0 2px 8px var(--shadow)" },
+  regenPanel: { background:"white", border:"1px solid var(--blue-border)", borderRadius:12, padding:"10px 14px", marginTop:6, boxShadow:"0 2px 8px var(--shadow)" },
+  customImgPanel: { position:"relative", zIndex:10, background:"var(--bg3)", borderTop:"1px solid var(--border)", padding:"10px 12px", backdropFilter:"blur(12px)" },
+  regenInput: { width:"100%", background:"var(--bg3)", border:"1px solid var(--border2)", borderRadius:8, padding:"9px 12px", color:"var(--text)", fontSize:13, outline:"none", fontFamily:"inherit", boxSizing:"border-box", marginTop:6, marginBottom:10, fontWeight:600 },
+  regenBtns: { display:"flex", gap:8 },
+};
+
+window._mountApp = function() { ReactDOM.createRoot(document.getElementById("app-root")).render(<App />); };
+
+</script>
+
+</body>
+</html>
