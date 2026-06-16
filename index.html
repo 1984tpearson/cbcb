@@ -406,6 +406,8 @@ const dataApi = {
   deleteCharacter: (characterId) => dataApi.call("delete_character", { characterId }),
   getChat: (characterId) => dataApi.call("get_chat", { characterId }).then(r => r.messages || []),
   saveChat: (characterId, messages) => dataApi.call("save_chat", { characterId, messages }),
+  getChatSession: (sessionId) => dataApi.call("get_chat", { characterId: sessionId }).then(r => r.messages || []),
+  saveChatSession: (sessionId, messages) => dataApi.call("save_chat", { characterId: sessionId, messages }),
   getGallery: (characterId) => dataApi.call("get_gallery", { characterId }).then(r => r.gallery || []),
   saveGallery: (characterId, gallery) => dataApi.call("save_gallery", { characterId, gallery }),
 };
@@ -1654,19 +1656,21 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   const [openingLoading, setOpeningLoading] = useState(false);
   const bottomRef = useRef();
 
+  const sessionId = character.currentSessionId || character.id;
+
   useEffect(() => {
-    dataApi.getChat(character.id)
+    dataApi.getChatSession(sessionId)
       .then(msgs => setMessages(msgs))
       .catch(e => setError(e.message))
       .finally(() => setMessagesLoaded(true));
     dataApi.getGallery(character.id)
       .then(g => setGallery(g))
       .catch(() => {});
-  }, [character.id]);
+  }, [sessionId]);
 
   useEffect(() => {
     if (!messagesLoaded) return;
-    dataApi.saveChat(character.id, messages).catch(e => setError(e.message));
+    dataApi.saveChatSession(sessionId, messages).catch(e => setError(e.message));
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
@@ -1691,6 +1695,28 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
     setCharacter(updatedChar);
     onUpdateCharacter(updatedChar);
     setBgImage(updatedChar.backgroundImage);
+  };
+
+  const handleRestart = () => {
+    if (!confirm("Start a new conversation? The current chat will be preserved.")) return;
+    const newSessionId = `${character.id}_${Date.now()}`;
+    const resetSliders = { ...(character.sliders || DEFAULT_SLIDERS) };
+    // Reset reactive sliders back to character defaults
+    const characterDefaults = character.sliders || DEFAULT_SLIDERS;
+    resetSliders.familiarity = characterDefaults.familiarity ?? DEFAULT_SLIDERS.familiarity;
+    resetSliders.likesUser = characterDefaults.likesUser ?? DEFAULT_SLIDERS.likesUser;
+    resetSliders.attractionToUser = characterDefaults.attractionToUser ?? DEFAULT_SLIDERS.attractionToUser;
+    const updatedChar = { ...character, currentSessionId: newSessionId, sliders: resetSliders };
+    setCharacter(updatedChar);
+    onUpdateCharacter(updatedChar);
+    setMessages([]);
+    setMessagesLoaded(false);
+    setOpeningScenarios(null);
+    setOpeningLoading(true);
+    generateOpeningScenarios({ character: updatedChar, model: settings.selectedModel, settings })
+      .then(scenarios => setOpeningScenarios(scenarios))
+      .catch(() => {})
+      .finally(() => { setOpeningLoading(false); setMessagesLoaded(true); });
   };
 
   const applyReactivity = async (newMessages, currentChar) => {
@@ -1926,6 +1952,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <button style={S.iconBtnLight} title="Image gallery" onClick={() => setShowGallery(true)}>🖼</button>
+          <button style={S.iconBtnLight} title="New conversation" onClick={handleRestart}>↺</button>
           {/* Personality button */}
           <button style={S.iconBtnLight} title="Character settings" onClick={() => setShowPersonality(true)}>⚙</button>
           {/* Background button */}
