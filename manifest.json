@@ -1,0 +1,15 @@
+{
+  "name": "PersonaChat",
+  "short_name": "PersonaChat",
+  "start_url": "/cbcb/",
+  "display": "standalone",
+  "background_color": "#fdf6f8",
+  "theme_color": "#d4607a",
+  "icons": [
+    {
+      "src": "https://via.placeholder.com/192x192/d4607a/ffffff",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}
