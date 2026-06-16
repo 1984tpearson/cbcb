@@ -1126,6 +1126,10 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
   const [memoryFacts, setMemoryFacts] = useState(character.memoryFacts || "");
   const [charOutfit, setCharOutfit] = useState(character.charOutfit || "");
   const [userOutfit, setUserOutfit] = useState(character.userOutfit || "");
+
+  // Re-sync wardrobe state if character prop updates while panel is open
+  useEffect(() => { setCharOutfit(character.charOutfit || ""); }, [character.charOutfit]);
+  useEffect(() => { setUserOutfit(character.userOutfit || ""); }, [character.userOutfit]);
   const [memoryGenLoading, setMemoryGenLoading] = useState(false);
   const [useUserPersonaOverride, setUseUserPersonaOverride] = useState(!!character.userPersonaOverride);
   const [userPersonaOverride, setUserPersonaOverride] = useState(character.userPersonaOverride || { ...DEFAULT_USER_PERSONA });
