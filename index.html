@@ -671,7 +671,11 @@ async function sendChat({ messages, character, model, settings }) {
   else if (rl <= 80) replyLengthClause = "\n\n[REPLY LENGTH] Give detailed, expressive replies of at least 2-3 paragraphs.";
   else replyLengthClause = "\n\n[REPLY LENGTH — CRITICAL] Give long, rich, immersive replies — at least 3-4 paragraphs minimum. Elaborate freely, linger on details, describe feelings, actions, and surroundings in depth. Never cut yourself short.";
 
-  const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + personaNote + nsfwClause + actionClause + plainClause + memoryClause;
+  const wardrobeClause = (character.charOutfit || character.userOutfit)
+    ? `\n\n[WARDROBE — current clothing]\n${character.charOutfit ? `You are currently wearing: ${character.charOutfit}.` : ""}${character.userOutfit ? ` The person you're talking to is currently wearing: ${character.userOutfit}.` : ""} Reference these naturally if relevant — don't force it, but don't contradict them either.`
+    : "";
+
+  const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + personaNote + nsfwClause + actionClause + plainClause + wardrobeClause + memoryClause;
 
   const res = await fetch(AI_PROXY_URL, {
     method: "POST",
@@ -958,7 +962,7 @@ async function generateOpeningScenarios({ character, model, settings, exclude = 
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages: [
       { role: "system", content: (character.persona || `You are ${character.name}.`) + addendum + personaNote + plainClause },
-      { role: "user", content: `[seed:${seed}] Generate 5 opening scenarios for an in-person encounter with ${character.name}. Each scenario must match its assigned category exactly — do not substitute or blend categories.\n\n${categoryList}\n\nRules:\n- The two of you are physically together — never reference texting, messaging, screens, or anything virtual\n- Each opening must feel genuinely distinct in tone and energy from the others\n- Include physical actions and expressions in asterisks woven naturally into the message\n- Vary locations, times of day, and energy levels\n- 1-3 sentences per opening message${character.nsfw ? "\n- For sexually charged scenarios be bold and explicit about the situation — don't sanitise it" : ""}${excludeClause}\n\nReturn ONLY valid JSON, an array of exactly 5 objects:\n[{"label": "short 2-4 word scenario name", "setting": "one sentence describing the scene/context", "message": "the in-character opening"}]\n\nNo extra text, no markdown, just the JSON array.` }
+      { role: "user", content: `[seed:${seed}] Generate 5 opening scenarios for an in-person encounter with ${character.name}. Each scenario must match its assigned category exactly — do not substitute or blend categories.\n\n${categoryList}\n\nRules:\n- Write the opening message in FIRST PERSON — use "I", never "she", "he", or the character's name in third person\n- The two of you are physically together — never reference texting, messaging, screens, or anything virtual\n- Each opening must feel genuinely distinct in tone and energy from the others\n- Include physical actions and expressions in asterisks woven naturally into the message, in first person (e.g. *I glance up* not *she glances up*)\n- Vary locations, times of day, and energy levels\n- 1-3 sentences per opening message${character.nsfw ? "\n- For sexually charged scenarios be bold and explicit about the situation — don't sanitise it" : ""}${excludeClause}\n\nReturn ONLY valid JSON, an array of exactly 5 objects:\n[{"label": "short 2-4 word scenario name", "setting": "one sentence describing the scene/context", "message": "the in-character opening"}]\n\nNo extra text, no markdown, just the JSON array.` }
     ]}),
   });
   const data = await res.json();
@@ -1120,6 +1124,8 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
   const [speakPlainly, setSpeakPlainly] = useState(character.speakPlainly || false);
   const [memorySummary, setMemorySummary] = useState(character.memorySummary || "");
   const [memoryFacts, setMemoryFacts] = useState(character.memoryFacts || "");
+  const [charOutfit, setCharOutfit] = useState(character.charOutfit || "");
+  const [userOutfit, setUserOutfit] = useState(character.userOutfit || "");
   const [memoryGenLoading, setMemoryGenLoading] = useState(false);
   const [useUserPersonaOverride, setUseUserPersonaOverride] = useState(!!character.userPersonaOverride);
   const [userPersonaOverride, setUserPersonaOverride] = useState(character.userPersonaOverride || { ...DEFAULT_USER_PERSONA });
@@ -1180,6 +1186,20 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
               <AppearanceSection appearance={appearance} onChange={setAppearance} />
             </div>
           )}
+          <div style={S.divider} />
+          <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Wardrobe</span>
+          <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Tracked automatically as clothing is mentioned in conversation. Edit manually to correct or set the starting state.</p>
+          <label style={S.label}>{character.name} is wearing</label>
+          <input style={S.input} placeholder="e.g. a black dress and heels"
+            value={charOutfit} onChange={e => setCharOutfit(e.target.value)} />
+          <label style={S.label}>User is wearing</label>
+          <input style={S.input} placeholder="e.g. jeans and a grey t-shirt"
+            value={userOutfit} onChange={e => setUserOutfit(e.target.value)} />
+          <button style={{ ...S.btnSecondary, marginTop: 4, color: "#c04060" }}
+            onClick={() => { setCharOutfit(""); setUserOutfit(""); }}>
+            Clear Wardrobe
+          </button>
+
           <div style={S.divider} />
           <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Memory</span>
           <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Injected into every message so the character remembers past events even as the conversation grows long. Edit freely or regenerate from chat history.</p>
@@ -1284,7 +1304,7 @@ Return ONLY the JSON object, no other text.` }] }),
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, reactiveEnabled, memorySummary, memoryFacts, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
+          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, reactiveEnabled, memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
         </div>
       </div>
     </div>
@@ -1738,7 +1758,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
     resetSliders.familiarity = characterDefaults.familiarity ?? DEFAULT_SLIDERS.familiarity;
     resetSliders.likesUser = characterDefaults.likesUser ?? DEFAULT_SLIDERS.likesUser;
     resetSliders.attractionToUser = characterDefaults.attractionToUser ?? DEFAULT_SLIDERS.attractionToUser;
-    const updatedChar = { ...character, currentSessionId: newSessionId, sliders: resetSliders };
+    const updatedChar = { ...character, currentSessionId: newSessionId, sliders: resetSliders, charOutfit: null, userOutfit: null };
     setCharacter(updatedChar);
     onUpdateCharacter(updatedChar);
     setMessages([]);
@@ -1750,6 +1770,53 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       .then(scenarios => { setOpeningScenarios(scenarios); setSeenScenarioLabels(scenarios.map(s => s.label)); })
       .catch(() => {})
       .finally(() => { setOpeningLoading(false); setMessagesLoaded(true); });
+  };
+
+  const applyWardrobe = async (newMessages, currentChar) => {
+    try {
+      const recent = newMessages.filter(m => m.role !== "image").slice(-6)
+        .map(m => `${m.role === "user" ? "User" : currentChar.name}: ${m.content}`).join("\n");
+      const res = await fetch(AI_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
+          messages: [{ role: "user", content:
+`You are tracking what characters are wearing in a roleplay conversation.
+
+Current wardrobe state:
+- ${currentChar.name} is wearing: ${currentChar.charOutfit || "unknown"}
+- User is wearing: ${currentChar.userOutfit || "unknown"}
+
+Recent conversation:
+${recent}
+
+Instructions:
+- Only update a field if clothing was explicitly mentioned or changed in the conversation
+- If nothing about clothing was mentioned, return the current values unchanged
+- Be specific and concise — e.g. "a white cotton shirt, jeans, and sneakers"
+- If a character undresses or removes items, reflect that accurately
+- Return ONLY valid JSON: {"charOutfit": "...", "userOutfit": "..."}
+- If a field is unknown and nothing was mentioned, use null
+No other text.` }]
+        }),
+      });
+      const data = await res.json();
+      const raw = data.choices[0].message.content.trim().replace(/```json|```/g, "").trim();
+      let parsed;
+      try { parsed = JSON.parse(raw); } catch { return; }
+      if (!parsed) return;
+      const updatedChar = {
+        ...currentChar,
+        charOutfit: parsed.charOutfit ?? currentChar.charOutfit ?? null,
+        userOutfit: parsed.userOutfit ?? currentChar.userOutfit ?? null,
+      };
+      // Only update if something actually changed
+      if (updatedChar.charOutfit !== currentChar.charOutfit || updatedChar.userOutfit !== currentChar.userOutfit) {
+        setCharacter(updatedChar);
+        onUpdateCharacter(updatedChar);
+      }
+    } catch {}
   };
 
   const applyReactivity = async (newMessages, currentChar) => {
@@ -1839,8 +1906,9 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const reply = await sendChat({ messages: newMessages.filter(m => m.role !== "image"), character, model: settings.selectedModel, settings });
       const withReply = [...newMessages, { role: "assistant", content: reply }];
       setMessages(m => [...m, { role: "assistant", content: reply }]);
-      // Fire reactivity analysis in background — don't await, don't block
+      // Fire reactivity and wardrobe tracking in background — don't await, don't block
       applyReactivity(withReply, character);
+      applyWardrobe(withReply, character);
     } catch (e) { setError(e.message); }
     setLoading(false);
   };
