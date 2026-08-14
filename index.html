@@ -555,6 +555,37 @@ function buildAppearancePrompt(appearance) {
   return parts.length > 0 ? parts.join(", ") : "";
 }
 
+// ─── IMAGE PROMPT ASSEMBLY ───────────────────────────────────────────────────
+// Every image for a character has to be built from the same identity string, in
+// the same position, or the face drifts. Three call sites used to assemble this
+// independently — with different style suffixes, and with the identity block
+// leading in some and trailing in others — so the portrait chosen at creation
+// never matched what showed up in chat.
+const IMAGE_STYLE = "photorealistic, natural lighting, cinematic, Canon EOS, 50mm lens, sharp focus, high detail";
+
+function buildIdentityPrompt(character) {
+  const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
+  const ageDesc = character.age ? `${character.age} year old` : "";
+  return [ageDesc, genderDesc, buildAppearancePrompt(character.appearance)].filter(Boolean).join(", ");
+}
+
+// Identity first (the text encoder weights leading tokens most heavily), then
+// the scene, then style. Character names are deliberately left out: they carry
+// no visual meaning, and a name that matches a public figure pulls the face
+// toward that person — the opposite of what we want.
+function buildImagePrompt(character, scene) {
+  return [buildIdentityPrompt(character), scene, IMAGE_STYLE].filter(Boolean).join(", ");
+}
+
+// The canonical anchor image: no scene, no wardrobe, no pose. Kept deliberately
+// plain and frontal because this is the frame a face-conditioning model gets
+// handed as the reference, and it doubles as the visual source of truth for the
+// character regardless of which provider we condition with.
+const IDENTITY_PORTRAIT_SCENE = "head and shoulders portrait, facing camera directly, neutral expression, plain seamless grey background, even soft studio lighting";
+function buildIdentityPortraitPrompt(character) {
+  return buildImagePrompt(character, IDENTITY_PORTRAIT_SCENE);
+}
+
 function buildAppearanceSystemNote(appearance) {
   if (!appearance) return "";
   const desc = buildAppearancePrompt(appearance);
@@ -823,11 +854,11 @@ async function generateImageDezgo({ prompt, nsfw, width, height, seed, model }) 
 
 async function buildImagePromptFromContext({ messages, character, model }) {
   const recent = messages.slice(-10).filter(m => m.role !== "image").map(m => `${m.role === "user" ? "User" : character.name}: ${m.content}`).join("\n");
-  const appearanceDesc = buildAppearancePrompt(character.appearance);
-  const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
-  const ageDesc = character.age ? `${character.age} year old` : "";
-  const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-  const content = await aiComplete({ model, messages: [{ role: "user", content: `You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is ${character.name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: ${charDesc || "not specified"}.\n\nConversation:\n${recent}\n\nWrite a Stable Diffusion prompt of 20-35 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression. Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere". Return ONLY the prompt text, nothing else.` }] });
+  // Only the scene is requested here. The character's physical description is
+  // prepended by buildImagePrompt and must not be duplicated or contradicted —
+  // the model restating "brown hair, green eyes" in its own words was a direct
+  // cause of faces changing between images.
+  const content = await aiComplete({ model, messages: [{ role: "user", content: `You are generating the SCENE HALF of a Stable Diffusion image prompt, based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is the character doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nConversation:\n${recent}\n\nWrite 15-25 words describing ONLY: the pose or action, clothing, location/setting, body language, and facial expression.\n\nCRITICAL: Do NOT describe the character's physical appearance — no hair colour, eye colour, skin tone, ethnicity, age, height, build or body proportions. Those are supplied separately and restating them will corrupt the character's likeness. Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere". Return ONLY the prompt text, nothing else.` }] });
   return content.trim().replace(/^"|"$/g, "");
 }
 
@@ -1410,7 +1441,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const safeCharacter = character || null;
   const [form, setForm] = useState(() => safeCharacter ? { ...safeCharacter } : {
     id: Date.now().toString(), name: "", persona: "", nsfw: false,
-    referenceImage: null, backgroundImage: null, autoImage: false,
+    referenceImage: null, backgroundImage: null, identityPortrait: null, autoImage: false,
     gender: "Female", customGender: "", sliders: { ...DEFAULT_SLIDERS },
     age: "", maritalStatus: "Single", relationship: "", relationshipCustom: "",
     appearance: { ...DEFAULT_APPEARANCE },
@@ -1419,6 +1450,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const [vibeLoading, setVibeLoading] = useState(false);
   const [imgPrompt, setImgPrompt] = useState("");
   const [imgLoading, setImgLoading] = useState(false);
+  const [portraitLoading, setPortraitLoading] = useState(false);
   const [showCustomImgInput, setShowCustomImgInput] = useState(false);
   const [customImgPrompt, setCustomImgPrompt] = useState("");
   const [error, setError] = useState("");
@@ -1462,16 +1494,31 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
     reader.readAsDataURL(file);
   };
 
+  // Generated separately from the gallery shots and stored on its own field:
+  // it is the character's visual source of truth, and once a face-conditioning
+  // provider is wired in this is the frame it gets handed. Always SFW and
+  // always frontal, so it stays usable as a reference.
+  const handleGenerateIdentityPortrait = async () => {
+    setPortraitLoading(true); setError("");
+    try {
+      const seed = form.seed || Math.floor(Math.random() * 2147483647);
+      const url = await generateImageDezgo({
+        prompt: buildIdentityPortraitPrompt(form),
+        nsfw: false,
+        width: 1024, height: 1024,
+        seed,
+        model: settings.imageModel,
+      });
+      setForm(f => ({ ...f, identityPortrait: url, seed }));
+    } catch (e) { setError(e.message); }
+    setPortraitLoading(false);
+  };
+
   const handleGenerateImage = async () => {
     setImgLoading(true); setError("");
     try {
-      const appearanceDesc = buildAppearancePrompt(form.appearance);
-      const genderDesc = form.gender === "Custom" ? (form.customGender || "") : (form.gender || "");
-      const ageDesc = form.age ? `${form.age} year old` : "";
-      const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-      const baseDesc = imgPrompt.trim() ? imgPrompt.trim() : (form.name ? form.name : "person");
-      const fullPrompt = charDesc ? `${baseDesc}, ${charDesc}` : baseDesc;
-      const stylePrompt = `full body shot, standing, ${fullPrompt}, photorealistic, natural lighting, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
+      const scene = ["full body shot, standing", imgPrompt.trim()].filter(Boolean).join(", ");
+      const stylePrompt = buildImagePrompt(form, scene);
       const seed = Math.floor(Math.random() * 2147483647);
       const url = await generateImageDezgo({ prompt: stylePrompt, nsfw: form.nsfw, seed, model: settings.imageModel });
       setGeneratedImages(prev => [url, ...prev]);
@@ -1621,6 +1668,20 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
               value={imgPrompt} onChange={e => setImgPrompt(e.target.value)} />
             <button style={S.btnPrimary} onClick={handleGenerateImage} disabled={imgLoading}>{imgLoading ? "Generating…" : form.referenceImage ? "↺ Regen" : "Gen Image"}</button>
           </div>
+
+          <div style={S.divider} />
+
+          {/* Identity portrait — the anchor face used to keep images consistent */}
+          <label style={S.label}>Identity Portrait</label>
+          <p style={{ fontSize: 12, color: "#4a4840", margin: "0 0 8px" }}>
+            A plain front-facing portrait used as this character's visual reference. Generated from the appearance settings above, never from an upload.
+          </p>
+          {form.identityPortrait && (
+            <img src={form.identityPortrait} alt="identity portrait" style={{ width: 140, height: 140, objectFit: "cover", borderRadius: 8, marginBottom: 8, background: "var(--bg3)", display: "block" }} />
+          )}
+          <button style={S.btnSecondary} onClick={handleGenerateIdentityPortrait} disabled={portraitLoading}>
+            {portraitLoading ? "Generating…" : form.identityPortrait ? "↺ Regenerate Portrait" : "Generate Identity Portrait"}
+          </button>
 
           {error && <p style={S.error}>{error}</p>}
         </div>
@@ -2083,16 +2144,8 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     if (!customImgPrompt.trim()) return;
     setImgLoading(true); setShowCustomImgInput(false);
     try {
-      const appearanceDesc = buildAppearancePrompt(character.appearance);
-      const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
-      const ageDesc = character.age ? `${character.age} year old` : "";
-      const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-      const styleModifiers = "photorealistic, natural lighting, cinematic, Canon EOS, 50mm lens, bokeh, sharp focus, high detail";
-      const fullPrompt = charDesc
-        ? `${character.name}, ${charDesc}, ${customImgPrompt}, ${styleModifiers}`
-        : `${character.name}, ${customImgPrompt}, ${styleModifiers}`;
       const url = await generateImageDezgo({
-        prompt: fullPrompt,
+        prompt: buildImagePrompt(character, customImgPrompt),
         nsfw: character.nsfw,
         seed: ensureSeed(),
         model: settings.imageModel,
@@ -2123,13 +2176,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const prompt = messages.length > 0
         ? await buildImagePromptFromContext({ messages, character, model: settings.selectedModel })
         : `${character.name}, portrait, character art`;
-      const appearanceDesc = buildAppearancePrompt(character.appearance);
-      const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
-      const ageDesc = character.age ? `${character.age} year old` : "";
-      const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-      const styleModifiers = "photorealistic, natural lighting, cinematic, Canon EOS, 50mm lens, sharp focus, high detail";
-      // Appearance goes FIRST so SD weights it highest, scene context after
-      const fullImgPrompt = charDesc ? `${charDesc}, ${prompt}, ${styleModifiers}` : `${prompt}, ${styleModifiers}`;
+      const fullImgPrompt = buildImagePrompt(character, prompt);
       // Context images: only NSFW if auto-image is on (user has opted in to continuous NSFW)
       const contextNsfw = auto ? character.nsfw : false;
       const url = await generateImageDezgo({
