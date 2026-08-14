@@ -9,7 +9,8 @@
 //
 // Actions:
 //   get_characters        -> { characters: [...] }
-//   save_characters       { characters: [...] } -> { ok: true }
+//   save_characters       { characters: [...] } -> { ok: true }   (full set replace)
+//   upsert_characters      { characters: [...] } -> { ok: true }   (partial, no removals)
 //   get_chat               { characterId } -> { messages: [...] }
 //   save_chat              { characterId, messages: [...] } -> { ok: true }
 //   delete_chat            { characterId } -> { ok: true }
@@ -27,6 +28,11 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, apikey',
 };
+
+function toRows(characters: any[]) {
+  const updated_at = new Date().toISOString();
+  return characters.map((c: any) => ({ id: c.id, data: c, updated_at }));
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -66,22 +72,45 @@ Deno.serve(async (req: Request) => {
         return json({ characters: (data || []).map((row: any) => row.data) });
       }
 
+      case 'upsert_characters': {
+        // Partial write: only touches the rows supplied, never removes anything.
+        // This is the hot path — a single character changing mid-conversation
+        // should not rewrite the whole table.
+        const characters = (body.characters || []).filter((c: any) => c && c.id);
+        if (characters.length === 0) return json({ ok: true });
+        const { error } = await supabase.from('characters').upsert(toRows(characters));
+        if (error) return json({ error: error.message }, 500);
+        return json({ ok: true });
+      }
+
       case 'save_characters': {
-        const characters = body.characters || [];
-        // Replace entire set: delete all, then insert
-        const { error: delErr } = await supabase.from('characters').delete().neq('id', '');
-        if (delErr) return json({ error: delErr.message }, 500);
+        // Full set replace. Writes first and prunes second, so a failure part
+        // way through leaves the table stale rather than empty — the previous
+        // delete-all-then-insert had a window where every character was gone,
+        // and a failed insert made that permanent.
+        const characters = (body.characters || []).filter((c: any) => c && c.id);
         if (characters.length > 0) {
-          const rows = characters.map((c: any) => ({ id: c.id, data: c, updated_at: new Date().toISOString() }));
-          const { error: insErr } = await supabase.from('characters').insert(rows);
-          if (insErr) return json({ error: insErr.message }, 500);
+          const { error: upErr } = await supabase.from('characters').upsert(toRows(characters));
+          if (upErr) return json({ error: upErr.message }, 500);
+        }
+
+        const { data: existing, error: exErr } = await supabase.from('characters').select('id');
+        if (exErr) return json({ error: exErr.message }, 500);
+
+        const keep = new Set(characters.map((c: any) => c.id));
+        const stale = (existing || []).map((r: any) => r.id).filter((id: string) => !keep.has(id));
+        if (stale.length > 0) {
+          const { error: delErr } = await supabase.from('characters').delete().in('id', stale);
+          if (delErr) return json({ error: delErr.message }, 500);
         }
         return json({ ok: true });
       }
 
       case 'delete_character': {
         const { characterId } = body;
-        await supabase.from('characters').delete().eq('id', characterId);
+        if (!characterId) return json({ error: 'characterId required' }, 400);
+        const { error } = await supabase.from('characters').delete().eq('id', characterId);
+        if (error) return json({ error: error.message }, 500);
         await supabase.from('chats').delete().eq('character_id', characterId);
         await supabase.from('galleries').delete().eq('character_id', characterId);
         return json({ ok: true });

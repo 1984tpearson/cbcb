@@ -431,6 +431,15 @@ const dataApi = {
   },
   getCharacters: () => dataApi.call("get_characters").then(r => r.characters || []),
   saveCharacters: (characters) => dataApi.call("save_characters", { characters }),
+  // Writes a single character without touching the rest of the table. Falls back
+  // to a full save if the deployed data-proxy predates the upsert_characters
+  // action, so the client works either side of a backend deploy.
+  upsertCharacter: (character, allCharacters) =>
+    dataApi.call("upsert_characters", { characters: [character] })
+      .catch(e => {
+        if (!/Unknown action/i.test(e.message) || !allCharacters) throw e;
+        return dataApi.call("save_characters", { characters: allCharacters });
+      }),
   deleteCharacter: (characterId) => dataApi.call("delete_character", { characterId }),
   getChat: (characterId) => dataApi.call("get_chat", { characterId }).then(r => r.messages || []),
   saveChat: (characterId, messages) => dataApi.call("save_chat", { characterId, messages }),
@@ -440,6 +449,56 @@ const dataApi = {
   saveGallery: (characterId, gallery) => dataApi.call("save_gallery", { characterId, gallery }),
 };
 
+
+// Single entry point for every AI proxy call. Every caller used to read
+// `data.choices[0].message.content` straight off the response, so a proxy
+// error surfaced as a TypeError about `undefined` instead of the actual
+// problem — and in the silent-catch callers, as nothing at all.
+async function aiComplete({ model, messages }) {
+  let res;
+  try {
+    res = await fetch(AI_PROXY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages }),
+    });
+  } catch (e) {
+    throw new Error(`AI proxy unreachable: ${e.message}`);
+  }
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`AI proxy error ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
+  }
+
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error("AI proxy returned a non-JSON response");
+  }
+
+  if (data && data.error) {
+    const msg = typeof data.error === "string" ? data.error : (data.error.message || JSON.stringify(data.error));
+    throw new Error(`AI proxy error: ${String(msg).slice(0, 200)}`);
+  }
+
+  const content = data && data.choices && data.choices[0] && data.choices[0].message
+    ? data.choices[0].message.content
+    : undefined;
+  if (typeof content !== "string") throw new Error("AI proxy returned no completion");
+  return content;
+}
+
+// Strips markdown fences and parses. Returns null instead of throwing —
+// callers decide whether a malformed reply is worth surfacing.
+function parseJsonReply(raw) {
+  const clean = String(raw).replace(/```json/gi, "").replace(/```/g, "").trim();
+  try { return JSON.parse(clean); } catch {}
+  const match = clean.match(/[\{\[][\s\S]*[\}\]]/);
+  if (match) { try { return JSON.parse(match[0]); } catch {} }
+  return null;
+}
 
 const storage = {
   get: (key, fallback = null) => {
@@ -705,14 +764,7 @@ async function sendChat({ messages, character, model, settings }) {
 
   const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + personaNote + nsfwClause + actionClause + plainClause + wardrobeClause + memoryClause;
 
-  const res = await fetch(AI_PROXY_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages: [{ role: "system", content: sysContent }, ...messages] }),
-  });
-  if (!res.ok) throw new Error(`AI proxy error: ${res.status}`);
-  const data = await res.json();
-  return data.choices[0].message.content;
+  return aiComplete({ model, messages: [{ role: "system", content: sysContent }, ...messages] });
 }
 
 async function generateImageDezgo({ prompt, nsfw, width, height, seed, model }) {
@@ -775,13 +827,8 @@ async function buildImagePromptFromContext({ messages, character, model }) {
   const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
   const ageDesc = character.age ? `${character.age} year old` : "";
   const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-  const res = await fetch(AI_PROXY_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages: [{ role: "user", content: `You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is ${character.name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: ${charDesc || "not specified"}.\n\nConversation:\n${recent}\n\nWrite a Stable Diffusion prompt of 20-35 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression. Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere". Return ONLY the prompt text, nothing else.` }] }),
-  });
-  const data = await res.json();
-  return data.choices[0].message.content.trim().replace(/^"|"$/g, "");
+  const content = await aiComplete({ model, messages: [{ role: "user", content: `You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is ${character.name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: ${charDesc || "not specified"}.\n\nConversation:\n${recent}\n\nWrite a Stable Diffusion prompt of 20-35 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression. Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere". Return ONLY the prompt text, nothing else.` }] });
+  return content.trim().replace(/^"|"$/g, "");
 }
 
 const MARITAL_STATUSES = ["Single", "Married", "Divorced", "Widowed", "In a relationship", "It's complicated"];
@@ -873,13 +920,7 @@ async function autoGenerateCharacter({ vibe, model, constraints = {} }) {
     ? constraints.gender
     : (constraints.gender === "Custom" && constraints.customGender ? constraints.customGender : null);
 
-  const res = await fetch(AI_PROXY_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages: [{ role: "user", content: `Create a fictional chat companion character based on this vibe: "${vibe}".${constraintBlock}\nUse culturally diverse names where appropriate. Avoid old-fashioned names.\nWrite the persona as a grounded, natural description of a real person — not a fictional archetype. Avoid flowery language, obscure references, or stacking quirks.\nReturn ONLY valid JSON with these exact fields:\n{\n  "name": "character name",\n  "persona": "2-3 sentence personality description, how they speak, backstory and quirks — must reflect the gender, marital status, and relationship if provided",\n  "age": 28,\n  "maritalStatus": "Single",\n  "hairColour": "Brown",\n  "eyeColour": "Brown",\n  "skinTone": "Medium",\n  "ethnicity": "Caucasian"\n}\nFor ethnicity use one of: Caucasian, Black / African, East Asian, South Asian, Southeast Asian, Middle Eastern, Hispanic / Latino, Indigenous, Mixed.\nFor maritalStatus use one of: Single, Married, Divorced, Widowed, In a relationship, It\'s complicated.\nFor hairColour use one of: Black, Dark brown, Brown, Auburn, Dirty blonde, Blonde, Platinum blonde, Red, Strawberry blonde, Grey, White.\nFor eyeColour use one of: Brown, Dark brown, Hazel, Green, Blue, Grey, Amber.\nFor skinTone use one of: Fair, Light, Medium, Olive, Tan, Brown, Dark brown, Ebony.\nNo extra text, no markdown, just the JSON object.` }] }),
-  });
-  const data = await res.json();
-  const raw = data.choices[0].message.content.trim();
+  const raw = (await aiComplete({ model, messages: [{ role: "user", content: `Create a fictional chat companion character based on this vibe: "${vibe}".${constraintBlock}\nUse culturally diverse names where appropriate. Avoid old-fashioned names.\nWrite the persona as a grounded, natural description of a real person — not a fictional archetype. Avoid flowery language, obscure references, or stacking quirks.\nReturn ONLY valid JSON with these exact fields:\n{\n  "name": "character name",\n  "persona": "2-3 sentence personality description, how they speak, backstory and quirks — must reflect the gender, marital status, and relationship if provided",\n  "age": 28,\n  "maritalStatus": "Single",\n  "hairColour": "Brown",\n  "eyeColour": "Brown",\n  "skinTone": "Medium",\n  "ethnicity": "Caucasian"\n}\nFor ethnicity use one of: Caucasian, Black / African, East Asian, South Asian, Southeast Asian, Middle Eastern, Hispanic / Latino, Indigenous, Mixed.\nFor maritalStatus use one of: Single, Married, Divorced, Widowed, In a relationship, It\'s complicated.\nFor hairColour use one of: Black, Dark brown, Brown, Auburn, Dirty blonde, Blonde, Platinum blonde, Red, Strawberry blonde, Grey, White.\nFor eyeColour use one of: Brown, Dark brown, Hazel, Green, Blue, Grey, Amber.\nFor skinTone use one of: Fair, Light, Medium, Olive, Tan, Brown, Dark brown, Ebony.\nNo extra text, no markdown, just the JSON object.` }] })).trim();
 
   const applyConstraints = (parsed) => ({
     name: constraints.name || parsed.name || "",
@@ -985,30 +1026,13 @@ async function generateOpeningScenarios({ character, model, settings, exclude = 
     ? `\n- NEVER use any of these scenarios that have already been shown: ${exclude.join(", ")}. Use completely different situations.`
     : "";
 
-  const res = await fetch(AI_PROXY_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages: [
+  const raw = (await aiComplete({ model, messages: [
       { role: "system", content: (character.persona || `You are ${character.name}.`) + addendum + personaNote + plainClause },
       { role: "user", content: `[seed:${seed}] Generate 5 opening scenarios for an in-person encounter with ${character.name}. Each scenario must match its assigned category exactly — do not substitute or blend categories.\n\n${categoryList}\n\nRules:\n- Write the opening message in FIRST PERSON — use "I", never "she", "he", or the character's name in third person\n- The two of you are physically together — never reference texting, messaging, screens, or anything virtual\n- Each opening must feel genuinely distinct in tone and energy from the others\n- Include physical actions and expressions in asterisks woven naturally into the message, in first person (e.g. *I glance up* not *she glances up*)\n- Vary locations, times of day, and energy levels\n- 1-3 sentences per opening message${character.nsfw ? "\n- For sexually charged scenarios be bold and explicit about the situation — don't sanitise it" : ""}${excludeClause}\n\nReturn ONLY valid JSON, an array of exactly 5 objects:\n[{"label": "short 2-4 word scenario name", "setting": "one sentence describing the scene/context", "message": "the in-character opening"}]\n\nNo extra text, no markdown, just the JSON array.` }
-    ]}),
-  });
-  const data = await res.json();
-  const raw = data.choices[0].message.content.trim();
+    ]})).trim();
 
-  try {
-    const clean = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
-    const parsed = JSON.parse(clean);
-    if (Array.isArray(parsed) && parsed.length > 0) return parsed.slice(0, 5);
-  } catch {}
-
-  try {
-    const match = raw.match(/\[[\s\S]*\]/);
-    if (match) {
-      const parsed = JSON.parse(match[0]);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed.slice(0, 5);
-    }
-  } catch {}
+  const parsed = parseJsonReply(raw);
+  if (Array.isArray(parsed) && parsed.length > 0) return parsed.slice(0, 5);
 
   // Fallback: single generic scenario
   return [{ label: "Opening", setting: "", message: raw.replace(/[{}\[\]"]/g, "").trim() }];
@@ -1159,6 +1183,7 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
   useEffect(() => { setCharOutfit(character.charOutfit || ""); }, [character.charOutfit]);
   useEffect(() => { setUserOutfit(character.userOutfit || ""); }, [character.userOutfit]);
   const [memoryGenLoading, setMemoryGenLoading] = useState(false);
+  const [memoryGenError, setMemoryGenError] = useState("");
   const [useUserPersonaOverride, setUseUserPersonaOverride] = useState(!!character.userPersonaOverride);
   const [userPersonaOverride, setUserPersonaOverride] = useState(character.userPersonaOverride || { ...DEFAULT_USER_PERSONA });
 
@@ -1248,14 +1273,12 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
             disabled={memoryGenLoading}
             onClick={async () => {
               setMemoryGenLoading(true);
+              setMemoryGenError("");
               try {
                 const chatHistory = storage.get(`chat_${character.id}`, []);
                 const chatText = chatHistory.filter(m => m.role !== "image").map(m => `${m.role === "user" ? "User" : character.name}: ${m.content}`).join("\n");
                 if (!chatText.trim()) { setMemoryGenLoading(false); return; }
-                const res = await fetch(AI_PROXY_URL, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ model: "meta-llama/llama-3.1-8b-instruct", messages: [{ role: "user", content:
+                const raw = await aiComplete({ model: "meta-llama/llama-3.1-8b-instruct", messages: [{ role: "user", content:
 `Summarise the following roleplay conversation between a user and ${character.name}. Return a JSON object with two fields:
 - "summary": a 3-5 sentence narrative summary of what has happened so far — key events, emotional moments, how the relationship has developed
 - "facts": a concise bullet-point list of key facts to remember — names used, places, things agreed to, relationship milestones, important details mentioned
@@ -1263,20 +1286,17 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
 Conversation:
 ${chatText.slice(-8000)}
 
-Return ONLY the JSON object, no other text.` }] }),
-                });
-                const data = await res.json();
-                const raw = data.choices[0].message.content.trim().replace(/```json|```/g, "").trim();
-                try {
-                  const parsed = JSON.parse(raw);
-                  if (parsed.summary) setMemorySummary(parsed.summary);
-                  if (parsed.facts) setMemoryFacts(typeof parsed.facts === "string" ? parsed.facts : parsed.facts.join("\n"));
-                } catch {}
-              } catch (e) {}
+Return ONLY the JSON object, no other text.` }] });
+                const parsed = parseJsonReply(raw);
+                if (!parsed) throw new Error("Could not read the model's reply");
+                if (parsed.summary) setMemorySummary(parsed.summary);
+                if (parsed.facts) setMemoryFacts(typeof parsed.facts === "string" ? parsed.facts : parsed.facts.join("\n"));
+              } catch (e) { setMemoryGenError(e.message); }
               setMemoryGenLoading(false);
             }}>
             {memoryGenLoading ? "Generating…" : "↺ Regenerate from Chat History"}
           </button>
+          {memoryGenError && <span style={{ fontSize: 12, color: "#c04060" }}>{memoryGenError}</span>}
           <button style={{ ...S.btnSecondary, marginTop: 4, color: "#c04060" }}
             onClick={() => { setMemorySummary(""); setMemoryFacts(""); }}>
             Clear Memory
@@ -1793,6 +1813,24 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
 
   const sessionId = character.currentSessionId || character.id;
 
+  // Every character mutation goes through commitCharacter. The background tasks
+  // (reactivity, wardrobe) both start from the same snapshot and finish at
+  // unpredictable times, so each one has to patch the *latest* character rather
+  // than the one it captured — otherwise whichever resolved second would spread
+  // its stale snapshot over the other's fields and silently drop them.
+  // The ref is updated synchronously so a patch landing before React re-renders
+  // still sees its predecessor's result.
+  const characterRef = useRef(initialChar);
+  const commitCharacter = (patch) => {
+    const base = characterRef.current;
+    const next = typeof patch === "function" ? patch(base) : { ...base, ...patch };
+    if (!next || next === base) return base;
+    characterRef.current = next;
+    setCharacter(next);
+    onUpdateCharacter(next);
+    return next;
+  };
+
   useEffect(() => {
     dataApi.getChatSession(sessionId)
       .then(msgs => setMessages(msgs))
@@ -1827,23 +1865,24 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   }, [messages.length]);
 
   const handlePersonalitySave = (updatedChar) => {
-    setCharacter(updatedChar);
-    onUpdateCharacter(updatedChar);
+    // Wholesale replace: these are deliberate edits from the form, so they win
+    // over anything the background tasks drifted while the panel was open.
+    commitCharacter(() => updatedChar);
     setBgImage(updatedChar.backgroundImage);
   };
 
   const handleRestart = () => {
     if (!confirm("Start a new conversation? The current chat will be preserved.")) return;
     const newSessionId = `${character.id}_${Date.now()}`;
-    const resetSliders = { ...(character.sliders || DEFAULT_SLIDERS) };
-    // Reset reactive sliders back to character defaults
-    const characterDefaults = character.sliders || DEFAULT_SLIDERS;
-    resetSliders.familiarity = characterDefaults.familiarity ?? DEFAULT_SLIDERS.familiarity;
-    resetSliders.likesUser = characterDefaults.likesUser ?? DEFAULT_SLIDERS.likesUser;
-    resetSliders.attractionToUser = characterDefaults.attractionToUser ?? DEFAULT_SLIDERS.attractionToUser;
-    const updatedChar = { ...character, currentSessionId: newSessionId, sliders: resetSliders, charOutfit: null, userOutfit: null };
-    setCharacter(updatedChar);
-    onUpdateCharacter(updatedChar);
+    const updatedChar = commitCharacter(prev => {
+      // Reset reactive sliders back to character defaults
+      const characterDefaults = prev.sliders || DEFAULT_SLIDERS;
+      const resetSliders = { ...characterDefaults };
+      resetSliders.familiarity = characterDefaults.familiarity ?? DEFAULT_SLIDERS.familiarity;
+      resetSliders.likesUser = characterDefaults.likesUser ?? DEFAULT_SLIDERS.likesUser;
+      resetSliders.attractionToUser = characterDefaults.attractionToUser ?? DEFAULT_SLIDERS.attractionToUser;
+      return { ...prev, currentSessionId: newSessionId, sliders: resetSliders, charOutfit: null, userOutfit: null };
+    });
     setMessages([]);
     setMessagesLoaded(false);
     setOpeningScenarios(null);
@@ -1858,12 +1897,9 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   const inferScenarioOutfit = async (scenario, currentChar) => {
     try {
       const appearanceDesc = buildAppearancePrompt(currentChar.appearance);
-      const res = await fetch(AI_PROXY_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
-          messages: [{ role: "user", content:
+      const raw = await aiComplete({
+        model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
+        messages: [{ role: "user", content:
 `Given this scenario, infer what ${currentChar.name} would plausibly be wearing. Base it on the setting and context — be specific and realistic.
 
 Character: ${currentChar.name}, ${currentChar.age || ""} ${currentChar.gender || ""}, ${appearanceDesc}
@@ -1874,29 +1910,22 @@ Opening: ${scenario.message}
 
 Return ONLY valid JSON: {"charOutfit": "brief specific description of what they are wearing"}
 No other text.` }]
-        }),
       });
-      const data = await res.json();
-      const raw = data.choices[0].message.content.trim().replace(/```json|```/g, "").trim();
-      let parsed;
-      try { parsed = JSON.parse(raw); } catch { return; }
+      const parsed = parseJsonReply(raw);
       if (!parsed?.charOutfit) return;
-      const updatedChar = { ...currentChar, charOutfit: parsed.charOutfit };
-      setCharacter(updatedChar);
-      onUpdateCharacter(updatedChar);
-    } catch {}
+      commitCharacter(prev => ({ ...prev, charOutfit: parsed.charOutfit }));
+    } catch (e) {
+      console.warn("Scenario outfit inference failed:", e.message);
+    }
   };
 
   const applyWardrobe = async (newMessages, currentChar) => {
     try {
       const recent = newMessages.filter(m => m.role !== "image").slice(-3)
         .map(m => `${m.role === "user" ? "User" : currentChar.name}: ${m.content}`).join("\n");
-      const res = await fetch(AI_PROXY_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
-          messages: [{ role: "user", content:
+      const raw = await aiComplete({
+        model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
+        messages: [{ role: "user", content:
 `You are tracking what characters are wearing in a roleplay conversation.
 
 Current wardrobe state:
@@ -1914,24 +1943,21 @@ Instructions:
 - Return ONLY valid JSON: {"charOutfit": "...", "userOutfit": "..."}
 - If a field is unknown and nothing was mentioned, use null
 No other text.` }]
-        }),
       });
-      const data = await res.json();
-      const raw = data.choices[0].message.content.trim().replace(/```json|```/g, "").trim();
-      let parsed;
-      try { parsed = JSON.parse(raw); } catch { return; }
+      const parsed = parseJsonReply(raw);
       if (!parsed) return;
-      const updatedChar = {
-        ...currentChar,
-        charOutfit: parsed.charOutfit ?? currentChar.charOutfit ?? null,
-        userOutfit: parsed.userOutfit ?? currentChar.userOutfit ?? null,
-      };
-      // Only update if something actually changed
-      if (updatedChar.charOutfit !== currentChar.charOutfit || updatedChar.userOutfit !== currentChar.userOutfit) {
-        setCharacter(updatedChar);
-        onUpdateCharacter(updatedChar);
-      }
-    } catch {}
+      // Patch only the wardrobe fields against the latest character, leaving
+      // everything else (notably sliders, which reactivity may have just moved)
+      // untouched. Returning prev unchanged makes commitCharacter a no-op.
+      commitCharacter(prev => {
+        const charOutfit = parsed.charOutfit ?? prev.charOutfit ?? null;
+        const userOutfit = parsed.userOutfit ?? prev.userOutfit ?? null;
+        if (charOutfit === prev.charOutfit && userOutfit === prev.userOutfit) return prev;
+        return { ...prev, charOutfit, userOutfit };
+      });
+    } catch (e) {
+      console.warn("Wardrobe tracking failed:", e.message);
+    }
   };
 
   const applyReactivity = async (newMessages, currentChar) => {
@@ -1944,12 +1970,9 @@ No other text.` }]
       const likes = currentSliders.likesUser ?? 50;
       const attraction = currentSliders.attractionToUser ?? 50;
 
-      const res = await fetch(AI_PROXY_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
-          messages: [{ role: "user", content:
+      const raw = await aiComplete({
+        model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
+        messages: [{ role: "user", content:
 `You are analysing a roleplay chat to determine how ${currentChar.name}'s feelings and personality should subtly shift after this exchange.
 
 Current state (0-100 scale):
@@ -1985,28 +2008,33 @@ Rules:
 - All final values must stay between 0 and 100
 
 Return ONLY a JSON object of slider keys and integer delta values, e.g. {"familiarity": 2, "amorous": 3, "playfulness": -1}. No other text.`
-          }]
-        }),
+        }]
       });
-      const data = await res.json();
-      const raw = data.choices[0].message.content.trim().replace(/```json|```/g, "").trim();
-      let deltas = {};
-      try { deltas = JSON.parse(raw); } catch { return; }
+      const deltas = parseJsonReply(raw);
+      if (!deltas) return;
 
-      const newSliders = { ...currentSliders };
-      for (const key of REACTIVE_SLIDER_KEYS) {
-        if (deltas[key] !== undefined && typeof deltas[key] === "number") {
+      // Deltas are applied to the latest sliders, not the snapshot this call
+      // started from, so a wardrobe write landing in between is not clobbered.
+      commitCharacter(prev => {
+        const baseSliders = prev.sliders || DEFAULT_SLIDERS;
+        const newSliders = { ...baseSliders };
+        let changed = false;
+        for (const key of REACTIVE_SLIDER_KEYS) {
+          if (typeof deltas[key] !== "number") continue;
           const maxDrift = REACTIVE_MAX_DRIFT[key] || 4;
           const clamped = Math.max(-maxDrift, Math.min(maxDrift, Math.round(deltas[key])));
-          newSliders[key] = Math.max(0, Math.min(100, (newSliders[key] ?? DEFAULT_SLIDERS[key] ?? 50) + clamped));
+          if (clamped === 0) continue;
+          const before = newSliders[key] ?? DEFAULT_SLIDERS[key] ?? 50;
+          const after = Math.max(0, Math.min(100, before + clamped));
+          if (after !== before) { newSliders[key] = after; changed = true; }
         }
-      }
-
-      const updatedChar = { ...currentChar, sliders: newSliders };
-      setCharacter(updatedChar);
-      onUpdateCharacter(updatedChar);
+        return changed ? { ...prev, sliders: newSliders } : prev;
+      });
     } catch (e) {
-      // Reactivity errors are silent — don't interrupt the conversation
+      // Reactivity failures must not interrupt the conversation, but they
+      // shouldn't be invisible either — this used to fail silently for a whole
+      // session with no indication that drift had stopped working.
+      console.warn("Reactivity update failed:", e.message);
     }
   };
 
@@ -2045,12 +2073,10 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
   };
 
   const ensureSeed = () => {
-    if (character.seed) return character.seed;
+    const existing = characterRef.current.seed;
+    if (existing) return existing;
     const seed = Math.floor(Math.random() * 2147483647);
-    const updated = { ...character, seed };
-    setCharacter(updated);
-    onUpdateCharacter(updated);
-    return seed;
+    return commitCharacter(prev => prev.seed ? prev : { ...prev, seed }).seed;
   };
 
   const handleCustomImage = async () => {
@@ -2122,9 +2148,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
 
   const handleSetBackground = (url) => {
     setBgImage(url);
-    const updated = { ...character, backgroundImage: url };
-    setCharacter(updated);
-    onUpdateCharacter(updated);
+    commitCharacter(prev => ({ ...prev, backgroundImage: url }));
     setShowBgMenu(false);
   };
 
@@ -2348,17 +2372,12 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                       character.age || "", character.maritalStatus || "",
                       character.relationship || "", character.relationshipCustom || ""
                     );
-                    const res = await fetch(AI_PROXY_URL, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ model: settings.selectedModel, messages: [
-                        { role: "system", content: (character.persona || `You are ${character.name}.`) + addendum },
-                        { role: "user", content: `Scene context: ${customSceneDesc}\n\nWrite a short in-character opening message (1-3 sentences) that ${character.name} would say or do in this moment. Include physical actions in asterisks where natural. No narration, just the opening.` }
-                      ]})
-                    });
-                    const data = await res.json();
-                    setCustomSceneOpening(data.choices[0].message.content.trim());
-                  } catch (e) { /* silent */ }
+                    const opening = await aiComplete({ model: settings.selectedModel, messages: [
+                      { role: "system", content: (character.persona || `You are ${character.name}.`) + addendum },
+                      { role: "user", content: `Scene context: ${customSceneDesc}\n\nWrite a short in-character opening message (1-3 sentences) that ${character.name} would say or do in this moment. Include physical actions in asterisks where natural. No narration, just the opening.` }
+                    ]});
+                    setCustomSceneOpening(opening.trim());
+                  } catch (e) { setError(e.message); }
                   setCustomSceneGenLoading(false);
                 }}>
                 {customSceneGenLoading ? "Generating…" : "✨ Generate Opening"}
@@ -2458,32 +2477,41 @@ function App() {
       .finally(() => setLoadingChars(false));
   }, []);
 
+  // These write one row instead of replacing the whole table, and the request
+  // is fired outside the state updater so React never issues it twice.
+  // charactersRef keeps a synchronous copy for the full-save fallback path.
+  const charactersRef = useRef([]);
+  useEffect(() => { charactersRef.current = characters; }, [characters]);
+
+  const persistCharacter = (char, next) =>
+    dataApi.upsertCharacter(char, next).catch(e => setLoadError(e.message));
+
   const saveCharacter = (char) => {
-    setCharacters(cs => {
-      const exists = cs.find(c => c.id === char.id);
-      const next = exists ? cs.map(c => c.id === char.id ? char : c) : [char, ...cs];
-      dataApi.saveCharacters(next).catch(e => setLoadError(e.message));
-      return next;
-    });
+    const exists = charactersRef.current.some(c => c.id === char.id);
+    const next = exists
+      ? charactersRef.current.map(c => c.id === char.id ? char : c)
+      : [char, ...charactersRef.current];
+    charactersRef.current = next;
+    setCharacters(next);
+    persistCharacter(char, next);
     setShowCharForm(false); setEditingChar(null);
   };
 
   const deleteCharacter = (id) => {
     if (!confirm("Delete this character and their chat history?")) return;
-    setCharacters(cs => {
-      const next = cs.filter(c => c.id !== id);
-      dataApi.saveCharacters(next).catch(e => setLoadError(e.message));
-      return next;
-    });
-    dataApi.deleteCharacter(id).catch(() => {});
+    const next = charactersRef.current.filter(c => c.id !== id);
+    charactersRef.current = next;
+    setCharacters(next);
+    // delete_character removes the character plus its chat and gallery, so
+    // there's no need to rewrite the remaining rows to express the removal.
+    dataApi.deleteCharacter(id).catch(e => setLoadError(e.message));
   };
 
   const updateCharacter = (char) => {
-    setCharacters(cs => {
-      const next = cs.map(c => c.id === char.id ? char : c);
-      dataApi.saveCharacters(next).catch(e => setLoadError(e.message));
-      return next;
-    });
+    const next = charactersRef.current.map(c => c.id === char.id ? char : c);
+    charactersRef.current = next;
+    setCharacters(next);
+    persistCharacter(char, next);
     setActiveChar(char);
   };
 
