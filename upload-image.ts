@@ -11,6 +11,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const ALLOWED_ORIGINS = Deno.env.get('ALLOWED_ORIGIN') || '*';
 const BUCKET = 'character-images';
+// ~12MB of base64 ≈ 9MB of image bytes — comfortably above a 1024px PNG.
+const MAX_BASE64_LENGTH = 12_000_000;
+const ALLOWED_MIME = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': ALLOWED_ORIGINS,
@@ -27,12 +30,22 @@ Deno.serve(async (req: Request) => {
     return new Response('Method not allowed', { status: 405, headers: corsHeaders });
   }
 
-  let body: { dataUrl?: string; filename?: string };
+  let body: { dataUrl?: string; filename?: string; token?: string };
   try {
     body = await req.json();
   } catch {
     return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
       status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Shared-token gate, matching data-proxy. Without this anyone who finds this
+  // URL can write arbitrary files into the public bucket.
+  const expectedToken = Deno.env.get('ACCESS_TOKEN');
+  if (!expectedToken || body.token !== expectedToken) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
@@ -55,6 +68,22 @@ Deno.serve(async (req: Request) => {
   }
   const mime = match[1];
   const base64Data = match[2];
+
+  // Cap before decoding — atob on an unbounded string allocates the whole
+  // payload in memory and will take the function down.
+  if (base64Data.length > MAX_BASE64_LENGTH) {
+    return new Response(JSON.stringify({ error: 'Image too large' }), {
+      status: 413,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (!ALLOWED_MIME.has(mime)) {
+    return new Response(JSON.stringify({ error: `Unsupported image type: ${mime}` }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
 
   let bytes: Uint8Array;
   try {
@@ -85,7 +114,9 @@ Deno.serve(async (req: Request) => {
 
   const { error: uploadError } = await supabase.storage
     .from(BUCKET)
-    .upload(path, bytes, { contentType: mime, upsert: true });
+    // upsert stays off: filenames carry a timestamp + random suffix, so a
+    // collision means someone is trying to overwrite an existing image.
+    .upload(path, bytes, { contentType: mime, upsert: false });
 
   if (uploadError) {
     return new Response(JSON.stringify({ error: uploadError.message }), {

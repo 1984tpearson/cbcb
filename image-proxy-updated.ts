@@ -42,6 +42,18 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  // Shared-token gate, matching data-proxy. Without this anyone who finds this
+  // URL can spend the Dezgo key indefinitely.
+  const expectedToken = Deno.env.get('ACCESS_TOKEN');
+  const token = formData.get('token');
+  formData.delete('token'); // never forward to Dezgo
+  if (!expectedToken || token !== expectedToken) {
+    return new Response('Unauthorized', {
+      status: 401,
+      headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGINS },
+    });
+  }
+
   const apiKey = Deno.env.get('DEZGO_API_KEY');
   if (!apiKey) {
     return new Response('Server misconfiguration', {

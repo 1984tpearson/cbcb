@@ -801,6 +801,7 @@ async function generateImageDezgo({ prompt, nsfw, width, height, seed, model, in
   formData.append("sampler", "auto");
   formData.append("format", "png");
   formData.append("negative_prompt", "(worst quality:2), (low quality:2), (normal quality:2), lowres, bad anatomy, bad hands, ((monochrome)), ((grayscale)), watermark, text, signature, logo, cropped, out of frame, jpeg artifacts, blurry, deformed, ugly, disfigured, cartoon, anime, illustration, painting, drawing, art, sketch, 3d render");
+  formData.append("token", ACCESS_TOKEN);
 
   if (seed) formData.append("seed", String(seed));
 
@@ -840,7 +841,7 @@ async function generateImageDezgo({ prompt, nsfw, width, height, seed, model, in
     const uploadRes = await fetch(UPLOAD_IMAGE_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dataUrl, filename: `img_${Date.now()}_${Math.random().toString(36).slice(2)}` }),
+      body: JSON.stringify({ dataUrl, token: ACCESS_TOKEN, filename: `img_${Date.now()}_${Math.random().toString(36).slice(2)}` }),
     });
     if (uploadRes.ok) {
       const { url } = await uploadRes.json();
