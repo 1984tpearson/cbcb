@@ -789,43 +789,70 @@ async function fetchInitImage(src) {
   }
 }
 
-async function generateImageDezgo({ prompt, nsfw, width, height, seed, model, initImage, strength }) {
+const NEGATIVE_PROMPT = "(worst quality:2), (low quality:2), (normal quality:2), lowres, bad anatomy, bad hands, ((monochrome)), ((grayscale)), watermark, text, signature, logo, cropped, out of frame, jpeg artifacts, blurry, deformed, ugly, disfigured, cartoon, anime, illustration, painting, drawing, art, sketch, 3d render";
+
+async function generateImageDezgo({ prompt, nsfw, width, height, seed, model, initImage, strength, fallbackSeed }) {
   const modelId = model || DEZGO_MODELS[0].id;
   const params = DEZGO_MODEL_PARAMS[modelId] || DEZGO_MODEL_PARAMS[DEZGO_MODELS[0].id];
   const initBlob = await fetchInitImage(initImage);
-  const formData = new FormData();
-  formData.append("prompt", prompt);
-  formData.append("model", modelId);
-  formData.append("steps", params.steps);
-  formData.append("guidance", params.guidance);
-  formData.append("sampler", "auto");
-  formData.append("format", "png");
-  formData.append("negative_prompt", "(worst quality:2), (low quality:2), (normal quality:2), lowres, bad anatomy, bad hands, ((monochrome)), ((grayscale)), watermark, text, signature, logo, cropped, out of frame, jpeg artifacts, blurry, deformed, ugly, disfigured, cartoon, anime, illustration, painting, drawing, art, sketch, 3d render");
-  formData.append("token", ACCESS_TOKEN);
 
-  if (seed) formData.append("seed", String(seed));
+  // `sendModel: false` drops the model field so Dezgo falls back to the
+  // endpoint's own default. image2image_sdxl rejects the text2image model
+  // names with InvalidEnumValue, and its accepted list isn't discoverable
+  // from here, so this is how an img2img call gets a usable model.
+  const buildForm = ({ useInit, sendModel, seedValue }) => {
+    const formData = new FormData();
+    formData.append("prompt", prompt);
+    if (sendModel) formData.append("model", modelId);
+    formData.append("steps", params.steps);
+    formData.append("guidance", params.guidance);
+    formData.append("sampler", "auto");
+    formData.append("format", "png");
+    formData.append("negative_prompt", NEGATIVE_PROMPT);
+    formData.append("token", ACCESS_TOKEN);
+    if (seedValue) formData.append("seed", String(seedValue));
 
-  if (initBlob) {
-    // img2img takes its dimensions from the init image, so width/height are
-    // not sent — passing them alongside init_image is an error on Dezgo.
-    formData.append("init_image", initBlob, "init.png");
-    formData.append("strength", String(strength ?? IMG2IMG_STRENGTH));
-    formData.append("dezgo_endpoint", "image2image_sdxl");
-  } else {
-    formData.append("width", width || 774);
-    formData.append("height", height || 1355);
-    formData.append("dezgo_endpoint", params.endpoint);
+    if (useInit) {
+      // img2img takes its dimensions from the init image, so width/height are
+      // not sent — passing them alongside init_image is an error on Dezgo.
+      formData.append("init_image", initBlob, "init.png");
+      formData.append("strength", String(strength ?? IMG2IMG_STRENGTH));
+      formData.append("dezgo_endpoint", "image2image_sdxl");
+    } else {
+      formData.append("width", width || 774);
+      formData.append("height", height || 1355);
+      formData.append("dezgo_endpoint", params.endpoint);
+    }
+    return formData;
+  };
+
+  const send = async (opts) => {
+    const r = await fetch(IMAGE_PROXY_URL, { method: "POST", body: buildForm(opts) });
+    return { ok: r.ok, status: r.status, res: r, err: r.ok ? "" : await r.text().catch(() => "") };
+  };
+
+  // img2img first (identity from the reference, seed free to vary), then the
+  // same call without an explicit model, then plain text2image on the locked
+  // per-character seed. A reference that img2img won't accept costs variety,
+  // never the image itself.
+  const attempts = initBlob
+    ? [
+        { useInit: true, sendModel: true, seedValue: seed },
+        { useInit: true, sendModel: false, seedValue: seed },
+        { useInit: false, sendModel: true, seedValue: fallbackSeed || seed },
+      ]
+    : [{ useInit: false, sendModel: true, seedValue: seed }];
+
+  let last = null;
+  for (const opts of attempts) {
+    last = await send(opts);
+    if (last.ok) break;
   }
 
-  const res = await fetch(IMAGE_PROXY_URL, {
-    method: "POST",
-    body: formData,
-  });
-
-  if (!res.ok) {
-    const err = await res.text().catch(() => "");
-    throw new Error(`Dezgo error: ${res.status} ${err}`);
+  if (!last.ok) {
+    throw new Error(`Dezgo error: ${last.status} ${last.err}`);
   }
+  const res = last.res;
 
   const blob = await res.blob();
   const dataUrl = await new Promise((resolve, reject) => {
@@ -2132,6 +2159,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         seed: character.referenceImage ? Math.floor(Math.random() * 2147483647) : ensureSeed(),
         model: settings.imageModel,
         initImage: character.referenceImage,
+        fallbackSeed: ensureSeed(),
       });
       setMessages(m => [...m, { role: "image", content: url, prompt: customImgPrompt }]);
       const newGallery2 = [{ url, prompt: customImgPrompt, date: Date.now() }, ...gallery].slice(0, 20);
@@ -2174,6 +2202,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         seed: character.referenceImage ? Math.floor(Math.random() * 2147483647) : ensureSeed(),
         model: settings.imageModel,
         initImage: character.referenceImage,
+        fallbackSeed: ensureSeed(),
       });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);
       const newGallery3 = [{ url, prompt, date: Date.now() }, ...gallery].slice(0, 20);
