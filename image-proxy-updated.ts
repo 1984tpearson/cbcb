@@ -9,6 +9,7 @@
 const DEZGO_URL_DEFAULT = 'https://api.dezgo.com/text2image_sdxl';
 const DEZGO_URL_LIGHTNING = 'https://api.dezgo.com/text2image_sdxl_lightning';
 const DEZGO_URL_IMAGE2IMAGE = 'https://api.dezgo.com/image2image';
+const DEZGO_URL_IMAGE2IMAGE_SDXL = 'https://api.dezgo.com/image2image_sdxl';
 const ALLOWED_ORIGINS = Deno.env.get('ALLOWED_ORIGIN') || '*';
 
 Deno.serve(async (req: Request) => {
@@ -57,6 +58,9 @@ Deno.serve(async (req: Request) => {
   let DEZGO_URL = DEZGO_URL_DEFAULT;
   if (endpointHint === 'lightning') DEZGO_URL = DEZGO_URL_LIGHTNING;
   else if (endpointHint === 'image2image') DEZGO_URL = DEZGO_URL_IMAGE2IMAGE;
+  // Every model in the client's list is SDXL, so img2img has to go to the SDXL
+  // variant — the plain image2image endpoint only accepts SD1.5-family models.
+  else if (endpointHint === 'image2image_sdxl') DEZGO_URL = DEZGO_URL_IMAGE2IMAGE_SDXL;
 
   const upstream = await fetch(DEZGO_URL, {
     method: 'POST',

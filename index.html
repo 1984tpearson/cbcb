@@ -767,14 +767,35 @@ async function sendChat({ messages, character, model, settings }) {
   return aiComplete({ model, messages: [{ role: "system", content: sysContent }, ...messages] });
 }
 
-async function generateImageDezgo({ prompt, nsfw, width, height, seed, model }) {
+// How far img2img is allowed to travel from the reference image. Low values
+// cling to the reference (same pose, same framing — the thing we're trying to
+// get away from), high values drift off it and lose the face. 0.45 keeps the
+// character recognisable while letting the prompt drive pose and setting.
+const IMG2IMG_STRENGTH = 0.45;
+
+// Fetches a reference image (Supabase storage URL, or a data: URL from the
+// pre-storage fallback path) as a Blob so it can be posted as init_image.
+// Returns null on any failure — callers fall back to plain text2image rather
+// than failing the whole generation.
+async function fetchInitImage(src) {
+  if (!src) return null;
+  try {
+    const res = await fetch(src);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return blob.size > 0 ? blob : null;
+  } catch {
+    return null;
+  }
+}
+
+async function generateImageDezgo({ prompt, nsfw, width, height, seed, model, initImage, strength }) {
   const modelId = model || DEZGO_MODELS[0].id;
   const params = DEZGO_MODEL_PARAMS[modelId] || DEZGO_MODEL_PARAMS[DEZGO_MODELS[0].id];
+  const initBlob = await fetchInitImage(initImage);
   const formData = new FormData();
   formData.append("prompt", prompt);
   formData.append("model", modelId);
-  formData.append("width", width || 774);
-  formData.append("height", height || 1355);
   formData.append("steps", params.steps);
   formData.append("guidance", params.guidance);
   formData.append("sampler", "auto");
@@ -783,7 +804,17 @@ async function generateImageDezgo({ prompt, nsfw, width, height, seed, model }) 
 
   if (seed) formData.append("seed", String(seed));
 
-  formData.append("dezgo_endpoint", params.endpoint);
+  if (initBlob) {
+    // img2img takes its dimensions from the init image, so width/height are
+    // not sent — passing them alongside init_image is an error on Dezgo.
+    formData.append("init_image", initBlob, "init.png");
+    formData.append("strength", String(strength ?? IMG2IMG_STRENGTH));
+    formData.append("dezgo_endpoint", "image2image_sdxl");
+  } else {
+    formData.append("width", width || 774);
+    formData.append("height", height || 1355);
+    formData.append("dezgo_endpoint", params.endpoint);
+  }
 
   const res = await fetch(IMAGE_PROXY_URL, {
     method: "POST",
@@ -2094,8 +2125,12 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const url = await generateImageDezgo({
         prompt: fullPrompt,
         nsfw: character.nsfw,
-        seed: ensureSeed(),
+        // With a reference image anchoring the face, the seed no longer has to
+        // carry identity — so let it vary and give each image its own
+        // composition. Without one, fall back to the locked per-character seed.
+        seed: character.referenceImage ? Math.floor(Math.random() * 2147483647) : ensureSeed(),
         model: settings.imageModel,
+        initImage: character.referenceImage,
       });
       setMessages(m => [...m, { role: "image", content: url, prompt: customImgPrompt }]);
       const newGallery2 = [{ url, prompt: customImgPrompt, date: Date.now() }, ...gallery].slice(0, 20);
@@ -2135,8 +2170,9 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const url = await generateImageDezgo({
         prompt: fullImgPrompt,
         nsfw: contextNsfw,
-        seed: ensureSeed(),
+        seed: character.referenceImage ? Math.floor(Math.random() * 2147483647) : ensureSeed(),
         model: settings.imageModel,
+        initImage: character.referenceImage,
       });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);
       const newGallery3 = [{ url, prompt, date: Date.now() }, ...gallery].slice(0, 20);
