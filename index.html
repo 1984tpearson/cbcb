@@ -919,6 +919,15 @@ function buildPersonalityAddendum(sliders, gender, customGender, age, maritalSta
   else if (s.coyness <= 80) lines.push("You frequently engineer 'accidental' flirtatious moments (a dropped item you lean down for, an 'oops' wardrobe slip, an innocently-phrased but loaded question) and act surprised or embarrassed when called on it, while clearly enjoying the effect.");
   else lines.push("You constantly stage 'innocent accidents' and fake-naive questions as your primary way of expressing interest — dropping things to show off, 'accidentally' being underdressed, asking things like whether you're a good kisser as if genuinely curious — and always maintain plausible deniability, feigning surprise or innocence if the user calls it out.");
 
+  // Horniness modulates amorous, forwardness, coyness, dirty talk, and pet
+  // names — arousal pulls all of these toward bolder/warmer expression
+  // regardless of their baseline slider values, while low arousal pulls
+  // them the other way, damping them down even if their sliders are set high.
+  if (horny >= 76) lines.push("Your current arousal overrides your usual restraint: even if you're naturally reserved, coy, or reluctant with pet names, right now you're far more amorous, direct, forward, affectionate, and eager than your baseline sliders alone suggest — sexual language, initiating, and intimate language all come far more easily, and any staged 'innocent accidents' start looking more like open invitations.");
+  else if (horny >= 51) lines.push("Your current arousal is nudging you noticeably bolder and warmer than your baseline — more amorous, more forward, less coy, looser with dirty talk and pet names than your sliders alone would produce.");
+  else if (horny >= 26) lines.push("Your mild arousal gives a slight extra push toward warmth and boldness, but your amorous, forwardness, coyness, dirty talk, and pet name behavior still mostly follow their baseline sliders.");
+  else lines.push("You're not currently aroused, which noticeably dampens things even if your baseline sliders are set higher: you're less amorous, less forward, less inclined toward coy games or flirtatious 'accidents', and less likely to reach for dirty talk or pet names right now — none of it disappears entirely, but it's muted until your arousal picks back up.");
+
   return "\n\n[PERSONALITY PARAMETERS]\n" + lines.join(" ");
 }
 
@@ -1309,8 +1318,15 @@ function SliderRow({ def, value, onChange }) {
   );
 }
 
-function SliderGroup({ sliders, onChange }) {
-  const sections = [...new Set(SLIDER_DEFS.map(d => d.section))];
+function SliderGroup({ sliders, onChange, reactiveFirst }) {
+  let sections = [...new Set(SLIDER_DEFS.map(d => d.section))];
+  // Once a chat is underway, the reactive Relationship sliders (familiarity,
+  // likesUser, attractionToUser, horniness) are the ones actually shifting
+  // turn to turn, so surfacing them first saves scrolling past the static
+  // personality/speech/behaviour sliders to check them.
+  if (reactiveFirst) {
+    sections = [...sections].sort((a, b) => (a === "Relationship" ? -1 : b === "Relationship" ? 1 : 0));
+  }
   return (
     <div>
       {sections.map(section => (
@@ -1529,7 +1545,7 @@ Return ONLY the JSON object, no other text.` }] });
           <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Personality Sliders</span>
           <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 12 }}>These shape how the character speaks and behaves — changes take effect immediately.</p>
 
-          <SliderGroup sliders={sliders} onChange={(key, v) => setSliders(s => ({ ...s, [key]: v }))} />
+          <SliderGroup sliders={sliders} onChange={(key, v) => setSliders(s => ({ ...s, [key]: v }))} reactiveFirst />
 
           <div style={S.divider} />
           <div style={S.toggleRow}>
