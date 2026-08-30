@@ -324,6 +324,7 @@ const DEFAULT_SLIDERS = {
   familiarity: 10,
   likesUser: 50,
   attractionToUser: 50,
+  horniness: 15,
 };
 
 // Which sliders the reactivity system is allowed to drift
@@ -331,7 +332,7 @@ const REACTIVE_SLIDER_KEYS = [
   "amorous", "playfulness", "assertiveness", "emotionalDepth",
   "profanity", "dirtyTalk", "petNames", "forwardness",
   "jealousy", "openness", "neediness", "confidence", "formality",
-  "familiarity", "likesUser", "attractionToUser",
+  "familiarity", "likesUser", "attractionToUser", "horniness",
 ];
 
 // Max drift per turn for each slider (base, before multipliers)
@@ -339,6 +340,7 @@ const REACTIVE_MAX_DRIFT = {
   familiarity: 3,      // slow steady climb
   likesUser: 2,
   attractionToUser: 2,
+  horniness: 4,
   amorous: 4,
   playfulness: 4,
   assertiveness: 3,
@@ -375,6 +377,7 @@ const SLIDER_DEFS = [
   { key: "familiarity",      label: "Familiarity",        left: "Complete Stranger", right: "Knows User Deeply", section: "Relationship", reactive: true },
   { key: "likesUser",        label: "Likes User",         left: "Dislikes",       right: "Loves",          section: "Relationship", reactive: true },
   { key: "attractionToUser", label: "Attraction to User", left: "Repulsed",       right: "Strongly Attracted", section: "Relationship", reactive: true },
+  { key: "horniness",        label: "Horniness",          left: "Not in the Mood", right: "Overwhelmed with Desire", section: "Relationship", reactive: true },
 ].map(def => ({ ...def, previewFn: v => personalitySliderPreview(def.key, v) }));
 
 const DEFAULT_USER_PERSONA = { name: "", gender: "", notes: "" };
@@ -740,6 +743,17 @@ function personalitySliderPreview(key, value) {
       if (v <= 60) return "mild attraction";
       if (v <= 80) return "genuinely attracted";
       return "extremely attracted";
+    case "horniness":
+      // 8 tiers instead of the usual 5 — this trait swings more sharply
+      // within a scene, so it gets finer-grained resolution.
+      if (v <= 12) return "not aroused";
+      if (v <= 25) return "faint undercurrent";
+      if (v <= 37) return "mildly turned on";
+      if (v <= 50) return "noticeably aroused";
+      if (v <= 62) return "visibly turned on";
+      if (v <= 75) return "strongly aroused";
+      if (v <= 87) return "consumed by desire";
+      return "desperately aroused";
     default:
       return "";
   }
@@ -780,6 +794,18 @@ function buildPersonalityAddendum(sliders, gender, customGender, age, maritalSta
   else if (attraction <= 60) lines.push("You feel mild, neutral physical attraction to the user.");
   else if (attraction <= 80) lines.push("You find the user genuinely attractive.");
   else lines.push("You find the user extremely attractive and are very physically drawn to them.");
+
+  // Horniness — 8 tiers instead of the usual 5, since this state can swing
+  // sharply within a single scene and benefits from finer resolution.
+  const horny = s.horniness ?? 15;
+  if (horny <= 12) lines.push("You are not thinking about sex at all right now — it's simply not on your mind.");
+  else if (horny <= 25) lines.push("There's the faintest, easily-ignored undercurrent of arousal, but it doesn't affect how you act.");
+  else if (horny <= 37) lines.push("You're mildly aware of a spark of arousal, but it stays in the background of your thoughts.");
+  else if (horny <= 50) lines.push("You're noticeably turned on — it occasionally colors your tone, though you're not acting on it.");
+  else if (horny <= 62) lines.push("You're visibly turned on and it's starting to show in your body language and word choice.");
+  else if (horny <= 75) lines.push("You're strongly aroused — it's becoming hard to think about much else, and it shows.");
+  else if (horny <= 87) lines.push("You're consumed by desire — it's difficult to focus on anything but how badly you want the user, and you're likely to initiate.");
+  else lines.push("You are overwhelmed with desperate arousal — it dominates everything you say and do, and you can barely hold yourself back.");
 
   // Amorous
   if (s.amorous <= 20) lines.push("You are not flirtatious or romantic in any way — keep all interactions platonic and professional.");
@@ -2084,6 +2110,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       resetSliders.familiarity = characterDefaults.familiarity ?? DEFAULT_SLIDERS.familiarity;
       resetSliders.likesUser = characterDefaults.likesUser ?? DEFAULT_SLIDERS.likesUser;
       resetSliders.attractionToUser = characterDefaults.attractionToUser ?? DEFAULT_SLIDERS.attractionToUser;
+      resetSliders.horniness = characterDefaults.horniness ?? DEFAULT_SLIDERS.horniness;
       return { ...prev, currentSessionId: newSessionId, sliders: resetSliders, charOutfit: null, userOutfit: null };
     });
     setMessages([]);
@@ -2172,6 +2199,7 @@ No other text.` }]
       const fam = currentSliders.familiarity ?? 10;
       const likes = currentSliders.likesUser ?? 50;
       const attraction = currentSliders.attractionToUser ?? 50;
+      const horny = currentSliders.horniness ?? 15;
 
       const raw = await aiComplete({
         model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
@@ -2182,6 +2210,7 @@ Current state (0-100 scale):
 - familiarity: ${fam} (how well they know the user)
 - likesUser: ${likes} (how much they like the user)
 - attractionToUser: ${attraction} (physical attraction to user)
+- horniness: ${horny} (current in-the-moment arousal/sexual desire — distinct from attraction, which is stable; horniness is a state that rises and falls within a scene)
 - amorous: ${currentSliders.amorous ?? 30}
 - playfulness: ${currentSliders.playfulness ?? 50}
 - assertiveness: ${currentSliders.assertiveness ?? 50}
@@ -2202,12 +2231,13 @@ Rules:
 - familiarity always increases slightly just from talking (+1 to +3)
 - likesUser and attractionToUser move based on whether the user was charming, rude, funny, cold, etc.
 - amorous/forwardness/dirtyTalk/petNames are amplified by high attraction AND high likes — if both are high these can increase significantly when flirting occurs; if attraction is low these should decrease or stay flat regardless of flirting
+- horniness rises when the conversation is sexual, flirtatious, or physically charged, especially if attractionToUser is already high — it can jump quickly during escalating sexual tension. It decreases when the conversation is non-romantic/non-sexual for a stretch, and drops sharply right after a sexual climax or release in the scene (post-coital cool-down). Unlike the other relationship sliders, horniness should actively decay back toward a low baseline when nothing sexual is happening — don't let it stay elevated indefinitely.
 - emotionalDepth/openness/neediness are gated by familiarity — they can only reach high values once familiarity is also high
 - formality decreases gradually as familiarity increases
 - playfulness increases when the user is fun/funny; decreases when they're boring or rude
 - jealousy increases if user mentions other people romantically
 - Only return changes worth making — if nothing changed, return empty deltas
-- Keep all changes small: familiarity max ±3, relationship sliders max ±2, personality sliders max ±4
+- Keep all changes small: familiarity max ±3, likesUser/attractionToUser max ±2, horniness max ±4 (it moves faster than the other relationship sliders — allow bigger swings here), personality sliders max ±4
 - All final values must stay between 0 and 100
 
 Return ONLY a JSON object of slider keys and integer delta values, e.g. {"familiarity": 2, "amorous": 3, "playfulness": -1}. No other text.`
