@@ -513,11 +513,11 @@ function appearancePhrasePreview(key, value) {
       if (value >= 60) return "full figure";
       return "athletic build";
     case "chest":
-      if (value <= 20) return "small bust";
-      if (value <= 40) return "modest bust";
-      if (value >= 80) return "large bust";
-      if (value >= 60) return "full bust";
-      return "average bust";
+      if (value <= 20) return "small breasts";
+      if (value <= 40) return "modest breasts";
+      if (value >= 80) return "large breasts";
+      if (value >= 60) return "full breasts";
+      return "average breasts";
     case "waist":
       if (value <= 30) return "narrow waist";
       if (value >= 70) return "full waist";
@@ -570,10 +570,10 @@ function buildAppearancePrompt(appearance) {
   }
 
   const chest = a.chest ?? 50;
-  if (chest <= 20) parts.push("small bust");
-  else if (chest <= 40) parts.push("modest bust");
-  else if (chest >= 80) parts.push("large bust");
-  else if (chest >= 60) parts.push("full bust");
+  if (chest <= 20) parts.push("small breasts");
+  else if (chest <= 40) parts.push("modest breasts");
+  else if (chest >= 80) parts.push("large breasts");
+  else if (chest >= 60) parts.push("full breasts");
 
   const waist = a.waist ?? 50;
   const hips = a.hips ?? 50;
@@ -921,7 +921,7 @@ const APPEARANCE_SLIDER_DEFS = [
   { key: "hips",    label: "Hips",   left: "Narrow",   right: "Full" },
 ].map(def => ({ ...def, previewFn: v => appearancePhrasePreview(def.key, v) }));
 
-function randomiseAppearance(parsed) {
+function randomiseAppearance(parsed, current) {
   const pick = arr => arr[Math.floor(Math.random() * arr.length)];
   const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
@@ -931,20 +931,29 @@ function randomiseAppearance(parsed) {
   const skinOptions = SKIN_TONES.filter(c => c !== "Custom");
 
   const ethnicityOptions = ETHNICITIES.filter(e => e !== "Custom");
+
+  // Any field the user has already moved away from its default is treated
+  // as a manual choice and preserved as-is — vibe-generate only fills in
+  // fields still sitting at their untouched default, the same "don't
+  // clobber what's already set" rule the name/persona/maritalStatus fields
+  // already follow.
+  const c = current || {};
+  const isTouched = key => c[key] !== undefined && c[key] !== DEFAULT_APPEARANCE[key];
+
   return {
-    hairColour: parsed?.hairColour || pick(hairOptions),
-    hairColourCustom: "",
-    eyeColour: parsed?.eyeColour || pick(eyeOptions),
-    eyeColourCustom: "",
-    skinTone: parsed?.skinTone || pick(skinOptions),
-    skinToneCustom: "",
-    ethnicity: parsed?.ethnicity || pick(ethnicityOptions),
-    ethnicityCustom: "",
-    height: rand(20, 80),
-    build: rand(15, 75),
-    chest: rand(20, 80),
-    waist: rand(20, 70),
-    hips: rand(25, 75),
+    hairColour: isTouched("hairColour") ? c.hairColour : (parsed?.hairColour || pick(hairOptions)),
+    hairColourCustom: isTouched("hairColour") ? (c.hairColourCustom || "") : "",
+    eyeColour: isTouched("eyeColour") ? c.eyeColour : (parsed?.eyeColour || pick(eyeOptions)),
+    eyeColourCustom: isTouched("eyeColour") ? (c.eyeColourCustom || "") : "",
+    skinTone: isTouched("skinTone") ? c.skinTone : (parsed?.skinTone || pick(skinOptions)),
+    skinToneCustom: isTouched("skinTone") ? (c.skinToneCustom || "") : "",
+    ethnicity: isTouched("ethnicity") ? c.ethnicity : (parsed?.ethnicity || pick(ethnicityOptions)),
+    ethnicityCustom: isTouched("ethnicity") ? (c.ethnicityCustom || "") : "",
+    height: isTouched("height") ? c.height : rand(20, 80),
+    build: isTouched("build") ? c.build : rand(15, 75),
+    chest: isTouched("chest") ? c.chest : rand(20, 80),
+    waist: isTouched("waist") ? c.waist : rand(20, 70),
+    hips: isTouched("hips") ? c.hips : rand(25, 75),
   };
 }
 
@@ -1500,7 +1509,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
         persona: f.persona.trim() || result.persona,
         age: f.age || result.age || "",
         maritalStatus: f.maritalStatus !== "Single" ? f.maritalStatus : (result.maritalStatus || "Single"),
-        appearance: randomiseAppearance(result.appearance),
+        appearance: randomiseAppearance(result.appearance, f.appearance),
       }));
     } catch (e) { setError("Failed to generate character. Try again."); }
     setVibeLoading(false);
@@ -1523,7 +1532,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
       const baseDesc = imgPrompt.trim() ? imgPrompt.trim() : (form.name ? form.name : "person");
       const fullPrompt = charDesc ? `${baseDesc}, ${charDesc}` : baseDesc;
-      const stylePrompt = `full body shot, standing, ${fullPrompt}, photorealistic, natural lighting, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
+      const stylePrompt = `standing, ${fullPrompt}, photorealistic, natural lighting, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
       const url = await generateImageWiro({ prompt: stylePrompt, model: settings.imageModel });
       setGeneratedImages(prev => [url, ...prev]);
       setForm(f => ({ ...f, referenceImage: url, backgroundImage: url }));
