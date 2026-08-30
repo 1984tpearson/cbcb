@@ -512,12 +512,12 @@ function appearancePhrasePreview(key, value) {
       if (value >= 80) return "stocky build";
       if (value >= 60) return "full figure";
       return "athletic build";
-    case "chest":
-      if (value <= 20) return "small breasts";
-      if (value <= 40) return "modest breasts";
-      if (value >= 80) return "large breasts";
-      if (value >= 60) return "full breasts";
-      return "average breasts";
+    case "chest": {
+      // 5 evenly-spaced buckets across the slider range, A through DD.
+      const cups = ["A", "B", "C", "D", "DD"];
+      const idx = Math.min(cups.length - 1, Math.floor(value / (100 / cups.length)));
+      return `${cups[idx]} cup breasts`;
+    }
     case "waist":
       if (value <= 30) return "narrow waist";
       if (value >= 70) return "full waist";
@@ -570,10 +570,7 @@ function buildAppearancePrompt(appearance) {
   }
 
   const chest = a.chest ?? 50;
-  if (chest <= 20) parts.push("small breasts");
-  else if (chest <= 40) parts.push("modest breasts");
-  else if (chest >= 80) parts.push("large breasts");
-  else if (chest >= 60) parts.push("full breasts");
+  parts.push(appearancePhrasePreview("chest", chest));
 
   const waist = a.waist ?? 50;
   const hips = a.hips ?? 50;
@@ -916,7 +913,7 @@ const DEFAULT_APPEARANCE = {
 const APPEARANCE_SLIDER_DEFS = [
   { key: "height",  label: "Height", left: "Petite",   right: "Tall" },
   { key: "build",   label: "Build",  left: "Slim",     right: "Stocky" },
-  { key: "chest",   label: "Breasts",  left: "Smaller",  right: "Larger" },
+  { key: "chest",   label: "Breasts",  left: "A cup",  right: "DD cup" },
   { key: "waist",   label: "Waist",  left: "Narrow",   right: "Full" },
   { key: "hips",    label: "Hips",   left: "Narrow",   right: "Full" },
 ].map(def => ({ ...def, previewFn: v => appearancePhrasePreview(def.key, v) }));
@@ -976,7 +973,7 @@ async function autoGenerateCharacter({ vibe, model, constraints = {} }) {
     ? constraints.gender
     : (constraints.gender === "Custom" && constraints.customGender ? constraints.customGender : null);
 
-  const raw = (await aiComplete({ model, messages: [{ role: "user", content: `Create a fictional chat companion character based on this vibe: "${vibe}".${constraintBlock}\nUse culturally diverse names where appropriate. Avoid old-fashioned names.\nWrite the persona as a grounded, natural description of a real person — not a fictional archetype. Avoid flowery language, obscure references, or stacking quirks.\nReturn ONLY valid JSON with these exact fields:\n{\n  "name": "character name",\n  "persona": "2-3 sentence personality description, how they speak, backstory and quirks — must reflect the gender, marital status, and relationship if provided",\n  "age": 28,\n  "maritalStatus": "Single",\n  "hairColour": "Brown",\n  "eyeColour": "Brown",\n  "skinTone": "Medium",\n  "ethnicity": "Caucasian"\n}\nFor ethnicity use one of: Caucasian, Black / African, East Asian, South Asian, Southeast Asian, Middle Eastern, Hispanic / Latino, Indigenous, Mixed.\nFor maritalStatus use one of: Single, Married, Divorced, Widowed, In a relationship, It\'s complicated.\nFor hairColour use one of: Black, Dark brown, Brown, Auburn, Dirty blonde, Blonde, Platinum blonde, Red, Strawberry blonde, Grey, White.\nFor eyeColour use one of: Brown, Dark brown, Hazel, Green, Blue, Grey, Amber.\nFor skinTone use one of: Fair, Light, Medium, Olive, Tan, Brown, Dark brown, Ebony.\nNo extra text, no markdown, just the JSON object.` }] })).trim();
+  const raw = (await aiComplete({ model, messages: [{ role: "user", content: `Create a fictional chat companion character based on this vibe: "${vibe}".${constraintBlock}\nUse culturally diverse names where appropriate. Avoid old-fashioned names.\nWrite the persona as a grounded, natural description of a real person — not a fictional archetype. Avoid flowery language, obscure references, or stacking quirks.\nVary hairColour, eyeColour, skinTone, ethnicity, age, and maritalStatus across different characters — do not default to the same choices every time.\nReturn ONLY valid JSON with these exact fields, replacing each placeholder with an actual value (not the placeholder text itself):\n{\n  "name": "<character name>",\n  "persona": "<2-3 sentence personality description, how they speak, backstory and quirks — must reflect the gender, marital status, and relationship if provided>",\n  "age": <a number, varied — not always the same age>,\n  "maritalStatus": "<one of: Single, Married, Divorced, Widowed, In a relationship, It\'s complicated>",\n  "hairColour": "<one of: Black, Dark brown, Brown, Auburn, Dirty blonde, Blonde, Platinum blonde, Red, Strawberry blonde, Grey, White>",\n  "eyeColour": "<one of: Brown, Dark brown, Hazel, Green, Blue, Grey, Amber>",\n  "skinTone": "<one of: Fair, Light, Medium, Olive, Tan, Brown, Dark brown, Ebony>",\n  "ethnicity": "<one of: Caucasian, Black / African, East Asian, South Asian, Southeast Asian, Middle Eastern, Hispanic / Latino, Indigenous, Mixed>"\n}\nNo extra text, no markdown, just the JSON object.` }] })).trim();
 
   const applyConstraints = (parsed) => ({
     name: constraints.name || parsed.name || "",
