@@ -377,30 +377,15 @@ const SLIDER_DEFS = [
 
 const DEFAULT_USER_PERSONA = { name: "", gender: "", notes: "" };
 
+// Single Wiro model for now. Kept as a list (rather than a bare constant) so
+// the Settings dropdown and per-model config pattern can grow to multiple
+// Wiro models later without reshaping the surrounding code.
 const DEZGO_MODELS = [
-  { id: "dreamshaperxl_lightning_1024px", label: "DreamShaper XL Lightning" },
-  { id: "envy_starlight_xl_01_lightning_1024px", label: "Envy Starlight XL Lightning" },
-  { id: "juggernautxl_10_hyper", label: "Juggernaut XL 10 Hyper" },
-  { id: "juggernautxl_9_lightning_1024px", label: "Juggernaut XL 9 Lightning" },
-  { id: "ponyxl_6_turbo_dpo", label: "Pony XL 6 Turbo DPO" },
-  { id: "bluepencilxl_1024px", label: "BluePencil XL" },
-  { id: "dreamshaperxl_1024px", label: "DreamShaper XL" },
-  { id: "juggernautxl_1024px", label: "Juggernaut XL" },
-  { id: "juggernautxl_rundiffusion_8_1024px", label: "Juggernaut XL RunDiffusion 8" },
-  { id: "sdxl_1024px", label: "SDXL Base 1.0" },
+  { id: "seedream-v5-pro-uncensored", label: "Seedream v5 Pro (Wiro)" },
 ];
 
 const DEZGO_MODEL_PARAMS = {
-  dreamshaperxl_lightning_1024px:        { steps: "5",  guidance: "2.0", endpoint: "lightning" },
-  envy_starlight_xl_01_lightning_1024px: { steps: "5",  guidance: "2.0", endpoint: "lightning" },
-  juggernautxl_10_hyper:                 { steps: "6",  guidance: "2.0", endpoint: "lightning" },
-  juggernautxl_9_lightning_1024px:       { steps: "5",  guidance: "2.0", endpoint: "lightning" },
-  ponyxl_6_turbo_dpo:                    { steps: "8",  guidance: "2.0", endpoint: "lightning" },
-  bluepencilxl_1024px:                   { steps: "30", guidance: "7.0", endpoint: "sdxl" },
-  dreamshaperxl_1024px:                  { steps: "30", guidance: "7.0", endpoint: "sdxl" },
-  juggernautxl_1024px:                   { steps: "30", guidance: "7.0", endpoint: "sdxl" },
-  juggernautxl_rundiffusion_8_1024px:    { steps: "30", guidance: "7.0", endpoint: "sdxl" },
-  sdxl_1024px:                           { steps: "30", guidance: "7.0", endpoint: "sdxl" },
+  "seedream-v5-pro-uncensored": { resolution: "1k", aspectRatio: "9:16", outputFormat: "png" },
 };
 
 const DEFAULT_SETTINGS = {
@@ -767,94 +752,34 @@ async function sendChat({ messages, character, model, settings }) {
   return aiComplete({ model, messages: [{ role: "system", content: sysContent }, ...messages] });
 }
 
-// How far img2img is allowed to travel from the reference image. Low values
-// cling to the reference (same pose, same framing — the thing we're trying to
-// get away from), high values drift off it and lose the face. 0.45 keeps the
-// character recognisable while letting the prompt drive pose and setting.
-const IMG2IMG_STRENGTH = 0.45;
-
-// Fetches a reference image (Supabase storage URL, or a data: URL from the
-// pre-storage fallback path) as a Blob so it can be posted as init_image.
-// Returns null on any failure — callers fall back to plain text2image rather
-// than failing the whole generation.
-async function fetchInitImage(src) {
-  if (!src) return null;
-  try {
-    const res = await fetch(src);
-    if (!res.ok) return null;
-    const blob = await res.blob();
-    return blob.size > 0 ? blob : null;
-  } catch {
-    return null;
-  }
-}
-
-const NEGATIVE_PROMPT = "(worst quality:2), (low quality:2), (normal quality:2), lowres, bad anatomy, bad hands, ((monochrome)), ((grayscale)), watermark, text, signature, logo, cropped, out of frame, jpeg artifacts, blurry, deformed, ugly, disfigured, cartoon, anime, illustration, painting, drawing, art, sketch, 3d render";
-
-async function generateImageDezgo({ prompt, nsfw, width, height, seed, model, initImage, strength, fallbackSeed }) {
+async function generateImageWiro({ prompt, model, initImage, resolution, aspectRatio, outputFormat }) {
   const modelId = model || DEZGO_MODELS[0].id;
   const params = DEZGO_MODEL_PARAMS[modelId] || DEZGO_MODEL_PARAMS[DEZGO_MODELS[0].id];
-  const initBlob = await fetchInitImage(initImage);
 
-  // `sendModel: false` drops the model field so Dezgo falls back to the
-  // endpoint's own default. image2image_sdxl rejects the text2image model
-  // names with InvalidEnumValue, and its accepted list isn't discoverable
-  // from here, so this is how an img2img call gets a usable model.
-  const buildForm = ({ useInit, sendModel, seedValue }) => {
-    const formData = new FormData();
-    formData.append("prompt", prompt);
-    if (sendModel) formData.append("model", modelId);
-    formData.append("steps", params.steps);
-    formData.append("guidance", params.guidance);
-    formData.append("sampler", "auto");
-    formData.append("format", "png");
-    formData.append("negative_prompt", NEGATIVE_PROMPT);
-    formData.append("token", ACCESS_TOKEN);
-    if (seedValue) formData.append("seed", String(seedValue));
-
-    if (useInit) {
-      // img2img takes its dimensions from the init image, so width/height are
-      // not sent — passing them alongside init_image is an error on Dezgo.
-      formData.append("init_image", initBlob, "init.png");
-      formData.append("strength", String(strength ?? IMG2IMG_STRENGTH));
-      formData.append("dezgo_endpoint", "image2image_sdxl");
-    } else {
-      formData.append("width", width || 774);
-      formData.append("height", height || 1355);
-      formData.append("dezgo_endpoint", params.endpoint);
-    }
-    return formData;
+  const body = {
+    prompt,
+    resolution: resolution || params.resolution,
+    aspectRatio: aspectRatio || params.aspectRatio,
+    outputFormat: outputFormat || params.outputFormat,
+    watermark: "false",
   };
+  // Reference image for character consistency — Wiro accepts a URL directly
+  // (no need to fetch/blob it client-side the way the old Dezgo img2img
+  // flow required), so this just passes the character's stored image URL.
+  if (initImage) body.inputImage = initImage;
 
-  const send = async (opts) => {
-    const r = await fetch(IMAGE_PROXY_URL, { method: "POST", body: buildForm(opts) });
-    return { ok: r.ok, status: r.status, res: r, err: r.ok ? "" : await r.text().catch(() => "") };
-  };
+  const r = await fetch(IMAGE_PROXY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 
-  // img2img first (identity from the reference, seed free to vary), then the
-  // same call without an explicit model, then plain text2image on the locked
-  // per-character seed. A reference that img2img won't accept costs variety,
-  // never the image itself.
-  const attempts = initBlob
-    ? [
-        { useInit: true, sendModel: true, seedValue: seed },
-        { useInit: true, sendModel: false, seedValue: seed },
-        { useInit: false, sendModel: true, seedValue: fallbackSeed || seed },
-      ]
-    : [{ useInit: false, sendModel: true, seedValue: seed }];
-
-  let last = null;
-  for (const opts of attempts) {
-    last = await send(opts);
-    if (last.ok) break;
+  if (!r.ok) {
+    const err = await r.text().catch(() => "");
+    throw new Error(`Wiro error: ${r.status} ${err}`);
   }
 
-  if (!last.ok) {
-    throw new Error(`Dezgo error: ${last.status} ${last.err}`);
-  }
-  const res = last.res;
-
-  const blob = await res.blob();
+  const blob = await r.blob();
   const dataUrl = await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => resolve(reader.result);
@@ -1531,10 +1456,9 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       const baseDesc = imgPrompt.trim() ? imgPrompt.trim() : (form.name ? form.name : "person");
       const fullPrompt = charDesc ? `${baseDesc}, ${charDesc}` : baseDesc;
       const stylePrompt = `full body shot, standing, ${fullPrompt}, photorealistic, natural lighting, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
-      const seed = Math.floor(Math.random() * 2147483647);
-      const url = await generateImageDezgo({ prompt: stylePrompt, nsfw: form.nsfw, seed, model: settings.imageModel });
+      const url = await generateImageWiro({ prompt: stylePrompt, model: settings.imageModel });
       setGeneratedImages(prev => [url, ...prev]);
-      setForm(f => ({ ...f, referenceImage: url, backgroundImage: url, seed }));
+      setForm(f => ({ ...f, referenceImage: url, backgroundImage: url }));
     } catch (e) { setError(e.message); }
     setImgLoading(false);
   };
@@ -2150,16 +2074,12 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const fullPrompt = charDesc
         ? `${character.name}, ${charDesc}, ${customImgPrompt}, ${styleModifiers}`
         : `${character.name}, ${customImgPrompt}, ${styleModifiers}`;
-      const url = await generateImageDezgo({
+      const url = await generateImageWiro({
         prompt: fullPrompt,
-        nsfw: character.nsfw,
-        // With a reference image anchoring the face, the seed no longer has to
-        // carry identity — so let it vary and give each image its own
-        // composition. Without one, fall back to the locked per-character seed.
-        seed: character.referenceImage ? Math.floor(Math.random() * 2147483647) : ensureSeed(),
         model: settings.imageModel,
+        // Reference image anchors identity — Wiro handles the consistency,
+        // so there's no seed juggling needed the way Dezgo's img2img required.
         initImage: character.referenceImage,
-        fallbackSeed: ensureSeed(),
       });
       setMessages(m => [...m, { role: "image", content: url, prompt: customImgPrompt }]);
       const newGallery2 = [{ url, prompt: customImgPrompt, date: Date.now() }, ...gallery].slice(0, 20);
@@ -2194,15 +2114,10 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const styleModifiers = "photorealistic, natural lighting, cinematic, Canon EOS, 50mm lens, sharp focus, high detail";
       // Appearance goes FIRST so SD weights it highest, scene context after
       const fullImgPrompt = charDesc ? `${charDesc}, ${prompt}, ${styleModifiers}` : `${prompt}, ${styleModifiers}`;
-      // Context images: only NSFW if auto-image is on (user has opted in to continuous NSFW)
-      const contextNsfw = auto ? character.nsfw : false;
-      const url = await generateImageDezgo({
+      const url = await generateImageWiro({
         prompt: fullImgPrompt,
-        nsfw: contextNsfw,
-        seed: character.referenceImage ? Math.floor(Math.random() * 2147483647) : ensureSeed(),
         model: settings.imageModel,
         initImage: character.referenceImage,
-        fallbackSeed: ensureSeed(),
       });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);
       const newGallery3 = [{ url, prompt, date: Date.now() }, ...gallery].slice(0, 20);
