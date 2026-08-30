@@ -939,7 +939,7 @@ async function sendChat({ messages, character, model, settings }) {
   return aiComplete({ model, messages: [{ role: "system", content: sysContent }, ...messages] });
 }
 
-async function generateImageWiro({ prompt, model, initImage, resolution, aspectRatio, outputFormat }) {
+async function generateImageWiro({ prompt, model, initImage, resolution, aspectRatio, outputFormat, seed }) {
   const modelId = model || DEZGO_MODELS[0].id;
   const params = DEZGO_MODEL_PARAMS[modelId] || DEZGO_MODEL_PARAMS[DEZGO_MODELS[0].id];
 
@@ -957,6 +957,11 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
     outputFormat: outputFormat || params.outputFormat,
     watermark: "false",
   };
+  // Random seed per call so identical/near-identical prompts (e.g. clicking
+  // "Regenerate" on a character with no wording changes) still produce
+  // visually distinct results, rather than Wiro falling back to whatever it
+  // defaults to when seed is omitted.
+  body.seed = seed ?? Math.floor(Math.random() * 2147483647);
   // Reference image for character consistency — Wiro accepts a URL directly
   // (no need to fetch/blob it client-side the way the old Dezgo img2img
   // flow required), so this just passes the character's stored image URL.
@@ -1666,7 +1671,8 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       const fullPrompt = charDesc ? `${baseDesc}, ${charDesc}` : baseDesc;
       const clothingClause = clothed ? "fully clothed, wearing an outfit appropriate to the setting" : "nude";
       const stylePrompt = `standing, ${fullPrompt}, ${clothingClause}, photorealistic, natural lighting, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
-      const url = await generateImageWiro({ prompt: stylePrompt, model: settings.imageModel });
+      const seed = Math.floor(Math.random() * 2147483647);
+      const url = await generateImageWiro({ prompt: stylePrompt, model: settings.imageModel, seed });
       setGeneratedImages(prev => [url, ...prev]);
       setForm(f => ({ ...f, referenceImage: url, backgroundImage: url }));
     } catch (e) { setError(e.message); }
