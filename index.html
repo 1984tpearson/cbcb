@@ -495,6 +495,42 @@ const storage = {
 };
 
 // ─── BUILD PERSONALITY ADDENDUM FROM SLIDERS ─────────────────────────────────
+// Per-trait phrase for a given slider value — shared by the prompt builder
+// below and the live preview text under each slider, so they can never drift
+// out of sync with each other.
+function appearancePhrasePreview(key, value) {
+  switch (key) {
+    case "height":
+      if (value <= 25) return "short stature";
+      if (value <= 45) return "petite frame";
+      if (value >= 75) return "tall";
+      if (value >= 55) return "above average height";
+      return "average height";
+    case "build":
+      if (value <= 20) return "slim build";
+      if (value <= 40) return "slender build";
+      if (value >= 80) return "stocky build";
+      if (value >= 60) return "full figure";
+      return "athletic build";
+    case "chest":
+      if (value <= 20) return "small bust";
+      if (value <= 40) return "modest bust";
+      if (value >= 80) return "large bust";
+      if (value >= 60) return "full bust";
+      return "average bust";
+    case "waist":
+      if (value <= 30) return "narrow waist";
+      if (value >= 70) return "full waist";
+      return "average waist";
+    case "hips":
+      if (value <= 30) return "narrow hips";
+      if (value >= 70) return "wide hips";
+      return "average hips";
+    default:
+      return "";
+  }
+}
+
 function buildAppearancePrompt(appearance) {
   if (!appearance) return "";
   const a = appearance;
@@ -511,31 +547,51 @@ function buildAppearancePrompt(appearance) {
   if (skin) parts.push(`${skin.toLowerCase()} skin`);
 
   const h = a.height ?? 50;
-  if (h <= 25) parts.push("very short stature");
-  else if (h <= 45) parts.push("petite frame");
-  else if (h >= 75) parts.push("tall");
-  else if (h >= 55) parts.push("above average height");
-
   const b = a.build ?? 50;
-  if (b <= 20) parts.push("very slim build");
-  else if (b <= 40) parts.push("slender build");
-  else if (b >= 80) parts.push("stocky build");
-  else if (b >= 60) parts.push("full figure");
-  else parts.push("athletic build");
+
+  // Height + build combined into one phrase when both land at the extreme
+  // low end, instead of stacking two separate "very short" / "very slim"
+  // modifiers — that combination is what was pushing generations toward
+  // caricature proportions (tiny torso, stretched limbs) rather than a
+  // proportionally short, slim figure.
+  if (h <= 25 && b <= 20) {
+    parts.push("short, slender frame");
+  } else {
+    if (h <= 25) parts.push("short stature");
+    else if (h <= 45) parts.push("petite frame");
+    else if (h >= 75) parts.push("tall");
+    else if (h >= 55) parts.push("above average height");
+
+    if (b <= 20) parts.push("slim build");
+    else if (b <= 40) parts.push("slender build");
+    else if (b >= 80) parts.push("stocky build");
+    else if (b >= 60) parts.push("full figure");
+    else parts.push("athletic build");
+  }
 
   const chest = a.chest ?? 50;
   if (chest <= 20) parts.push("small bust");
   else if (chest <= 40) parts.push("modest bust");
-  else if (chest >= 80) parts.push("very large bust");
+  else if (chest >= 80) parts.push("large bust");
   else if (chest >= 60) parts.push("full bust");
 
   const waist = a.waist ?? 50;
-  if (waist <= 30) parts.push("narrow waist");
-  else if (waist >= 70) parts.push("full waist");
-
   const hips = a.hips ?? 50;
-  if (hips <= 30) parts.push("narrow hips");
-  else if (hips >= 70) parts.push("wide hips");
+
+  // Waist + hips combined when both point the same direction — "narrow
+  // waist, narrow hips" as two separate phrases reads as more extreme than
+  // either was meant to be individually, since they're largely describing
+  // the same silhouette.
+  if (waist <= 30 && hips <= 30) {
+    parts.push("slender waistline");
+  } else if (waist >= 70 && hips >= 70) {
+    parts.push("curvier waistline");
+  } else {
+    if (waist <= 30) parts.push("narrow waist");
+    else if (waist >= 70) parts.push("full waist");
+    if (hips <= 30) parts.push("narrow hips");
+    else if (hips >= 70) parts.push("wide hips");
+  }
 
   return parts.length > 0 ? parts.join(", ") : "";
 }
@@ -756,8 +812,15 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
   const modelId = model || DEZGO_MODELS[0].id;
   const params = DEZGO_MODEL_PARAMS[modelId] || DEZGO_MODEL_PARAMS[DEZGO_MODELS[0].id];
 
+  // Wiro/Seedream has no negative_prompt parameter, so proportion guidance
+  // goes into the positive prompt instead — appended here rather than at
+  // each call site so every generation gets it. Addresses a caricature-like
+  // failure mode (tiny torso, stretched limbs) seen on extreme appearance
+  // slider combinations.
+  const guardedPrompt = `${prompt}, natural realistic human body proportions, anatomically correct, not exaggerated, not stylized, not caricature`;
+
   const body = {
-    prompt,
+    prompt: guardedPrompt,
     resolution: resolution || params.resolution,
     aspectRatio: aspectRatio || params.aspectRatio,
     outputFormat: outputFormat || params.outputFormat,
@@ -853,10 +916,10 @@ const DEFAULT_APPEARANCE = {
 const APPEARANCE_SLIDER_DEFS = [
   { key: "height",  label: "Height", left: "Petite",   right: "Tall" },
   { key: "build",   label: "Build",  left: "Slim",     right: "Stocky" },
-  { key: "chest",   label: "Chest",  left: "Smaller",  right: "Larger" },
+  { key: "chest",   label: "Breasts",  left: "Smaller",  right: "Larger" },
   { key: "waist",   label: "Waist",  left: "Narrow",   right: "Full" },
   { key: "hips",    label: "Hips",   left: "Narrow",   right: "Full" },
-];
+].map(def => ({ ...def, previewFn: v => appearancePhrasePreview(def.key, v) }));
 
 function randomiseAppearance(parsed) {
   const pick = arr => arr[Math.floor(Math.random() * arr.length)];
@@ -1066,6 +1129,11 @@ function SliderRow({ def, value, onChange }) {
         <span style={{ fontSize: 10, color: "#4a4840" }}>{def.left}</span>
         <span style={{ fontSize: 10, color: "#4a4840" }}>{def.right}</span>
       </div>
+      {def.previewFn && (
+        <div style={{ fontSize: 10, color: "var(--pink)", marginTop: 4, fontStyle: "italic" }}>
+          {def.previewFn(value)}
+        </div>
+      )}
     </div>
   );
 }
