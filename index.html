@@ -375,7 +375,7 @@ const SLIDER_DEFS = [
   { key: "familiarity",      label: "Familiarity",        left: "Complete Stranger", right: "Knows User Deeply", section: "Relationship", reactive: true },
   { key: "likesUser",        label: "Likes User",         left: "Dislikes",       right: "Loves",          section: "Relationship", reactive: true },
   { key: "attractionToUser", label: "Attraction to User", left: "Repulsed",       right: "Strongly Attracted", section: "Relationship", reactive: true },
-];
+].map(def => ({ ...def, previewFn: v => personalitySliderPreview(def.key, v) }));
 
 const DEFAULT_USER_PERSONA = { name: "", gender: "", notes: "" };
 
@@ -618,6 +618,131 @@ function buildUserPersonaNote(persona) {
   if (persona.notes) parts.push(persona.notes);
   if (parts.length === 0) return "";
   return `\n\n[ABOUT THE PERSON YOU'RE TALKING TO] ${parts.join("; ")}. Address and refer to them accordingly.`;
+}
+
+// Short-phrase preview for each personality/behaviour/relationship slider —
+// mirrors the tier boundaries in buildPersonalityAddendum below so the two
+// can never drift out of sync with each other.
+function personalitySliderPreview(key, value) {
+  const v = value;
+  switch (key) {
+    case "amorous":
+      if (v <= 20) return "platonic only";
+      if (v <= 40) return "warm, not flirty";
+      if (v <= 60) return "subtly flirtatious";
+      if (v <= 80) return "openly flirtatious";
+      return "highly amorous";
+    case "replyLength":
+      if (v <= 20) return "very terse";
+      if (v <= 40) return "concise replies";
+      if (v <= 60) return "moderate length";
+      if (v <= 80) return "detailed, expressive";
+      return "long & immersive";
+    case "formality":
+      if (v <= 20) return "very casual";
+      if (v <= 40) return "relaxed tone";
+      if (v <= 60) return "balanced tone";
+      if (v <= 80) return "polished speech";
+      return "formal & refined";
+    case "assertiveness":
+      if (v <= 20) return "very passive";
+      if (v <= 40) return "easy-going";
+      if (v <= 60) return "balanced";
+      if (v <= 80) return "confident & assertive";
+      return "very dominant";
+    case "playfulness":
+      if (v <= 20) return "serious, little humor";
+      if (v <= 40) return "dry humor";
+      if (v <= 60) return "light banter";
+      if (v <= 80) return "playful & witty";
+      return "highly playful";
+    case "emotionalDepth":
+      if (v <= 20) return "surface-level";
+      if (v <= 40) return "measured warmth";
+      if (v <= 60) return "genuine emotion";
+      if (v <= 80) return "emotionally expressive";
+      return "intensely emotional";
+    case "profanity":
+      if (v <= 20) return "never swears";
+      if (v <= 40) return "rarely swears";
+      if (v <= 60) return "casual swearing";
+      if (v <= 80) return "swears freely";
+      return "swears constantly";
+    case "dirtyTalk":
+      if (v <= 20) return "completely prudish";
+      if (v <= 40) return "fairly modest";
+      if (v <= 60) return "suggestive & flirty";
+      if (v <= 80) return "open & bold";
+      return "very explicit";
+    case "vocabulary":
+      if (v <= 20) return "blunt & simple";
+      if (v <= 40) return "plain speech";
+      if (v <= 60) return "natural, varied";
+      if (v <= 80) return "rich & expressive";
+      return "flowery & poetic";
+    case "petNames":
+      if (v <= 20) return "formal names only";
+      if (v <= 40) return "occasional endearments";
+      if (v <= 60) return "natural nicknames";
+      if (v <= 80) return "frequent pet names";
+      return "constant pet names";
+    case "forwardness":
+      if (v <= 20) return "very reserved";
+      if (v <= 40) return "waits for a move";
+      if (v <= 60) return "either way";
+      if (v <= 80) return "makes first move";
+      return "very forward";
+    case "jealousy":
+      if (v <= 20) return "unbothered";
+      if (v <= 40) return "hides jealousy";
+      if (v <= 60) return "mildly possessive";
+      if (v <= 80) return "noticeably possessive";
+      return "intensely jealous";
+    case "openness":
+      if (v <= 20) return "very guarded";
+      if (v <= 40) return "shares selectively";
+      if (v <= 60) return "fairly open";
+      if (v <= 80) return "shares openly";
+      return "overshares";
+    case "neediness":
+      if (v <= 20) return "very independent";
+      if (v <= 40) return "mostly independent";
+      if (v <= 60) return "enjoys closeness";
+      if (v <= 80) return "craves attention";
+      return "very clingy";
+    case "confidence":
+      if (v <= 20) return "deeply insecure";
+      if (v <= 40) return "self-conscious";
+      if (v <= 60) return "balanced self-view";
+      if (v <= 80) return "generally confident";
+      return "highly confident";
+    case "coyness":
+      if (v <= 20) return "fully direct";
+      if (v <= 40) return "mostly straightforward";
+      if (v <= 60) return "stages 'accidents' occasionally";
+      if (v <= 80) return "frequent innocent acts";
+      return "constant plausible deniability";
+    case "familiarity":
+      if (v <= 15) return "complete stranger";
+      if (v <= 35) return "still getting acquainted";
+      if (v <= 60) return "knows them reasonably well";
+      if (v <= 80) return "knows them well";
+      return "knows them deeply";
+    case "likesUser":
+      if (v <= 20) return "dislikes user";
+      if (v <= 40) return "polite but distant";
+      if (v <= 60) return "neutral to mild";
+      if (v <= 80) return "genuinely likes them";
+      return "deep feelings";
+    case "attractionToUser":
+      if (v <= 20) return "no attraction";
+      if (v <= 40) return "little attraction";
+      if (v <= 60) return "mild attraction";
+      if (v <= 80) return "genuinely attracted";
+      return "extremely attracted";
+    default:
+      return "";
+  }
 }
 
 function buildPersonalityAddendum(sliders, gender, customGender, age, maritalStatus, relationship, relationshipCustom) {
