@@ -1480,6 +1480,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const [vibeLoading, setVibeLoading] = useState(false);
   const [imgPrompt, setImgPrompt] = useState("");
   const [imgLoading, setImgLoading] = useState(false);
+  const [clothed, setClothed] = useState(true);
   const [showCustomImgInput, setShowCustomImgInput] = useState(false);
   const [customImgPrompt, setCustomImgPrompt] = useState("");
   const [error, setError] = useState("");
@@ -1532,7 +1533,8 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
       const baseDesc = imgPrompt.trim() ? imgPrompt.trim() : (form.name ? form.name : "person");
       const fullPrompt = charDesc ? `${baseDesc}, ${charDesc}` : baseDesc;
-      const stylePrompt = `standing, ${fullPrompt}, photorealistic, natural lighting, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
+      const clothingClause = clothed ? "fully clothed, wearing an outfit appropriate to the setting" : "nude";
+      const stylePrompt = `standing, ${fullPrompt}, ${clothingClause}, photorealistic, natural lighting, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
       const url = await generateImageWiro({ prompt: stylePrompt, model: settings.imageModel });
       setGeneratedImages(prev => [url, ...prev]);
       setForm(f => ({ ...f, referenceImage: url, backgroundImage: url }));
@@ -1676,9 +1678,13 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
             <button style={S.btnSecondary} onClick={() => fileRef.current.click()}>Upload Image</button>
             <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileUpload} />
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input style={{ ...S.input, flex: 1, marginBottom: 0 }} placeholder="Optional — leave blank to use appearance settings"
               value={imgPrompt} onChange={e => setImgPrompt(e.target.value)} />
+            <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text4)", whiteSpace: "nowrap" }}>
+              <input type="checkbox" checked={clothed} onChange={e => setClothed(e.target.checked)} />
+              Clothed
+            </label>
             <button style={S.btnPrimary} onClick={handleGenerateImage} disabled={imgLoading}>{imgLoading ? "Generating…" : form.referenceImage ? "↺ Regen" : "Gen Image"}</button>
           </div>
 
@@ -2148,9 +2154,12 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const ageDesc = character.age ? `${character.age} year old` : "";
       const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
       const styleModifiers = "photorealistic, natural lighting, cinematic, Canon EOS, 50mm lens, bokeh, sharp focus, high detail";
-      const fullPrompt = charDesc
-        ? `${character.name}, ${charDesc}, ${customImgPrompt}, ${styleModifiers}`
-        : `${character.name}, ${customImgPrompt}, ${styleModifiers}`;
+      // Ground the outfit in the tracked wardrobe state rather than leaving
+      // it to the model's default — a specific custom prompt (e.g. "wearing
+      // a red dress") will still tend to win out since it's more specific
+      // and closer to the end of the prompt.
+      const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
+      const fullPrompt = [character.name, charDesc, wardrobeDesc, customImgPrompt, styleModifiers].filter(Boolean).join(", ");
       const url = await generateImageWiro({
         prompt: fullPrompt,
         model: settings.imageModel,
@@ -2189,8 +2198,13 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const ageDesc = character.age ? `${character.age} year old` : "";
       const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
       const styleModifiers = "photorealistic, natural lighting, cinematic, Canon EOS, 50mm lens, sharp focus, high detail";
-      // Appearance goes FIRST so SD weights it highest, scene context after
-      const fullImgPrompt = charDesc ? `${charDesc}, ${prompt}, ${styleModifiers}` : `${prompt}, ${styleModifiers}`;
+      // Ground the outfit in the tracked wardrobe state — the scene prompt
+      // from buildImagePromptFromContext only sees raw conversation text and
+      // has no guaranteed reference to what's actually being worn, so this
+      // is the more reliable source. Appearance + wardrobe go FIRST so SD
+      // weights them highest, scene context after.
+      const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
+      const fullImgPrompt = [charDesc, wardrobeDesc, prompt, styleModifiers].filter(Boolean).join(", ");
       const url = await generateImageWiro({
         prompt: fullImgPrompt,
         model: settings.imageModel,
