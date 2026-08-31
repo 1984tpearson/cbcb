@@ -1324,6 +1324,45 @@ const ETHNICITIES = [
   "Middle Eastern", "Hispanic / Latino", "Indigenous", "Mixed", "Custom"
 ];
 
+// Asking the model to "vary" appearance across generations cannot work: each
+// call is independent and has nothing to vary from, so it returns its most
+// likely answer every time — which is why every character came back South
+// Asian with brown hair, brown eyes and the same surname. The traits are
+// chosen here instead, and the model is told what they are.
+//
+// Ethnicity is picked first, then the rest from what plausibly goes with it,
+// so the result stays coherent rather than uniformly random.
+const ETHNICITY_PROFILES = {
+  "Caucasian": { hair: ["Black", "Dark brown", "Brown", "Auburn", "Dirty blonde", "Blonde", "Platinum blonde", "Red", "Strawberry blonde"], eyes: ["Brown", "Hazel", "Green", "Blue", "Grey"], skin: ["Fair", "Light", "Medium", "Olive"] },
+  "Black / African": { hair: ["Black", "Dark brown", "Brown", "Coloured"], eyes: ["Dark brown", "Brown", "Hazel", "Amber"], skin: ["Brown", "Dark brown", "Ebony", "Tan"] },
+  "East Asian": { hair: ["Black", "Dark brown", "Brown", "Coloured"], eyes: ["Dark brown", "Brown", "Hazel"], skin: ["Fair", "Light", "Medium", "Olive"] },
+  "South Asian": { hair: ["Black", "Dark brown", "Brown"], eyes: ["Dark brown", "Brown", "Hazel", "Green"], skin: ["Light", "Medium", "Olive", "Tan", "Brown"] },
+  "Southeast Asian": { hair: ["Black", "Dark brown", "Brown", "Coloured"], eyes: ["Dark brown", "Brown", "Hazel"], skin: ["Light", "Medium", "Olive", "Tan", "Brown"] },
+  "Middle Eastern": { hair: ["Black", "Dark brown", "Brown", "Auburn"], eyes: ["Dark brown", "Brown", "Hazel", "Green", "Amber"], skin: ["Light", "Medium", "Olive", "Tan"] },
+  "Hispanic / Latino": { hair: ["Black", "Dark brown", "Brown", "Auburn", "Dirty blonde"], eyes: ["Dark brown", "Brown", "Hazel", "Green", "Amber"], skin: ["Light", "Medium", "Olive", "Tan", "Brown"] },
+  "Indigenous": { hair: ["Black", "Dark brown", "Brown"], eyes: ["Dark brown", "Brown", "Hazel"], skin: ["Medium", "Olive", "Tan", "Brown"] },
+  "Mixed": { hair: ["Black", "Dark brown", "Brown", "Auburn", "Dirty blonde", "Blonde", "Red", "Coloured"], eyes: ["Brown", "Dark brown", "Hazel", "Green", "Blue", "Grey", "Amber"], skin: ["Fair", "Light", "Medium", "Olive", "Tan", "Brown", "Dark brown"] },
+};
+const ETHNICITY_POOL = Object.keys(ETHNICITY_PROFILES);
+// Weighted so most characters are of an ordinary dating age without every one
+// landing on the same number, which "age: <a number, varied>" was producing.
+const AGE_BANDS = [[19, 25], [23, 30], [26, 34], [30, 40], [35, 48], [42, 60]];
+const MARITAL_POOL = ["Single", "Single", "Single", "In a relationship", "Married", "Divorced", "It's complicated", "Widowed"];
+const pickOne = (arr) => arr[Math.floor(Math.random() * arr.length)];
+function pickCharacterTraits() {
+  const ethnicity = pickOne(ETHNICITY_POOL);
+  const profile = ETHNICITY_PROFILES[ethnicity];
+  const [lo, hi] = pickOne(AGE_BANDS);
+  return {
+    ethnicity,
+    hairColour: pickOne(profile.hair),
+    eyeColour: pickOne(profile.eyes),
+    skinTone: pickOne(profile.skin),
+    age: lo + Math.floor(Math.random() * (hi - lo + 1)),
+    maritalStatus: pickOne(MARITAL_POOL),
+  };
+}
+
 const DEFAULT_APPEARANCE = {
   hairColour: "Brown",
   hairColourCustom: "",
@@ -1403,19 +1442,24 @@ async function autoGenerateCharacter({ vibe, model, constraints = {} }) {
     ? constraints.gender
     : (constraints.gender === "Custom" && constraints.customGender ? constraints.customGender : null);
 
-  const raw = (await aiComplete({ model, messages: [{ role: "user", content: `Create a fictional chat companion character based on this vibe: "${vibe}".${constraintBlock}\nUse culturally diverse names where appropriate. Avoid old-fashioned names.\nWrite the persona as a grounded, natural description of a real person — not a fictional archetype. Avoid flowery language, obscure references, or stacking quirks.\nVary hairColour, eyeColour, skinTone, ethnicity, age, and maritalStatus across different characters — do not default to the same choices every time.\nReturn ONLY valid JSON with these exact fields, replacing each placeholder with an actual value (not the placeholder text itself):\n{\n  "name": "<character name>",\n  "persona": "<2-3 sentence personality description, how they speak, backstory and quirks — must reflect the gender, marital status, and relationship if provided>",\n  "age": <a number, varied — not always the same age>,\n  "maritalStatus": "<one of: Single, Married, Divorced, Widowed, In a relationship, It\'s complicated>",\n  "hairColour": "<one of: Black, Dark brown, Brown, Auburn, Dirty blonde, Blonde, Platinum blonde, Red, Strawberry blonde, Grey, White>",\n  "eyeColour": "<one of: Brown, Dark brown, Hazel, Green, Blue, Grey, Amber>",\n  "skinTone": "<one of: Fair, Light, Medium, Olive, Tan, Brown, Dark brown, Ebony>",\n  "ethnicity": "<one of: Caucasian, Black / African, East Asian, South Asian, Southeast Asian, Middle Eastern, Hispanic / Latino, Indigenous, Mixed>"\n}\nNo extra text, no markdown, just the JSON object.` }] })).trim();
+  // Traits are assigned here rather than left to the model — see
+  // pickCharacterTraits. The model only writes the name and persona, and is
+  // told what it is writing for.
+  const traits = pickCharacterTraits();
+  const seed = Math.floor(Math.random() * 1000000);
+  const raw = (await aiComplete({ model, messages: [{ role: "user", content: `[seed:${seed}] Create a fictional chat companion character based on this vibe: "${vibe}".${constraintBlock}\n\nThis character has already been cast. Write them as:\n- Ethnicity: ${traits.ethnicity}\n- Age: ${traits.age}\n- Marital status: ${traits.maritalStatus}\n- Hair: ${traits.hairColour}, eyes: ${traits.eyeColour}, skin: ${traits.skinTone}\n\nThe name must fit that ethnicity and read like a real person alive today. Pick a surname that is plausible but NOT the single most obvious one for that background — reach for a less predictable choice. Avoid old-fashioned names.\nWrite the persona as a grounded, natural description of a real person — not a fictional archetype. Avoid flowery language, obscure references, or stacking quirks.\nReturn ONLY valid JSON with these exact fields:\n{\n  "name": "<first and last name>",\n  "persona": "<2-3 sentence personality description, how they speak, backstory and quirks — must reflect the age, marital status, gender and relationship above>"\n}\nNo extra text, no markdown, just the JSON object.` }] })).trim();
 
   const applyConstraints = (parsed) => ({
     name: constraints.name || parsed.name || "",
     persona: constraints.persona || parsed.persona || "",
-    age: constraints.age || parsed.age || 25,
-    maritalStatus: constraints.maritalStatus || parsed.maritalStatus || "Single",
+    age: constraints.age || traits.age,
+    maritalStatus: constraints.maritalStatus || traits.maritalStatus,
     appearance: {
       ...DEFAULT_APPEARANCE,
-      hairColour: parsed.hairColour || "Brown",
-      eyeColour: parsed.eyeColour || "Brown",
-      skinTone: parsed.skinTone || "Medium",
-      ethnicity: parsed.ethnicity || ""
+      hairColour: traits.hairColour,
+      eyeColour: traits.eyeColour,
+      skinTone: traits.skinTone,
+      ethnicity: traits.ethnicity,
     }
   });
 
