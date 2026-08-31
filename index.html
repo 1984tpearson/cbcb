@@ -411,15 +411,32 @@ const UPLOAD_IMAGE_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/
 // cannot see itself. Deliberately not applied on the character creation
 // screen, where a third-person reference portrait is wanted.
 const POV_BASE = "POV, first person perspective, seen through the viewer's own eyes, camera at eye level, viewer's own face and head never visible";
-// Only ask for the viewer's limbs when the scene actually has them doing
-// something. Requesting them unconditionally puts disembodied hands in every
-// shot, including ones where the user is just standing and watching.
-const POV_CONTACT_RE = /\b(hand|hands|arm|arms|wrist|finger|fingers|palm|touch|touches|touching|hold|holds|holding|grip|gripping|grab|grabbing|reach|reaches|reaching|stroke|stroking|caress|caressing|push|pushing|pull|pulling|lap|leg|legs|knee|knees|foot|feet)\b/i;
-const POV_CONTACT_MODIFIER = "the viewer's own hand and forearm visible in the foreground entering the frame from the camera";
-function buildPovModifiers(sceneText) {
-  return POV_CONTACT_RE.test(sceneText || "")
-    ? `${POV_BASE}, ${POV_CONTACT_MODIFIER}`
-    : POV_BASE;
+// Which of the viewer's own body parts belong in frame depends on what they
+// are doing, so the clause is assembled per image rather than fixed. Asking
+// for them unconditionally puts disembodied limbs in every shot, including
+// ones where the user is just standing and watching.
+//
+// Arms come from the scene text, since reaching and touching is what the
+// action beats describe. Legs and torso come from the *user's own pose*
+// instead: limb words in the scene text are ambiguous about whose limb it is
+// ("her legs crossed" must not put the viewer's legs in the foreground),
+// while the staging tracker knows who is sitting or lying down.
+const POV_CONTACT_RE = /\b(hand|hands|arm|arms|wrist|finger|fingers|palm|touch|touches|touching|hold|holds|holding|grip|gripping|grab|grabbing|grasp|grasping|reach|reaches|reaching|stroke|stroking|caress|caressing|push|pushing|pull|pulling|lift|lifting|handing|passing|offering|cup|cupping)\b/i;
+const POV_SEATED_RE = /\b(sitting|seated|sat|sits|perched|kneeling|knelt|crouching|squatting|straddling|straddled)\b/i;
+const POV_RECLINED_RE = /\b(lying|laying|lain|lies|reclining|reclined|sprawled|on his back|on her back|on my back|in bed|propped up)\b/i;
+const POV_ARMS_MODIFIER = "the viewer's own hand and forearm visible in the foreground entering the frame from the camera";
+const POV_LAP_MODIFIER = "the viewer's own thighs and knees visible in the lower foreground, seen looking down from their own seated position";
+const POV_TORSO_MODIFIER = "the viewer's own chest and legs stretching away below the camera in the lower foreground";
+function buildPovModifiers(sceneText, staging) {
+  const parts = [POV_BASE];
+  const scene = sceneText || "";
+  const userPose = (staging && staging.userPose) || "";
+  if (POV_CONTACT_RE.test(scene)) parts.push(POV_ARMS_MODIFIER);
+  // Reclined wins over seated — you can be described as both, and lying down
+  // is the more specific framing of the two.
+  if (POV_RECLINED_RE.test(userPose)) parts.push(POV_TORSO_MODIFIER);
+  else if (POV_SEATED_RE.test(userPose)) parts.push(POV_LAP_MODIFIER);
+  return parts.join(", ");
 }
 const DATA_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/data-proxy";
 const ACCESS_TOKEN = "pc_8f3a9d2e7b1c4f6a0d5e9c3b7a2f1e8d";
@@ -2503,7 +2520,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // and closer to the end of the prompt.
       const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
       const stagingDesc = buildStagingImageDesc(character.staging);
-      const fullPrompt = [buildPovModifiers(`${customImgPrompt} ${stagingDesc}`), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, styleModifiers].filter(Boolean).join(", ");
+      const fullPrompt = [buildPovModifiers(customImgPrompt, character.staging), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, styleModifiers].filter(Boolean).join(", ");
       const url = await generateImageWiro({
         prompt: fullPrompt,
         model: settings.imageModel,
@@ -2549,7 +2566,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // weights them highest, scene context after.
       const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
       const stagingDesc = buildStagingImageDesc(character.staging);
-      const fullImgPrompt = [buildPovModifiers(`${prompt} ${stagingDesc}`), charDesc, wardrobeDesc, stagingDesc, prompt, styleModifiers].filter(Boolean).join(", ");
+      const fullImgPrompt = [buildPovModifiers(prompt, character.staging), charDesc, wardrobeDesc, stagingDesc, prompt, styleModifiers].filter(Boolean).join(", ");
       const url = await generateImageWiro({
         prompt: fullImgPrompt,
         model: settings.imageModel,
