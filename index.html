@@ -410,7 +410,7 @@ const UPLOAD_IMAGE_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/
 // game; what never appears is their face, head or back, since the camera
 // cannot see itself. Deliberately not applied on the character creation
 // screen, where a third-person reference portrait is wanted.
-const POV_BASE = "POV, first person perspective, seen through the viewer's own eyes, camera at eye level, viewer's own face and head never visible";
+const POV_BASE = "first person POV through the viewer's own eyes, viewer's face never visible";
 // Which of the viewer's own body parts belong in frame depends on what they
 // are doing, so the clause is assembled per image rather than fixed. Asking
 // for them unconditionally puts disembodied limbs in every shot, including
@@ -430,18 +430,14 @@ const POV_BASE = "POV, first person perspective, seen through the viewer's own e
 // counts. The custom prompt box is hand-written, where "my hand" is natural.
 const POV_VIEWER_LIMB_RE = /\b(?:viewer|user)(?:'|\u2019)?s?\s+(?:own\s+)?(?:hand|hands|arm|arms|forearm|forearms|finger|fingers|palm|palms|wrist|wrists)\b/i;
 const POV_CUSTOM_LIMB_RE = /\b(?:my|your|our)\s+(?:own\s+)?(?:hand|hands|arm|arms|forearm|forearms|finger|fingers|palm|palms)\b/i;
-const POV_SEATED_RE = /\b(sitting|seated|sat|sits|perched|kneeling|knelt|crouching|squatting|straddling|straddled)\b/i;
-const POV_RECLINED_RE = /\b(lying|laying|lain|lies|reclining|reclined|sprawled|on his back|on her back|on my back|in bed|propped up)\b/i;
-const POV_ARMS_MODIFIER = "the viewer's own hand and forearm visible in the foreground entering the frame from the camera";
+const POV_ARMS_MODIFIER = "the viewer's own hand and forearm in the foreground, entering frame from the camera";
 // Seedream leans toward putting hands into a POV frame whether or not anything
 // asked for them, so when the viewer is touching nothing, say so explicitly.
-const POV_NO_LIMBS = "no disembodied hands or arms, no extra limbs reaching into frame, the viewer's own arms are not raised or visible";
+const POV_NO_LIMBS = "no disembodied hands or arms in frame";
 // When the scene already names the limb, claim it rather than adding another:
 // this tells the model whose arms those are and that there is only one pair,
 // instead of introducing a second pair alongside them.
-const POV_ARMS_OWNED_MODIFIER = "the hand and arm in the foreground belong to the viewer, a single pair of arms entering the frame from the camera, no other arms";
-const POV_LAP_MODIFIER = "the viewer's own thighs and knees visible in the lower foreground, seen looking down from their own seated position";
-const POV_TORSO_MODIFIER = "the viewer's own chest and legs stretching away below the camera in the lower foreground";
+const POV_ARMS_OWNED_MODIFIER = "the foreground hand and arm belong to the viewer, one pair only";
 // In an intimate scene the viewer's own body is part of the shot, and framing
 // it out is what makes these images read as wrong — a POV that crops at the
 // wrists during sex is stranger than one that doesn't. Gated on the
@@ -464,40 +460,55 @@ function povSelfBody(userOutfit, bare, clothed) {
   if (!userOutfit || isUserUndressed(userOutfit)) return bare;
   return `${clothed}, the viewer wearing ${userOutfit}`;
 }
-const POV_INTIMATE_MODIFIER = "the viewer's own body in the immediate foreground below the camera, framing the bottom of the shot, one body and one pair of arms only";
+const POV_INTIMATE_MODIFIER = "the viewer's own body framing the bottom of the shot";
 function isIntimateScene(sceneText, staging, nsfw) {
   const userPose = (staging && staging.userPose) || "";
   return !!nsfw && POV_INTIMATE_RE.test(`${sceneText || ""} ${userPose}`);
 }
+// The viewer's body is in shot only when they are physically interacting with
+// the character. It used to also appear in every seated shot (their lap) and
+// every reclined one (their torso), which made the user visible in most
+// images instead of the few where it means something.
 function buildPovModifiers(sceneText, staging, nsfw, userOutfit) {
-  const parts = [POV_BASE];
   const scene = sceneText || "";
-  const userPose = (staging && staging.userPose) || "";
-  const intimate = isIntimateScene(scene, staging, nsfw);
-  // Only an explicitly viewer-owned limb puts arms in the shot. Everything
-  // else gets the opposite instruction, because the model invents them.
-  if (POV_VIEWER_LIMB_RE.test(scene)) parts.push(POV_ARMS_OWNED_MODIFIER);
-  else if (POV_CUSTOM_LIMB_RE.test(scene)) parts.push(POV_ARMS_MODIFIER);
-  else parts.push(POV_NO_LIMBS);
-  // The intimate framing already covers the viewer's torso and legs, so it
-  // replaces the seated/reclined clauses rather than stacking with them and
-  // asking for the same body twice.
-  if (intimate) {
+  const parts = [POV_BASE];
+  // Sex is physical interaction by definition, so it counts as contact.
+  if (isIntimateScene(scene, staging, nsfw)) {
     parts.push(povSelfBody(
       userOutfit,
-      `${POV_INTIMATE_MODIFIER}, their bare chest, hips and thighs`,
+      `${POV_INTIMATE_MODIFIER}, bare chest and hips`,
       `${POV_INTIMATE_MODIFIER}, still dressed`,
     ));
-    return parts.join(", ");
-  }
-  // Reclined wins over seated — you can be described as both, and lying down
-  // is the more specific framing of the two.
-  if (POV_RECLINED_RE.test(userPose)) {
-    parts.push(povSelfBody(userOutfit, POV_TORSO_MODIFIER, POV_TORSO_MODIFIER));
-  } else if (POV_SEATED_RE.test(userPose)) {
-    parts.push(povSelfBody(userOutfit, POV_LAP_MODIFIER, POV_LAP_MODIFIER));
+  } else if (POV_VIEWER_LIMB_RE.test(scene)) {
+    parts.push(POV_ARMS_OWNED_MODIFIER);
+  } else if (POV_CUSTOM_LIMB_RE.test(scene)) {
+    parts.push(POV_ARMS_MODIFIER);
+  } else {
+    parts.push(POV_NO_LIMBS);
   }
   return parts.join(", ");
+}
+
+// The prompt is assembled from sources that each describe the scene in their
+// own words, so the same fact arrived two or three times — the tracked outfit
+// beside the scene's mention of it, the staging location beside the
+// extractor's. Dropping repeated phrases keeps the prompt short enough that
+// the parts that matter still carry weight.
+function joinPromptParts(parts) {
+  const seen = new Set();
+  const kept = [];
+  for (const part of parts) {
+    if (!part) continue;
+    for (const phrase of String(part).split(",")) {
+      const trimmed = phrase.trim();
+      if (!trimmed) continue;
+      const key = trimmed.toLowerCase().replace(/[^a-z0-9 ]/g, "");
+      if (key.length > 3 && seen.has(key)) continue;
+      seen.add(key);
+      kept.push(trimmed);
+    }
+  }
+  return kept.join(", ");
 }
 const DATA_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/data-proxy";
 const ACCESS_TOKEN = "pc_8f3a9d2e7b1c4f6a0d5e9c3b7a2f1e8d";
@@ -1139,7 +1150,7 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
   // each call site so every generation gets it. Addresses a caricature-like
   // failure mode (tiny torso, stretched limbs) seen on extreme appearance
   // slider combinations.
-  const guardedPrompt = `${prompt}, natural realistic human body proportions, anatomically correct, exactly two arms and two hands per person, no duplicated or extra limbs, not exaggerated, not stylized, not caricature`;
+  const guardedPrompt = `${prompt}, realistic human proportions, two arms and two hands per person, no extra limbs`;
 
   const body = {
     prompt: guardedPrompt,
@@ -1297,7 +1308,7 @@ async function buildImagePromptFromContext({ messages, character, model }) {
   const ownBodyRule = character.nsfw
     ? " Describe what the User can see from where they are: the scene in front of them, plus their own body where it genuinely falls in the shot, and in an intimate scene their own chest, hips and thighs framing the bottom of the frame. Never describe the User's face, head or hair. Only mention the User's hands or arms if the User is actually touching, holding or reaching for something in this exact moment — if they are only looking or talking, do not mention their hands at all. When you do mention them, write them as \"viewer's hand\" or \"viewer's arm\" so they are not confused with ${character.name}'s own hands."
     : " Describe only what the User can see from where they are. Never describe the User's face, head, hair or whole body. Only mention the User's hands or arms if the User is actually touching, holding or reaching for something in this exact moment — if they are only looking or talking, do not mention their hands at all. When you do mention them, write them as \"viewer's hand\" or \"viewer's arm\" so they are not confused with ${character.name}'s own hands.";
-  const content = await aiComplete({ model, messages: [{ role: "user", content: `You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is ${character.name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: ${charDesc || "not specified"}.\n\nConversation:\n${recent}\n\nThe image is a first-person POV shot taken from the User's own eyes: the User is the camera. The User's own face, head and back can never be seen, but their hands, arms or legs SHOULD be described entering the frame from the camera whenever they are touching, holding or reaching for something — e.g. "a hand resting on her shoulder in the foreground". Write a Stable Diffusion prompt of 20-35 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression.${actNote} Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere".${ownBodyRule} Return ONLY the prompt text, nothing else.` }] });
+  const content = await aiComplete({ model, messages: [{ role: "user", content: `You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is ${character.name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: ${charDesc || "not specified"}.\n\nConversation:\n${recent}\n\nThe image is a first-person POV shot taken from the User's own eyes: the User is the camera. The User's own face, head and back can never be seen, but their hands, arms or legs SHOULD be described entering the frame from the camera whenever they are touching, holding or reaching for something — e.g. "a hand resting on her shoulder in the foreground". The location, both people's clothing and the camera framing are added separately — do NOT restate any of them. Write ONLY what is happening: her action, pose and expression in this moment.\n\nWrite a Stable Diffusion prompt of 15-25 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression.${actNote} Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere".${ownBodyRule} Return ONLY the prompt text, nothing else.` }] });
   return content.trim().replace(/^"|"$/g, "");
 }
 
@@ -2808,7 +2819,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
       const ageDesc = character.age ? `${character.age} year old` : "";
       const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-      const styleModifiers = "photorealistic, natural lighting, cinematic, Canon EOS, 50mm lens, bokeh, sharp focus, high detail";
+      const styleModifiers = "photorealistic, natural lighting, 50mm, sharp focus";
       // Ground the outfit in the tracked wardrobe state rather than leaving
       // it to the model's default — a specific custom prompt (e.g. "wearing
       // a red dress") will still tend to win out since it's more specific
@@ -2819,7 +2830,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // reaches the model when NSFW is on and the scene reads as intimate.
       const explicitDesc = isIntimateScene(customImgPrompt, character.staging, character.nsfw)
         ? (character.explicitDetail || "") : "";
-      const fullPrompt = [buildPovModifiers(customImgPrompt, character.staging, character.nsfw, character.userOutfit), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, explicitDesc, styleModifiers].filter(Boolean).join(", ");
+      const fullPrompt = joinPromptParts([buildPovModifiers(customImgPrompt, character.staging, character.nsfw, character.userOutfit), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, explicitDesc, styleModifiers]);
       const url = await generateImageWiro({
         prompt: fullPrompt,
         model: settings.imageModel,
@@ -2860,7 +2871,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
       const ageDesc = character.age ? `${character.age} year old` : "";
       const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-      const styleModifiers = "photorealistic, natural lighting, cinematic, Canon EOS, 50mm lens, sharp focus, high detail";
+      const styleModifiers = "photorealistic, natural lighting, 50mm, sharp focus";
       // Ground the outfit in the tracked wardrobe state — the scene prompt
       // from buildImagePromptFromContext only sees raw conversation text and
       // has no guaranteed reference to what's actually being worn, so this
@@ -2870,7 +2881,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const stagingDesc = buildStagingImageDesc(character.staging);
       const explicitDesc = isIntimateScene(prompt, character.staging, character.nsfw)
         ? (character.explicitDetail || "") : "";
-      const fullImgPrompt = [buildPovModifiers(prompt, character.staging, character.nsfw, character.userOutfit), charDesc, wardrobeDesc, stagingDesc, prompt, explicitDesc, styleModifiers].filter(Boolean).join(", ");
+      const fullImgPrompt = joinPromptParts([buildPovModifiers(prompt, character.staging, character.nsfw, character.userOutfit), charDesc, wardrobeDesc, stagingDesc, prompt, explicitDesc, styleModifiers]);
       const url = await generateImageWiro({
         prompt: fullImgPrompt,
         model: settings.imageModel,
