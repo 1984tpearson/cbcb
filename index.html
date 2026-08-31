@@ -421,16 +421,21 @@ const POV_BASE = "POV, first person perspective, seen through the viewer's own e
 // instead: limb words in the scene text are ambiguous about whose limb it is
 // ("her legs crossed" must not put the viewer's legs in the foreground),
 // while the staging tracker knows who is sitting or lying down.
-// Split deliberately. The old single regex matched limb nouns AND contact
-// verbs, so a scene that already said "a hand on her shoulder" triggered a
-// second, independent request for a hand entering the frame — the model was
-// told about two arms and duly drew two, usually with the spare pair coming
-// in at the top of the image.
-const POV_CONTACT_VERB_RE = /\b(touch|touches|touching|hold|holds|holding|grip|gripping|grab|grabbing|grasp|grasping|reach|reaches|reaching|stroke|stroking|caress|caressing|push|pushing|pull|pulling|lift|lifting|handing|passing|offering|cup|cupping)\b/i;
-const POV_LIMB_NOUN_RE = /\b(hand|hands|forearm|forearms|arm|arms|wrist|wrists|finger|fingers|palm|palms|thumb)\b/i;
+// Matching bare limb words does not work: "her hands clasped in front of her"
+// describes HER hands, and matching a contact verb catches her actions too
+// ("holding a glass of wine"). Both were putting the viewer's arms into shots
+// where the user was touching nothing, reaching in from the sides of frame.
+// Ownership has to be explicit, so the scene extractor is instructed to write
+// the user's own limbs as "viewer's hand" / "viewer's arm", and only that
+// counts. The custom prompt box is hand-written, where "my hand" is natural.
+const POV_VIEWER_LIMB_RE = /\b(?:viewer|user)(?:'|\u2019)?s?\s+(?:own\s+)?(?:hand|hands|arm|arms|forearm|forearms|finger|fingers|palm|palms|wrist|wrists)\b/i;
+const POV_CUSTOM_LIMB_RE = /\b(?:my|your|our)\s+(?:own\s+)?(?:hand|hands|arm|arms|forearm|forearms|finger|fingers|palm|palms)\b/i;
 const POV_SEATED_RE = /\b(sitting|seated|sat|sits|perched|kneeling|knelt|crouching|squatting|straddling|straddled)\b/i;
 const POV_RECLINED_RE = /\b(lying|laying|lain|lies|reclining|reclined|sprawled|on his back|on her back|on my back|in bed|propped up)\b/i;
 const POV_ARMS_MODIFIER = "the viewer's own hand and forearm visible in the foreground entering the frame from the camera";
+// Seedream leans toward putting hands into a POV frame whether or not anything
+// asked for them, so when the viewer is touching nothing, say so explicitly.
+const POV_NO_LIMBS = "no disembodied hands or arms, no extra limbs reaching into frame, the viewer's own arms are not raised or visible";
 // When the scene already names the limb, claim it rather than adding another:
 // this tells the model whose arms those are and that there is only one pair,
 // instead of introducing a second pair alongside them.
@@ -453,8 +458,11 @@ function buildPovModifiers(sceneText, staging, nsfw) {
   const scene = sceneText || "";
   const userPose = (staging && staging.userPose) || "";
   const intimate = isIntimateScene(scene, staging, nsfw);
-  if (POV_LIMB_NOUN_RE.test(scene)) parts.push(POV_ARMS_OWNED_MODIFIER);
-  else if (POV_CONTACT_VERB_RE.test(scene)) parts.push(POV_ARMS_MODIFIER);
+  // Only an explicitly viewer-owned limb puts arms in the shot. Everything
+  // else gets the opposite instruction, because the model invents them.
+  if (POV_VIEWER_LIMB_RE.test(scene)) parts.push(POV_ARMS_OWNED_MODIFIER);
+  else if (POV_CUSTOM_LIMB_RE.test(scene)) parts.push(POV_ARMS_MODIFIER);
+  else parts.push(POV_NO_LIMBS);
   // The intimate framing already covers the viewer's torso and legs, so it
   // replaces the seated/reclined clauses rather than stacking with them and
   // asking for the same body twice.
@@ -1234,8 +1242,8 @@ async function buildImagePromptFromContext({ messages, character, model }) {
     ? " State plainly what the two of them are physically doing to each other, including sexual acts where that is what is happening — do not soften it into mood, atmosphere or euphemism, and do not substitute a pose for the act."
     : "";
   const ownBodyRule = character.nsfw
-    ? " Describe what the User can see from where they are: the scene in front of them, plus their own body where it genuinely falls in the shot — their hands and arms when touching or reaching, and in an intimate scene their own chest, hips and thighs framing the bottom of the frame. Never describe the User's face, head or hair."
-    : " Describe only what the User can see from where they are: the scene in front of them, plus their own hands or limbs where those are in contact with something. Never describe the User's face, head, hair or whole body.";
+    ? " Describe what the User can see from where they are: the scene in front of them, plus their own body where it genuinely falls in the shot, and in an intimate scene their own chest, hips and thighs framing the bottom of the frame. Never describe the User's face, head or hair. Only mention the User's hands or arms if the User is actually touching, holding or reaching for something in this exact moment — if they are only looking or talking, do not mention their hands at all. When you do mention them, write them as \"viewer's hand\" or \"viewer's arm\" so they are not confused with ${character.name}'s own hands."
+    : " Describe only what the User can see from where they are. Never describe the User's face, head, hair or whole body. Only mention the User's hands or arms if the User is actually touching, holding or reaching for something in this exact moment — if they are only looking or talking, do not mention their hands at all. When you do mention them, write them as \"viewer's hand\" or \"viewer's arm\" so they are not confused with ${character.name}'s own hands.";
   const content = await aiComplete({ model, messages: [{ role: "user", content: `You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is ${character.name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: ${charDesc || "not specified"}.\n\nConversation:\n${recent}\n\nThe image is a first-person POV shot taken from the User's own eyes: the User is the camera. The User's own face, head and back can never be seen, but their hands, arms or legs SHOULD be described entering the frame from the camera whenever they are touching, holding or reaching for something — e.g. "a hand resting on her shoulder in the foreground". Write a Stable Diffusion prompt of 20-35 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression.${actNote} Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere".${ownBodyRule} Return ONLY the prompt text, nothing else.` }] });
   return content.trim().replace(/^"|"$/g, "");
 }
