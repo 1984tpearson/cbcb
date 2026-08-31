@@ -405,9 +405,22 @@ const IMAGE_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/i
 const UPLOAD_IMAGE_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/upload-image";
 
 // Images generated during a chat are shot from the user's own eyes - the user
-// is the camera, so they never appear in frame. Deliberately not applied on the
-// character creation screen, where a third-person reference portrait is wanted.
-const POV_MODIFIERS = "POV, first person perspective, seen through the viewer's own eyes, camera at eye level, viewer not visible in frame";
+// is the camera. Their own hands, arms and legs still belong in frame when they
+// are touching or reaching for something, the way they do in a first-person
+// game; what never appears is their face, head or back, since the camera
+// cannot see itself. Deliberately not applied on the character creation
+// screen, where a third-person reference portrait is wanted.
+const POV_BASE = "POV, first person perspective, seen through the viewer's own eyes, camera at eye level, viewer's own face and head never visible";
+// Only ask for the viewer's limbs when the scene actually has them doing
+// something. Requesting them unconditionally puts disembodied hands in every
+// shot, including ones where the user is just standing and watching.
+const POV_CONTACT_RE = /\b(hand|hands|arm|arms|wrist|finger|fingers|palm|touch|touches|touching|hold|holds|holding|grip|gripping|grab|grabbing|reach|reaches|reaching|stroke|stroking|caress|caressing|push|pushing|pull|pulling|lap|leg|legs|knee|knees|foot|feet)\b/i;
+const POV_CONTACT_MODIFIER = "the viewer's own hand and forearm visible in the foreground entering the frame from the camera";
+function buildPovModifiers(sceneText) {
+  return POV_CONTACT_RE.test(sceneText || "")
+    ? `${POV_BASE}, ${POV_CONTACT_MODIFIER}`
+    : POV_BASE;
+}
 const DATA_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/data-proxy";
 const ACCESS_TOKEN = "pc_8f3a9d2e7b1c4f6a0d5e9c3b7a2f1e8d";
 
@@ -1107,7 +1120,7 @@ async function buildImagePromptFromContext({ messages, character, model }) {
   const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
   const ageDesc = character.age ? `${character.age} year old` : "";
   const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-  const content = await aiComplete({ model, messages: [{ role: "user", content: `You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is ${character.name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: ${charDesc || "not specified"}.\n\nConversation:\n${recent}\n\nThe image is a first-person POV shot taken from the User's own eyes: the User is the camera and must never appear in the image. Write a Stable Diffusion prompt of 20-35 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression. Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere". Describe only what the User can see from where they are; do NOT describe the User's own body or face. Return ONLY the prompt text, nothing else.` }] });
+  const content = await aiComplete({ model, messages: [{ role: "user", content: `You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is ${character.name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: ${charDesc || "not specified"}.\n\nConversation:\n${recent}\n\nThe image is a first-person POV shot taken from the User's own eyes: the User is the camera. The User's own face, head and back can never be seen, but their hands, arms or legs SHOULD be described entering the frame from the camera whenever they are touching, holding or reaching for something — e.g. "a hand resting on her shoulder in the foreground". Write a Stable Diffusion prompt of 20-35 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression. Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere". Describe only what the User can see from where they are: the scene in front of them, plus their own hands or limbs where those are in contact with something. Never describe the User's face, head, hair or whole body. Return ONLY the prompt text, nothing else.` }] });
   return content.trim().replace(/^"|"$/g, "");
 }
 
@@ -2490,7 +2503,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // and closer to the end of the prompt.
       const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
       const stagingDesc = buildStagingImageDesc(character.staging);
-      const fullPrompt = [POV_MODIFIERS, character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, styleModifiers].filter(Boolean).join(", ");
+      const fullPrompt = [buildPovModifiers(`${customImgPrompt} ${stagingDesc}`), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, styleModifiers].filter(Boolean).join(", ");
       const url = await generateImageWiro({
         prompt: fullPrompt,
         model: settings.imageModel,
@@ -2536,7 +2549,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // weights them highest, scene context after.
       const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
       const stagingDesc = buildStagingImageDesc(character.staging);
-      const fullImgPrompt = [POV_MODIFIERS, charDesc, wardrobeDesc, stagingDesc, prompt, styleModifiers].filter(Boolean).join(", ");
+      const fullImgPrompt = [buildPovModifiers(`${prompt} ${stagingDesc}`), charDesc, wardrobeDesc, stagingDesc, prompt, styleModifiers].filter(Boolean).join(", ");
       const url = await generateImageWiro({
         prompt: fullImgPrompt,
         model: settings.imageModel,
