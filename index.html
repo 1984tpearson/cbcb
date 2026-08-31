@@ -2339,28 +2339,56 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       .finally(() => { setOpeningLoading(false); setMessagesLoaded(true); });
   };
 
-  const inferScenarioOutfit = async (scenario, currentChar) => {
+  // Seeds wardrobe AND staging from the chosen opening. Without this the
+  // trackers start from "unknown" and only catch up once someone happens to
+  // mention clothes or move, so the first images of a scene had no setting
+  // and no idea what anyone was wearing.
+  const inferScenarioSetup = async (scenario, currentChar) => {
     try {
       const appearanceDesc = buildAppearancePrompt(currentChar.appearance);
       const raw = await aiComplete({
         model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
         messages: [{ role: "user", content:
-`Given this scenario, infer what ${currentChar.name} would plausibly be wearing. Base it on the setting and context — be specific and realistic.
+`Given this opening scenario, infer the starting state of the scene. Base everything on the setting and context — be specific, realistic and concrete.
 
 Character: ${currentChar.name}, ${currentChar.age || ""} ${currentChar.gender || ""}, ${appearanceDesc}
 Persona: ${currentChar.persona || ""}
-Scenario: ${scenario.label}
-Setting: ${scenario.setting}
-Opening: ${scenario.message}
+Scenario: ${scenario.label || ""}
+Setting: ${scenario.setting || ""}
+Opening: ${scenario.message || ""}
 
-Return ONLY valid JSON: {"charOutfit": "brief specific description of what they are wearing"}
+Infer:
+- charOutfit: what ${currentChar.name} is wearing, e.g. "a black dress and heels"
+- userOutfit: what the other person (the User) is plausibly wearing given the same setting
+- location: where the scene takes place, e.g. "a small kitchen at night"
+- charPose: ${currentChar.name}'s body position as a phrase completing "she is ...", e.g. "standing at the stove with her back turned"
+- userPose: the User's body position, same phrasing, e.g. "standing in the doorway"
+- proximity: physical distance between them, e.g. "across the room", "an arm's length apart"
+
+Keep each value under 15 words. Use null for anything the scenario genuinely does not support.
+Return ONLY valid JSON: {"charOutfit": "...", "userOutfit": "...", "location": "...", "charPose": "...", "userPose": "...", "proximity": "..."}
 No other text.` }]
       });
       const parsed = parseJsonReply(raw);
-      if (!parsed?.charOutfit) return;
-      commitCharacter(prev => ({ ...prev, charOutfit: parsed.charOutfit }));
+      if (!parsed) return;
+      commitCharacter(prev => {
+        const next = { ...prev };
+        let changed = false;
+        const charOutfit = cleanOutfitUpdate(parsed.charOutfit);
+        const userOutfit = cleanOutfitUpdate(parsed.userOutfit);
+        if (charOutfit) { next.charOutfit = charOutfit; changed = true; }
+        if (userOutfit) { next.userOutfit = userOutfit; changed = true; }
+        const staging = { ...(prev.staging || EMPTY_STAGING) };
+        let stagingChanged = false;
+        for (const key of STAGING_KEYS) {
+          const value = cleanOutfitUpdate(parsed[key]);
+          if (value) { staging[key] = value; stagingChanged = true; }
+        }
+        if (stagingChanged) { next.staging = staging; changed = true; }
+        return changed ? next : prev;
+      });
     } catch (e) {
-      console.warn("Scenario outfit inference failed:", e.message);
+      console.warn("Scenario setup inference failed:", e.message);
     }
   };
 
@@ -2764,7 +2792,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                     <p style={S.scenarioHeading}>Choose how to start with {character.name}:</p>
                     {openingScenarios.map((sc, i) => (
                       <button key={i} style={S.scenarioCard}
-                        onClick={() => { setMessages([{ role: "assistant", content: sc.message }]); setOpeningScenarios(null); inferScenarioOutfit(sc, character); }}>
+                        onClick={() => { setMessages([{ role: "assistant", content: sc.message }]); setOpeningScenarios(null); inferScenarioSetup(sc, character); }}>
                         <span style={S.scenarioLabel}>{sc.label}</span>
                         {sc.setting && <span style={S.scenarioSetting}>{sc.setting}</span>}
                         <span style={S.scenarioMessage}>"{sc.message}"</span>
@@ -2914,6 +2942,11 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                 if (customSceneDesc.trim()) msgs.push({ role: "system", content: `[Scene context: ${customSceneDesc.trim()}]`, hidden: true });
                 if (customSceneOpening.trim()) msgs.push({ role: "assistant", content: customSceneOpening.trim() });
                 if (msgs.length > 0) setMessages(msgs);
+                // A hand-written scene needs seeding just as much as a
+                // generated one — more so, since nothing else describes it.
+                if (customSceneDesc.trim() || customSceneOpening.trim()) {
+                  inferScenarioSetup({ setting: customSceneDesc.trim(), message: customSceneOpening.trim() }, character);
+                }
                 setOpeningScenarios(null);
                 setShowCustomScenario(false);
                 setCustomSceneDesc("");
