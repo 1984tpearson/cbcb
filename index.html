@@ -1098,15 +1098,39 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
   // flow required), so this just passes the character's stored image URL.
   if (initImage) body.inputImage = initImage;
 
-  const r = await fetch(IMAGE_PROXY_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!r.ok) {
-    const err = await r.text().catch(() => "");
-    throw new Error(`Wiro error: ${r.status} ${err}`);
+  // Wiro is submit-then-poll and the proxy gives up after its own budget, so
+  // a busy queue surfaces here as a 504 with the task still running. That is
+  // transient, and retrying the same prompt usually lands — so retry rather
+  // than making the user click Regen. Only gateway-class failures qualify: a
+  // 4xx means the request itself is wrong and will fail identically forever.
+  const RETRY_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+  const MAX_ATTEMPTS = 3;
+  let r, lastErr = "";
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      r = await fetch(IMAGE_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch (networkErr) {
+      // Fetch itself failed (connection dropped mid-generation) — same
+      // transient class, so it retries on the same terms.
+      if (attempt === MAX_ATTEMPTS) throw networkErr;
+      await new Promise(res => setTimeout(res, 2000 * attempt));
+      continue;
+    }
+    if (r.ok) break;
+    lastErr = await r.text().catch(() => "");
+    if (!RETRY_STATUSES.has(r.status) || attempt === MAX_ATTEMPTS) {
+      const hint = r.status === 504
+        ? " — the image service was too busy to finish in time. Try again in a moment."
+        : "";
+      throw new Error(`Wiro error: ${r.status} ${lastErr}${hint}`);
+    }
+    // Linear backoff: the queue needs time to drain, and a long wait here is
+    // cheaper than a failed generation the user has to notice and redo.
+    await new Promise(res => setTimeout(res, 3000 * attempt));
   }
 
   const blob = await r.blob();
