@@ -601,6 +601,27 @@ function appearancePhrasePreview(key, value) {
   }
 }
 
+// The appearance sliders describe hair, eyes, skin and body, but nothing
+// about facial structure, so the face was left entirely to the model's prior
+// — which lands on the same default face almost every time. Randomising the
+// seed alone does not move identity much on Seedream-class models; the face
+// has to actually be described. These are all ethnicity-neutral structural
+// traits, so they vary the face without fighting the user's own settings.
+const FACE_VARIATION_POOLS = [
+  ["oval face", "round face", "heart-shaped face", "square jawline", "angular face", "soft rounded features", "long narrow face", "wide cheekbones"],
+  ["high cheekbones", "subtle cheekbones", "full cheeks", "hollow cheeks", "broad forehead", "narrow forehead"],
+  ["small straight nose", "slightly upturned nose", "narrow nose", "broader nose", "aquiline nose", "rounded nose tip"],
+  ["full lips", "thin lips", "wide mouth", "small mouth", "cupid's bow lips", "asymmetric smile"],
+  ["close-set eyes", "wide-set eyes", "deep-set eyes", "almond-shaped eyes", "hooded eyelids", "large round eyes"],
+  ["light freckles across the nose", "a small beauty mark", "clear unblemished skin", "faint laugh lines", "a slightly crooked front tooth", "a small scar through one eyebrow"],
+];
+// One trait from each of a random subset of pools — taking all six every time
+// over-specifies the face and starts producing the same composite again.
+function pickFaceVariation() {
+  const pools = [...FACE_VARIATION_POOLS].sort(() => Math.random() - 0.5).slice(0, 4);
+  return pools.map(pool => pool[Math.floor(Math.random() * pool.length)]).join(", ");
+}
+
 function buildAppearancePrompt(appearance) {
   if (!appearance) return "";
   const a = appearance;
@@ -1885,7 +1906,12 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       const baseDesc = imgPrompt.trim() ? imgPrompt.trim() : (form.name ? form.name : "person");
       const fullPrompt = charDesc ? `${baseDesc}, ${charDesc}` : baseDesc;
       const clothingClause = clothed ? "fully clothed, wearing an outfit appropriate to the setting" : "nude";
-      const stylePrompt = `standing, ${fullPrompt}, ${clothingClause}, photorealistic, natural lighting, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
+      // Only on this screen: each click of Regen should offer a genuinely
+      // different face to pick from. Chat images deliberately do not do this
+      // — they pass the chosen reference image instead, and need the face to
+      // stay put.
+      const faceVariation = pickFaceVariation();
+      const stylePrompt = `standing, ${fullPrompt}, ${faceVariation}, ${clothingClause}, photorealistic, natural lighting, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
       const seed = Math.floor(Math.random() * 2147483647);
       const url = await generateImageWiro({ prompt: stylePrompt, model: settings.imageModel, seed });
       setGeneratedImages(prev => [url, ...prev]);
