@@ -21,6 +21,44 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, apikey',
 };
 
+// Shared by both intake paths — bytes in, public URL out.
+async function store(bytes: Uint8Array, mime: string, filename?: string) {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!supabaseUrl || !serviceKey) {
+    return new Response(JSON.stringify({ error: 'Server misconfiguration' }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const supabase = createClient(supabaseUrl, serviceKey);
+
+  const ext = mime.split('/')[1] || 'png';
+  const safeName = (filename || `img_${Date.now()}_${Math.random().toString(36).slice(2)}`).replace(/[^a-zA-Z0-9_\-\.]/g, '');
+  const path = `${safeName}.${ext}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from(BUCKET)
+    // upsert stays off: filenames carry a timestamp + random suffix, so a
+    // collision means someone is trying to overwrite an existing image.
+    .upload(path, bytes, { contentType: mime, upsert: false });
+
+  if (uploadError) {
+    return new Response(JSON.stringify({ error: uploadError.message }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
+
+  return new Response(JSON.stringify({ url: urlData.publicUrl }), {
+    status: 200,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -30,7 +68,7 @@ Deno.serve(async (req: Request) => {
     return new Response('Method not allowed', { status: 405, headers: corsHeaders });
   }
 
-  let body: { dataUrl?: string; filename?: string; token?: string };
+  let body: { dataUrl?: string; sourceUrl?: string; filename?: string; token?: string };
   try {
     body = await req.json();
   } catch {
@@ -50,7 +88,45 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  const { dataUrl, filename } = body;
+  const { dataUrl, sourceUrl, filename } = body;
+
+  // Preferred path: fetch the image here instead of having the browser
+  // download it, base64 it (a third larger, and slow on a phone) and post it
+  // back. Server to server, no re-encoding, no bytes through the client.
+  if (sourceUrl) {
+    let srcRes: Response;
+    try {
+      srcRes = await fetch(sourceUrl);
+    } catch (e) {
+      return new Response(JSON.stringify({ error: `Failed to fetch sourceUrl: ${e instanceof Error ? e.message : String(e)}` }), {
+        status: 502,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    if (!srcRes.ok) {
+      return new Response(JSON.stringify({ error: `Failed to fetch sourceUrl: HTTP ${srcRes.status}` }), {
+        status: 502,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const srcMime = srcRes.headers.get('content-type')?.split(';')[0] || 'image/png';
+    if (!ALLOWED_MIME.has(srcMime)) {
+      return new Response(JSON.stringify({ error: `Unsupported image type: ${srcMime}` }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const srcBytes = new Uint8Array(await srcRes.arrayBuffer());
+    // Same ceiling as the base64 path, applied to the decoded size.
+    if (srcBytes.byteLength > MAX_BASE64_LENGTH) {
+      return new Response(JSON.stringify({ error: 'Image too large' }), {
+        status: 413,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    return await store(srcBytes, srcMime, filename);
+  }
+
   if (!dataUrl || !dataUrl.startsWith('data:')) {
     return new Response(JSON.stringify({ error: 'dataUrl must be a base64 data URL' }), {
       status: 400,
@@ -97,38 +173,5 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  const supabaseUrl = Deno.env.get('SUPABASE_URL');
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-  if (!supabaseUrl || !serviceKey) {
-    return new Response(JSON.stringify({ error: 'Server misconfiguration' }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
-  const supabase = createClient(supabaseUrl, serviceKey);
-
-  const ext = mime.split('/')[1] || 'png';
-  const safeName = (filename || `img_${Date.now()}_${Math.random().toString(36).slice(2)}`).replace(/[^a-zA-Z0-9_\-\.]/g, '');
-  const path = `${safeName}.${ext}`;
-
-  const { error: uploadError } = await supabase.storage
-    .from(BUCKET)
-    // upsert stays off: filenames carry a timestamp + random suffix, so a
-    // collision means someone is trying to overwrite an existing image.
-    .upload(path, bytes, { contentType: mime, upsert: false });
-
-  if (uploadError) {
-    return new Response(JSON.stringify({ error: uploadError.message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
-  const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
-
-  return new Response(JSON.stringify({ url: urlData.publicUrl }), {
-    status: 200,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
+  return await store(bytes, mime, filename);
 });

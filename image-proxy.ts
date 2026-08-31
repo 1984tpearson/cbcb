@@ -9,7 +9,7 @@
 // Three actions, selected by `action` in the JSON body:
 //
 //   submit  → start a Wiro task, return { taskId } immediately
-//   status  → check a task: 202 while running, the image bytes when done
+//   status  → check a task: 202 while running, { imageUrl } when done
 //   (none)  → legacy blocking mode: submit, then poll inline until done
 //
 // The split exists because this function has a wall-clock limit. Blocking mode
@@ -62,29 +62,31 @@ async function fetchTask(taskId: string, apiKey: string) {
   return (detailJson?.tasklist?.[0] as Record<string, unknown> | undefined) || null;
 }
 
-// Turn a finished task into the image bytes, matching the response shape the
-// client already expects (raw image, not JSON).
-async function respondWithImage(task: Record<string, unknown>, outputFormat: unknown) {
+// The finished task's image URL, or an error response. Handing back the URL
+// rather than the bytes keeps the image off this function's critical path
+// entirely — it used to download the whole file from Wiro's CDN and re-serve
+// it, which is a second full transfer for no benefit.
+function taskImageUrl(task: Record<string, unknown>) {
   if (task.status !== 'task_postprocess_end' || String(task.pexit) !== '0') {
     const debugErr = (task.debugerror as string) || (task.status as string) || 'unknown error';
-    return new Response(`Wiro generation failed: ${debugErr}`, {
-      status: 502,
-      headers: corsHeaders(),
-    });
+    return { error: `Wiro generation failed: ${debugErr}` };
   }
-
   const outputs = (task.outputs as Array<Record<string, unknown>>) || [];
   const imageUrl = outputs[0]?.url as string | undefined;
-  if (!imageUrl) {
-    return new Response('Wiro task completed with no output', {
-      status: 502,
-      headers: corsHeaders(),
-    });
+  if (!imageUrl) return { error: 'Wiro task completed with no output' };
+  return { imageUrl };
+}
+
+// Legacy blocking mode only: pipe the actual bytes back, as the old client expects.
+async function respondWithImage(task: Record<string, unknown>, outputFormat: unknown) {
+  const result = taskImageUrl(task);
+  if (result.error) {
+    return new Response(result.error, { status: 502, headers: corsHeaders() });
   }
 
   let imgRes: Response;
   try {
-    imgRes = await fetch(imageUrl);
+    imgRes = await fetch(result.imageUrl as string);
   } catch (e) {
     return new Response(`Failed to fetch generated image: ${e instanceof Error ? e.message : String(e)}`, {
       status: 502,
@@ -143,8 +145,8 @@ Deno.serve(async (req: Request) => {
   const action = typeof payload.action === 'string' ? payload.action : '';
 
   // ── action: status ───────────────────────────────
-  // Poll an existing task. 202 while it is still running, image bytes when it
-  // finishes. This is the call the browser repeats, so it must stay cheap.
+  // Poll an existing task. 202 while it is still running, the image URL when
+  // it finishes. This is the call the browser repeats, so it must stay cheap.
   if (action === 'status') {
     const taskId = typeof payload.taskId === 'string' ? payload.taskId : '';
     if (!taskId) {
@@ -169,7 +171,11 @@ Deno.serve(async (req: Request) => {
       return json({ status: 'pending', taskId, taskStatus: task.status }, 202);
     }
 
-    return await respondWithImage(task, payload.outputFormat);
+    const result = taskImageUrl(task);
+    if (result.error) {
+      return new Response(result.error, { status: 502, headers: corsHeaders() });
+    }
+    return json({ status: 'done', imageUrl: result.imageUrl }, 200);
   }
 
   // ── submit / legacy: build the run ───────────────

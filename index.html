@@ -1175,13 +1175,14 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
   const { taskId } = await submitRes.json();
   if (!taskId) throw new Error("Wiro error: no task id returned");
 
-  // Generations are usually single-digit seconds; this allows five minutes
-  // before giving up, which costs nothing but a few extra polls.
-  const POLL_INTERVAL_MS = 2000;
-  const MAX_POLLS = 150;
-  let r = null;
+  // Poll quickly at first — a fast generation used to sit finished for a full
+  // 2s before anyone asked. Then ease off so a slow one is not hammered.
+  const POLL_SCHEDULE_MS = [900, 900, 1200, 1500, 2000];
+  const MAX_POLLS = 160;
+  let imageUrl = null;
   for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
-    await new Promise(res => setTimeout(res, POLL_INTERVAL_MS));
+    const wait = POLL_SCHEDULE_MS[Math.min(attempt, POLL_SCHEDULE_MS.length - 1)];
+    await new Promise(res => setTimeout(res, wait));
     let statusRes;
     try {
       statusRes = await fetch(IMAGE_PROXY_URL, {
@@ -1197,26 +1198,21 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
       const err = await statusRes.text().catch(() => "");
       throw new Error(`Wiro error: ${statusRes.status} ${err}`);
     }
-    r = statusRes;
+    const done = await statusRes.json();
+    imageUrl = done && done.imageUrl;
     break;
   }
-  if (!r) throw new Error(`Wiro error: generation did not finish in time (task ${taskId})`);
+  if (!imageUrl) throw new Error(`Wiro error: generation did not finish in time (task ${taskId})`);
 
-  const blob = await r.blob();
-  const dataUrl = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-
-  // Upload to Supabase Storage and return the public URL (avoids storing
-  // large base64 blobs in localStorage)
+  // Copy to Supabase Storage for persistence — Wiro's CDN is not somewhere to
+  // keep a gallery. The upload function fetches the URL itself, so the bytes
+  // never touch the browser: they used to come down through the proxy, get
+  // base64'd (a third larger, and slow on a phone) and be posted back up.
   try {
     const uploadRes = await fetch(UPLOAD_IMAGE_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dataUrl, token: ACCESS_TOKEN, filename: `img_${Date.now()}_${Math.random().toString(36).slice(2)}` }),
+      body: JSON.stringify({ sourceUrl: imageUrl, token: ACCESS_TOKEN, filename: `img_${Date.now()}_${Math.random().toString(36).slice(2)}` }),
     });
     if (uploadRes.ok) {
       const { url } = await uploadRes.json();
@@ -1224,8 +1220,8 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
     }
   } catch {}
 
-  // Fallback: if upload fails, return the data URL directly (old behaviour)
-  return dataUrl;
+  // Fallback: the Wiro URL still renders, it just is not permanent.
+  return imageUrl;
 }
 
 // Wardrobe tracking only runs when the recent turns actually talk about
