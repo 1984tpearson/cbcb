@@ -427,11 +427,26 @@ const POV_RECLINED_RE = /\b(lying|laying|lain|lies|reclining|reclined|sprawled|o
 const POV_ARMS_MODIFIER = "the viewer's own hand and forearm visible in the foreground entering the frame from the camera";
 const POV_LAP_MODIFIER = "the viewer's own thighs and knees visible in the lower foreground, seen looking down from their own seated position";
 const POV_TORSO_MODIFIER = "the viewer's own chest and legs stretching away below the camera in the lower foreground";
-function buildPovModifiers(sceneText, staging) {
+// In an intimate scene the viewer's own body is part of the shot, and framing
+// it out is what makes these images read as wrong — a POV that crops at the
+// wrists during sex is stranger than one that doesn't. Gated on the
+// character's NSFW toggle, same as every other explicit path in the app, so
+// an SFW character never gets this clause regardless of scene wording.
+const POV_INTIMATE_RE = /\b(sex|sexual|fucking|fucks|thrust|thrusting|riding|rides|straddling|straddles|grinding|penetrat\w*|oral|blowjob|going down on|cock|dick|pussy|clit|nipples?|breasts?|tits|cum|climax|orgasm|moaning|naked|nude|undressed|topless|bare[- ]?chested)\b/i;
+const POV_INTIMATE_MODIFIER = "the viewer's own nude body in the immediate foreground below the camera, their bare chest, hips and thighs framing the bottom of the shot";
+function buildPovModifiers(sceneText, staging, nsfw) {
   const parts = [POV_BASE];
   const scene = sceneText || "";
   const userPose = (staging && staging.userPose) || "";
+  const intimate = !!nsfw && POV_INTIMATE_RE.test(`${scene} ${userPose}`);
   if (POV_CONTACT_RE.test(scene)) parts.push(POV_ARMS_MODIFIER);
+  // The intimate framing already covers the viewer's torso and legs, so it
+  // replaces the seated/reclined clauses rather than stacking with them and
+  // asking for the same body twice.
+  if (intimate) {
+    parts.push(POV_INTIMATE_MODIFIER);
+    return parts.join(", ");
+  }
   // Reclined wins over seated — you can be described as both, and lying down
   // is the more specific framing of the two.
   if (POV_RECLINED_RE.test(userPose)) parts.push(POV_TORSO_MODIFIER);
@@ -1137,7 +1152,14 @@ async function buildImagePromptFromContext({ messages, character, model }) {
   const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
   const ageDesc = character.age ? `${character.age} year old` : "";
   const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-  const content = await aiComplete({ model, messages: [{ role: "user", content: `You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is ${character.name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: ${charDesc || "not specified"}.\n\nConversation:\n${recent}\n\nThe image is a first-person POV shot taken from the User's own eyes: the User is the camera. The User's own face, head and back can never be seen, but their hands, arms or legs SHOULD be described entering the frame from the camera whenever they are touching, holding or reaching for something — e.g. "a hand resting on her shoulder in the foreground". Write a Stable Diffusion prompt of 20-35 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression. Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere". Describe only what the User can see from where they are: the scene in front of them, plus their own hands or limbs where those are in contact with something. Never describe the User's face, head, hair or whole body. Return ONLY the prompt text, nothing else.` }] });
+  // What of the User's own body may be described depends on the character's
+  // NSFW setting: cropping a POV shot at the wrists during an intimate scene
+  // is what makes these images read as wrong, but an SFW character should
+  // never have the User's body brought into frame.
+  const ownBodyRule = character.nsfw
+    ? " Describe what the User can see from where they are: the scene in front of them, plus their own body where it genuinely falls in the shot — their hands and arms when touching or reaching, and in an intimate scene their own chest, hips and thighs framing the bottom of the frame. Never describe the User's face, head or hair."
+    : " Describe only what the User can see from where they are: the scene in front of them, plus their own hands or limbs where those are in contact with something. Never describe the User's face, head, hair or whole body.";
+  const content = await aiComplete({ model, messages: [{ role: "user", content: `You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is ${character.name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: ${charDesc || "not specified"}.\n\nConversation:\n${recent}\n\nThe image is a first-person POV shot taken from the User's own eyes: the User is the camera. The User's own face, head and back can never be seen, but their hands, arms or legs SHOULD be described entering the frame from the camera whenever they are touching, holding or reaching for something — e.g. "a hand resting on her shoulder in the foreground". Write a Stable Diffusion prompt of 20-35 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression. Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere".${ownBodyRule} Return ONLY the prompt text, nothing else.` }] });
   return content.trim().replace(/^"|"$/g, "");
 }
 
@@ -2520,7 +2542,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // and closer to the end of the prompt.
       const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
       const stagingDesc = buildStagingImageDesc(character.staging);
-      const fullPrompt = [buildPovModifiers(customImgPrompt, character.staging), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, styleModifiers].filter(Boolean).join(", ");
+      const fullPrompt = [buildPovModifiers(customImgPrompt, character.staging, character.nsfw), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, styleModifiers].filter(Boolean).join(", ");
       const url = await generateImageWiro({
         prompt: fullPrompt,
         model: settings.imageModel,
@@ -2566,7 +2588,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // weights them highest, scene context after.
       const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
       const stagingDesc = buildStagingImageDesc(character.staging);
-      const fullImgPrompt = [buildPovModifiers(prompt, character.staging), charDesc, wardrobeDesc, stagingDesc, prompt, styleModifiers].filter(Boolean).join(", ");
+      const fullImgPrompt = [buildPovModifiers(prompt, character.staging, character.nsfw), charDesc, wardrobeDesc, stagingDesc, prompt, styleModifiers].filter(Boolean).join(", ");
       const url = await generateImageWiro({
         prompt: fullImgPrompt,
         model: settings.imageModel,
