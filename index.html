@@ -1204,6 +1204,11 @@ function extractActionText(messages, characterName) {
   }).filter(Boolean).join("\n");
 }
 
+// Movement is the one staging change that routinely happens in prose rather
+// than in a *...* beat ("we went through to the kitchen"), so it gets its own
+// gate — without it the tracker never even looked.
+const MOVEMENT_RE = /\b(walk|walks|walked|walking|go|goes|went|going|come|comes|came|coming|move|moves|moved|moving|head|heads|headed|heading|enter|enters|entered|entering|leave|leaves|left|leaving|step|steps|stepped|stepping|sit|sits|sat|sitting|stand|stands|stood|standing|lie|lies|lay|lying|follow|follows|followed|following|inside|outside|upstairs|downstairs|bedroom|kitchen|bathroom|living room|hallway|garden|car|couch|sofa|bed|table)\b/i;
+
 const EMPTY_STAGING = { location: null, charPose: null, userPose: null, proximity: null };
 const STAGING_KEYS = ["location", "charPose", "userPose", "proximity"];
 function hasStaging(staging) {
@@ -2485,11 +2490,14 @@ No other text.` }]
 
   const applyStaging = async (newMessages, currentChar) => {
     try {
-      // Position is carried almost entirely by action beats, so the tracker
-      // reads those rather than the whole message — dialogue about sitting
-      // down is not the same as sitting down.
+      // Action beats are the primary signal, but not the only one: moving to
+      // another room is often narrated in prose, and reading beats alone left
+      // location stuck at wherever the scene opened while the poses moved on
+      // to a completely different place.
       const actions = extractActionText(newMessages, currentChar.name);
-      if (!actions) return;
+      const recentText = newMessages.filter(m => m.role !== "image").slice(-3)
+        .map(m => `${m.role === "user" ? "User" : currentChar.name}: ${m.content}`).join("\n");
+      if (!actions && !MOVEMENT_RE.test(recentText)) return;
       const prevStaging = currentChar.staging || EMPTY_STAGING;
       const raw = await aiComplete({
         model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
@@ -2503,7 +2511,10 @@ Current staging:
 - Distance between them: ${prevStaging.proximity || "unknown"}
 
 Recent action beats (what people physically did):
-${actions}
+${actions || "(none)"}
+
+Recent conversation, for context on where they are:
+${recentText}
 
 Your job is to detect CHANGES only. The current staging above is already correct.
 
@@ -2515,6 +2526,8 @@ Instructions:
 - userPose: the User's body position, same phrasing, e.g. "sitting opposite her at the table", "lying on his back".
 - proximity: physical distance, e.g. "an arm's length apart", "pressed close against each other", "across the room".
 - Keep each value under 15 words, concrete and physical. No emotions, no dialogue, no clothing.
+- The four fields must describe ONE coherent scene. If a change makes another field impossible, update that field too, even though it was not itself mentioned: if they move to a new room, location changes; if their poses put them side by side, proximity must agree; if someone stands up and walks away, proximity changes.
+- Check the current staging above against the conversation. If a field contradicts where they plainly are now, correct it rather than returning null — a stale value is worse than a changed one.
 - Return ONLY valid JSON: {"location": null, "charPose": null, "userPose": null, "proximity": null}
 No other text.` }]
       });
