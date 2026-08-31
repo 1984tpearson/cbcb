@@ -974,7 +974,17 @@ async function sendChat({ messages, character, model, settings }) {
     ? `\n\n[WARDROBE — current clothing]\n${character.charOutfit ? `You are currently wearing: ${character.charOutfit}.` : ""}${character.userOutfit ? ` The person you're talking to is currently wearing: ${character.userOutfit}.` : ""} Reference these naturally if relevant — don't force it, but don't contradict them either.`
     : "";
 
-  const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + personaNote + nsfwClause + actionClause + plainClause + wardrobeClause + memoryClause;
+  const st = character.staging;
+  const stagingClause = hasStaging(st)
+    ? `\n\n[STAGING — where everyone is right now]\n${[
+        st.location ? `Setting: ${st.location}.` : "",
+        st.charPose ? `You are ${st.charPose}.` : "",
+        st.userPose ? `The person you're talking to is ${st.userPose}.` : "",
+        st.proximity ? `Distance between you: ${st.proximity}.` : "",
+      ].filter(Boolean).join(" ")} Stay physically consistent with this — don't teleport, stand up without standing up, or forget where you both are. Move only when the scene actually calls for it, and describe the movement when you do.`
+    : "";
+
+  const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + personaNote + nsfwClause + actionClause + plainClause + wardrobeClause + stagingClause + memoryClause;
 
   return aiComplete({ model, messages: [{ role: "system", content: sysContent }, ...messages] });
 }
@@ -1057,6 +1067,38 @@ function cleanOutfitUpdate(value) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return NON_UPDATES.has(trimmed.toLowerCase()) ? null : (trimmed || null);
+}
+
+// Staging = where everyone is and how they are posed, tracked from the action
+// text in the roleplay (the *…* / **…** segments) so image prompts can place
+// the camera and the character correctly instead of guessing from dialogue.
+const ACTION_TEXT_RE = /\*{1,2}([^*]+)\*{1,2}/g;
+function extractActionText(messages, characterName) {
+  return messages.filter(m => m.role !== "image").slice(-4).map(m => {
+    const who = m.role === "user" ? "User" : characterName;
+    const beats = [...String(m.content || "").matchAll(ACTION_TEXT_RE)]
+      .map(match => match[1].trim()).filter(Boolean);
+    return beats.length ? `${who}: ${beats.join(" / ")}` : "";
+  }).filter(Boolean).join("\n");
+}
+
+const EMPTY_STAGING = { location: null, charPose: null, userPose: null, proximity: null };
+const STAGING_KEYS = ["location", "charPose", "userPose", "proximity"];
+function hasStaging(staging) {
+  return !!staging && STAGING_KEYS.some(k => staging[k]);
+}
+// Phrases for the image prompt, ordered the way the shot reads: where we are,
+// what the camera (the user) is doing, how far away she is, what she is doing.
+function buildStagingImageDesc(staging) {
+  if (!hasStaging(staging)) return "";
+  const parts = [];
+  if (staging.location) parts.push(staging.location);
+  if (staging.userPose) parts.push(`camera positioned as someone ${staging.userPose}`);
+  if (staging.proximity) parts.push(staging.proximity);
+  // The pose goes in bare — SD reads "sitting on the edge of the bed" as a
+  // pose directive, while a "she is ..." sentence just adds noise tokens.
+  if (staging.charPose) parts.push(staging.charPose);
+  return parts.filter(Boolean).join(", ");
 }
 
 async function buildImagePromptFromContext({ messages, character, model }) {
@@ -1437,10 +1479,13 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
   const [memoryFacts, setMemoryFacts] = useState(character.memoryFacts || "");
   const [charOutfit, setCharOutfit] = useState(character.charOutfit || "");
   const [userOutfit, setUserOutfit] = useState(character.userOutfit || "");
+  const [staging, setStaging] = useState(character.staging || EMPTY_STAGING);
 
   // Re-sync wardrobe state if character prop updates while panel is open
   useEffect(() => { setCharOutfit(character.charOutfit || ""); }, [character.charOutfit]);
   useEffect(() => { setUserOutfit(character.userOutfit || ""); }, [character.userOutfit]);
+  useEffect(() => { setStaging(character.staging || EMPTY_STAGING); }, [character.staging]);
+  const setStagingField = (key, value) => setStaging(st => ({ ...(st || EMPTY_STAGING), [key]: value || null }));
   const [memoryGenLoading, setMemoryGenLoading] = useState(false);
   const [memoryGenError, setMemoryGenError] = useState("");
   const [useUserPersonaOverride, setUseUserPersonaOverride] = useState(!!character.userPersonaOverride);
@@ -1514,6 +1559,26 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
           <button style={{ ...S.btnSecondary, marginTop: 4, color: "#c04060" }}
             onClick={() => { setCharOutfit(""); setUserOutfit(""); }}>
             Clear Wardrobe
+          </button>
+
+          <div style={S.divider} />
+          <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Scene / Staging</span>
+          <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Tracked automatically from the action text (*…*) in the conversation, and used to place the camera in generated images. Edit manually to correct or set the starting scene.</p>
+          <label style={S.label}>Location</label>
+          <input style={S.input} placeholder="e.g. a small kitchen at night"
+            value={staging?.location || ""} onChange={e => setStagingField("location", e.target.value)} />
+          <label style={S.label}>{character.name} is...</label>
+          <input style={S.input} placeholder="e.g. sitting on the edge of the bed, leaning forward"
+            value={staging?.charPose || ""} onChange={e => setStagingField("charPose", e.target.value)} />
+          <label style={S.label}>User is...</label>
+          <input style={S.input} placeholder="e.g. standing in the doorway"
+            value={staging?.userPose || ""} onChange={e => setStagingField("userPose", e.target.value)} />
+          <label style={S.label}>Distance apart</label>
+          <input style={S.input} placeholder="e.g. an arm's length apart"
+            value={staging?.proximity || ""} onChange={e => setStagingField("proximity", e.target.value)} />
+          <button style={{ ...S.btnSecondary, marginTop: 4, color: "#c04060" }}
+            onClick={() => setStaging(EMPTY_STAGING)}>
+            Clear Scene
           </button>
 
           <div style={S.divider} />
@@ -1615,7 +1680,7 @@ Return ONLY the JSON object, no other text.` }] });
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, reactiveEnabled, memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
+          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, reactiveEnabled, memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, staging: hasStaging(staging) ? staging : null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
         </div>
       </div>
     </div>
@@ -2147,7 +2212,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       resetSliders.likesUser = characterDefaults.likesUser ?? DEFAULT_SLIDERS.likesUser;
       resetSliders.attractionToUser = characterDefaults.attractionToUser ?? DEFAULT_SLIDERS.attractionToUser;
       resetSliders.horniness = characterDefaults.horniness ?? DEFAULT_SLIDERS.horniness;
-      return { ...prev, currentSessionId: newSessionId, sliders: resetSliders, charOutfit: null, userOutfit: null };
+      return { ...prev, currentSessionId: newSessionId, sliders: resetSliders, charOutfit: null, userOutfit: null, staging: null };
     });
     setMessages([]);
     setMessagesLoaded(false);
@@ -2232,6 +2297,58 @@ No other text.` }]
       });
     } catch (e) {
       console.warn("Wardrobe tracking failed:", e.message);
+    }
+  };
+
+  const applyStaging = async (newMessages, currentChar) => {
+    try {
+      // Position is carried almost entirely by action beats, so the tracker
+      // reads those rather than the whole message — dialogue about sitting
+      // down is not the same as sitting down.
+      const actions = extractActionText(newMessages, currentChar.name);
+      if (!actions) return;
+      const prevStaging = currentChar.staging || EMPTY_STAGING;
+      const raw = await aiComplete({
+        model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
+        messages: [{ role: "user", content:
+`You are tracking the physical staging (blocking) of a roleplay scene.
+
+Current staging:
+- Location: ${prevStaging.location || "unknown"}
+- ${currentChar.name}'s position/pose: ${prevStaging.charPose || "unknown"}
+- User's position/pose: ${prevStaging.userPose || "unknown"}
+- Distance between them: ${prevStaging.proximity || "unknown"}
+
+Recent action beats (what people physically did):
+${actions}
+
+Your job is to detect CHANGES only. The current staging above is already correct.
+
+Instructions:
+- Return null for a field unless the action beats show it actually changing. null means "no change" — the existing value is kept.
+- Never reword, shorten or tidy up a value that did not change. Return null instead. Do not echo current values back.
+- location: where the scene is, e.g. "a small kitchen at night", "on a bench in a park".
+- charPose: ${currentChar.name}'s body position, as a phrase completing "she is ...", e.g. "sitting on the edge of the bed, leaning forward", "standing at the stove with her back turned".
+- userPose: the User's body position, same phrasing, e.g. "sitting opposite her at the table", "lying on his back".
+- proximity: physical distance, e.g. "an arm's length apart", "pressed close against each other", "across the room".
+- Keep each value under 15 words, concrete and physical. No emotions, no dialogue, no clothing.
+- Return ONLY valid JSON: {"location": null, "charPose": null, "userPose": null, "proximity": null}
+No other text.` }]
+      });
+      const parsed = parseJsonReply(raw);
+      if (!parsed) return;
+      commitCharacter(prev => {
+        const base = prev.staging || EMPTY_STAGING;
+        const next = { ...base };
+        let changed = false;
+        for (const key of STAGING_KEYS) {
+          const value = cleanOutfitUpdate(parsed[key]);
+          if (value && value !== base[key]) { next[key] = value; changed = true; }
+        }
+        return changed ? { ...prev, staging: next } : prev;
+      });
+    } catch (e) {
+      console.warn("Staging tracking failed:", e.message);
     }
   };
 
@@ -2330,6 +2447,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // Fire reactivity and wardrobe tracking in background — don't await, don't block
       applyReactivity(withReply, character);
       applyWardrobe(withReply, character);
+      applyStaging(withReply, character);
     } catch (e) { setError(e.message); }
     setLoading(false);
   };
@@ -2371,7 +2489,8 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // a red dress") will still tend to win out since it's more specific
       // and closer to the end of the prompt.
       const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
-      const fullPrompt = [POV_MODIFIERS, character.name, charDesc, wardrobeDesc, customImgPrompt, styleModifiers].filter(Boolean).join(", ");
+      const stagingDesc = buildStagingImageDesc(character.staging);
+      const fullPrompt = [POV_MODIFIERS, character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, styleModifiers].filter(Boolean).join(", ");
       const url = await generateImageWiro({
         prompt: fullPrompt,
         model: settings.imageModel,
@@ -2416,7 +2535,8 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // is the more reliable source. Appearance + wardrobe go FIRST so SD
       // weights them highest, scene context after.
       const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
-      const fullImgPrompt = [POV_MODIFIERS, charDesc, wardrobeDesc, prompt, styleModifiers].filter(Boolean).join(", ");
+      const stagingDesc = buildStagingImageDesc(character.staging);
+      const fullImgPrompt = [POV_MODIFIERS, charDesc, wardrobeDesc, stagingDesc, prompt, styleModifiers].filter(Boolean).join(", ");
       const url = await generateImageWiro({
         prompt: fullImgPrompt,
         model: settings.imageModel,
