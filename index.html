@@ -2488,6 +2488,25 @@ No other text.` }]
     }
   };
 
+  // The wardrobe and staging a reply was generated FROM. Stored on the reply
+  // itself, because the trackers then move that state forward based on the
+  // reply — so regenerating has to put it back first, or the new reply is
+  // written against a scene that only existed in the discarded one.
+  const sceneSnapshot = (char) => ({
+    charOutfit: char.charOutfit ?? null,
+    userOutfit: char.userOutfit ?? null,
+    staging: char.staging ?? null,
+  });
+  const restoreScene = (snap) => {
+    if (!snap) return characterRef.current;
+    return commitCharacter(prev => ({
+      ...prev,
+      charOutfit: snap.charOutfit ?? null,
+      userOutfit: snap.userOutfit ?? null,
+      staging: snap.staging ?? null,
+    }));
+  };
+
   const applyStaging = async (newMessages, currentChar) => {
     try {
       // Staging is a full restatement, not change detection. Wardrobe uses the
@@ -2645,9 +2664,10 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     const newMessages = [...messages, userMsg];
     setMessages(newMessages); setInput(""); setLoading(true);
     try {
+      const stateBefore = sceneSnapshot(characterRef.current);
       const reply = await sendChat({ messages: newMessages.filter(m => m.role !== "image"), character, model: settings.selectedModel, settings });
       const withReply = [...newMessages, { role: "assistant", content: reply }];
-      setMessages(m => [...m, { role: "assistant", content: reply }]);
+      setMessages(m => [...m, { role: "assistant", content: reply, stateBefore }]);
       // Fire reactivity and wardrobe tracking in background — don't await, don't block
       applyReactivity(withReply, character);
       applyWardrobe(withReply, character);
@@ -2664,10 +2684,19 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     const messagesWithInstruction = instruction
       ? [...trimmed, { role: "user", content: `[Regeneration instruction: ${instruction}]` }]
       : trimmed;
+    // Undo the wardrobe/staging the discarded reply caused, so the new one is
+    // written against the scene as it stood before it.
+    const stateBefore = messages[lastAIIndex]?.stateBefore || null;
+    const restoredChar = restoreScene(stateBefore);
     setMessages(trimmed); setRegenLoading(true); setError("");
     try {
-      const reply = await sendChat({ messages: messagesWithInstruction.filter(m => m.role !== "image"), character, model: settings.selectedModel, settings });
-      setMessages([...trimmed, { role: "assistant", content: reply }]);
+      const reply = await sendChat({ messages: messagesWithInstruction.filter(m => m.role !== "image"), character: restoredChar, model: settings.selectedModel, settings });
+      const withReply = [...trimmed, { role: "assistant", content: reply, stateBefore }];
+      setMessages(withReply);
+      // Regeneration never re-ran the trackers, so the scene stayed frozen at
+      // the pre-reply state until the next message. Run them on the new reply.
+      applyWardrobe(withReply, restoredChar);
+      applyStaging(withReply, restoredChar);
     } catch (e) { setError(e.message); }
     setRegenLoading(false);
   };
@@ -2720,6 +2749,9 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       if (!confirm("Delete this message and everything after it?")) return;
       setMessages(m => m.slice(0, index));
     } else {
+      // Same problem as regeneration: the reply is gone, so the state it moved
+      // forward should go with it.
+      restoreScene(messages[index]?.stateBefore);
       setMessages(m => m.filter((_, i) => i !== index));
     }
   };
