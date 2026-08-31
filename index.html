@@ -434,11 +434,15 @@ const POV_TORSO_MODIFIER = "the viewer's own chest and legs stretching away belo
 // an SFW character never gets this clause regardless of scene wording.
 const POV_INTIMATE_RE = /\b(sex|sexual|fucking|fucks|thrust|thrusting|riding|rides|straddling|straddles|grinding|penetrat\w*|oral|blowjob|going down on|cock|dick|pussy|clit|nipples?|breasts?|tits|cum|climax|orgasm|moaning|naked|nude|undressed|topless|bare[- ]?chested)\b/i;
 const POV_INTIMATE_MODIFIER = "the viewer's own nude body in the immediate foreground below the camera, their bare chest, hips and thighs framing the bottom of the shot";
+function isIntimateScene(sceneText, staging, nsfw) {
+  const userPose = (staging && staging.userPose) || "";
+  return !!nsfw && POV_INTIMATE_RE.test(`${sceneText || ""} ${userPose}`);
+}
 function buildPovModifiers(sceneText, staging, nsfw) {
   const parts = [POV_BASE];
   const scene = sceneText || "";
   const userPose = (staging && staging.userPose) || "";
-  const intimate = !!nsfw && POV_INTIMATE_RE.test(`${scene} ${userPose}`);
+  const intimate = isIntimateScene(scene, staging, nsfw);
   if (POV_CONTACT_RE.test(scene)) parts.push(POV_ARMS_MODIFIER);
   // The intimate framing already covers the viewer's torso and legs, so it
   // replaces the seated/reclined clauses rather than stacking with them and
@@ -1156,10 +1160,18 @@ async function buildImagePromptFromContext({ messages, character, model }) {
   // NSFW setting: cropping a POV shot at the wrists during an intimate scene
   // is what makes these images read as wrong, but an SFW character should
   // never have the User's body brought into frame.
+  // The extractor's field list had no slot for what the two of them are
+  // physically doing, so on an explicit scene it would reliably return pose
+  // and mood and drop the act itself. This tells it to report the action
+  // rather than substitute atmosphere for it, matching how the opening
+  // scenario generator is already instructed.
+  const actNote = character.nsfw
+    ? " State plainly what the two of them are physically doing to each other, including sexual acts where that is what is happening — do not soften it into mood, atmosphere or euphemism, and do not substitute a pose for the act."
+    : "";
   const ownBodyRule = character.nsfw
     ? " Describe what the User can see from where they are: the scene in front of them, plus their own body where it genuinely falls in the shot — their hands and arms when touching or reaching, and in an intimate scene their own chest, hips and thighs framing the bottom of the frame. Never describe the User's face, head or hair."
     : " Describe only what the User can see from where they are: the scene in front of them, plus their own hands or limbs where those are in contact with something. Never describe the User's face, head, hair or whole body.";
-  const content = await aiComplete({ model, messages: [{ role: "user", content: `You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is ${character.name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: ${charDesc || "not specified"}.\n\nConversation:\n${recent}\n\nThe image is a first-person POV shot taken from the User's own eyes: the User is the camera. The User's own face, head and back can never be seen, but their hands, arms or legs SHOULD be described entering the frame from the camera whenever they are touching, holding or reaching for something — e.g. "a hand resting on her shoulder in the foreground". Write a Stable Diffusion prompt of 20-35 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression. Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere".${ownBodyRule} Return ONLY the prompt text, nothing else.` }] });
+  const content = await aiComplete({ model, messages: [{ role: "user", content: `You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is ${character.name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: ${charDesc || "not specified"}.\n\nConversation:\n${recent}\n\nThe image is a first-person POV shot taken from the User's own eyes: the User is the camera. The User's own face, head and back can never be seen, but their hands, arms or legs SHOULD be described entering the frame from the camera whenever they are touching, holding or reaching for something — e.g. "a hand resting on her shoulder in the foreground". Write a Stable Diffusion prompt of 20-35 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression.${actNote} Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere".${ownBodyRule} Return ONLY the prompt text, nothing else.` }] });
   return content.trim().replace(/^"|"$/g, "");
 }
 
@@ -1532,11 +1544,13 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
   const [charOutfit, setCharOutfit] = useState(character.charOutfit || "");
   const [userOutfit, setUserOutfit] = useState(character.userOutfit || "");
   const [staging, setStaging] = useState(character.staging || EMPTY_STAGING);
+  const [explicitDetail, setExplicitDetail] = useState(character.explicitDetail || "");
 
   // Re-sync wardrobe state if character prop updates while panel is open
   useEffect(() => { setCharOutfit(character.charOutfit || ""); }, [character.charOutfit]);
   useEffect(() => { setUserOutfit(character.userOutfit || ""); }, [character.userOutfit]);
   useEffect(() => { setStaging(character.staging || EMPTY_STAGING); }, [character.staging]);
+  useEffect(() => { setExplicitDetail(character.explicitDetail || ""); }, [character.explicitDetail]);
   const setStagingField = (key, value) => setStaging(st => ({ ...(st || EMPTY_STAGING), [key]: value || null }));
   const [memoryGenLoading, setMemoryGenLoading] = useState(false);
   const [memoryGenError, setMemoryGenError] = useState("");
@@ -1632,6 +1646,17 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
             onClick={() => setStaging(EMPTY_STAGING)}>
             Clear Scene
           </button>
+
+          {nsfw && (
+            <>
+              <div style={S.divider} />
+              <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Explicit Image Detail</span>
+              <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Your own wording, added to generated image prompts word for word — but only while NSFW is on and the scene reads as intimate. Leave empty to add nothing.</p>
+              <textarea style={{ ...S.input, height: 70, resize: "vertical" }}
+                placeholder="Wording to append to explicit image prompts..."
+                value={explicitDetail} onChange={e => setExplicitDetail(e.target.value)} />
+            </>
+          )}
 
           <div style={S.divider} />
           <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Memory</span>
@@ -1732,7 +1757,7 @@ Return ONLY the JSON object, no other text.` }] });
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, reactiveEnabled, memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, staging: hasStaging(staging) ? staging : null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
+          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, reactiveEnabled, memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, staging: hasStaging(staging) ? staging : null, explicitDetail: explicitDetail.trim() || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
         </div>
       </div>
     </div>
@@ -2542,7 +2567,11 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // and closer to the end of the prompt.
       const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
       const stagingDesc = buildStagingImageDesc(character.staging);
-      const fullPrompt = [buildPovModifiers(customImgPrompt, character.staging, character.nsfw), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, styleModifiers].filter(Boolean).join(", ");
+      // Author-supplied wording for explicit scenes, used verbatim. Only
+      // reaches the model when NSFW is on and the scene reads as intimate.
+      const explicitDesc = isIntimateScene(customImgPrompt, character.staging, character.nsfw)
+        ? (character.explicitDetail || "") : "";
+      const fullPrompt = [buildPovModifiers(customImgPrompt, character.staging, character.nsfw), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, explicitDesc, styleModifiers].filter(Boolean).join(", ");
       const url = await generateImageWiro({
         prompt: fullPrompt,
         model: settings.imageModel,
@@ -2588,7 +2617,9 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // weights them highest, scene context after.
       const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
       const stagingDesc = buildStagingImageDesc(character.staging);
-      const fullImgPrompt = [buildPovModifiers(prompt, character.staging, character.nsfw), charDesc, wardrobeDesc, stagingDesc, prompt, styleModifiers].filter(Boolean).join(", ");
+      const explicitDesc = isIntimateScene(prompt, character.staging, character.nsfw)
+        ? (character.explicitDetail || "") : "";
+      const fullImgPrompt = [buildPovModifiers(prompt, character.staging, character.nsfw), charDesc, wardrobeDesc, stagingDesc, prompt, explicitDesc, styleModifiers].filter(Boolean).join(", ");
       const url = await generateImageWiro({
         prompt: fullImgPrompt,
         model: settings.imageModel,
