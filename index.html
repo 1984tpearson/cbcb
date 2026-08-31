@@ -403,6 +403,11 @@ const DEFAULT_SETTINGS = {
 const AI_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/ai-proxy";
 const IMAGE_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/image-proxy";
 const UPLOAD_IMAGE_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/upload-image";
+
+// Images generated during a chat are shot from the user's own eyes - the user
+// is the camera, so they never appear in frame. Deliberately not applied on the
+// character creation screen, where a third-person reference portrait is wanted.
+const POV_MODIFIERS = "POV, first person perspective, seen through the viewer's own eyes, camera at eye level, viewer not visible in frame";
 const DATA_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/data-proxy";
 const ACCESS_TOKEN = "pc_8f3a9d2e7b1c4f6a0d5e9c3b7a2f1e8d";
 
@@ -1045,7 +1050,7 @@ async function buildImagePromptFromContext({ messages, character, model }) {
   const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
   const ageDesc = character.age ? `${character.age} year old` : "";
   const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-  const content = await aiComplete({ model, messages: [{ role: "user", content: `You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is ${character.name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: ${charDesc || "not specified"}.\n\nConversation:\n${recent}\n\nWrite a Stable Diffusion prompt of 20-35 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression. Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere". Return ONLY the prompt text, nothing else.` }] });
+  const content = await aiComplete({ model, messages: [{ role: "user", content: `You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is ${character.name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: ${charDesc || "not specified"}.\n\nConversation:\n${recent}\n\nThe image is a first-person POV shot taken from the User's own eyes: the User is the camera and must never appear in the image. Write a Stable Diffusion prompt of 20-35 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression. Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere". Describe only what the User can see from where they are; do NOT describe the User's own body or face. Return ONLY the prompt text, nothing else.` }] });
   return content.trim().replace(/^"|"$/g, "");
 }
 
@@ -2342,7 +2347,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // a red dress") will still tend to win out since it's more specific
       // and closer to the end of the prompt.
       const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
-      const fullPrompt = [character.name, charDesc, wardrobeDesc, customImgPrompt, styleModifiers].filter(Boolean).join(", ");
+      const fullPrompt = [POV_MODIFIERS, character.name, charDesc, wardrobeDesc, customImgPrompt, styleModifiers].filter(Boolean).join(", ");
       const url = await generateImageWiro({
         prompt: fullPrompt,
         model: settings.imageModel,
@@ -2375,7 +2380,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     try {
       const prompt = messages.length > 0
         ? await buildImagePromptFromContext({ messages, character, model: settings.selectedModel })
-        : `${character.name}, portrait, character art`;
+        : `${character.name}, looking at the viewer, character art`;
       const appearanceDesc = buildAppearancePrompt(character.appearance);
       const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
       const ageDesc = character.age ? `${character.age} year old` : "";
@@ -2387,7 +2392,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // is the more reliable source. Appearance + wardrobe go FIRST so SD
       // weights them highest, scene context after.
       const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
-      const fullImgPrompt = [charDesc, wardrobeDesc, prompt, styleModifiers].filter(Boolean).join(", ");
+      const fullImgPrompt = [POV_MODIFIERS, charDesc, wardrobeDesc, prompt, styleModifiers].filter(Boolean).join(", ");
       const url = await generateImageWiro({
         prompt: fullImgPrompt,
         model: settings.imageModel,
