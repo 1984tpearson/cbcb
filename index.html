@@ -517,13 +517,16 @@ const dataApi = {
 // `data.choices[0].message.content` straight off the response, so a proxy
 // error surfaced as a TypeError about `undefined` instead of the actual
 // problem — and in the silent-catch callers, as nothing at all.
-async function aiComplete({ model, messages }) {
+async function aiComplete({ model, messages, params }) {
   let res;
   try {
     res = await fetch(AI_PROXY_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model, messages }),
+      // params are merged into the OpenRouter body — the proxy forwards it
+      // verbatim. Only the conversation passes any: the tracker calls want
+      // plain, repeatable JSON, and penalties would work against that.
+      body: JSON.stringify({ model, messages, ...(params || {}) }),
     });
   } catch (e) {
     throw new Error(`AI proxy unreachable: ${e.message}`);
@@ -1075,7 +1078,33 @@ async function sendChat({ messages, character, model, settings }) {
 
   const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + personaNote + nsfwClause + actionClause + plainClause + wardrobeClause + stagingClause + memoryClause;
 
-  return aiComplete({ model, messages: [{ role: "system", content: sysContent }, ...messages] });
+  const reply = await aiComplete({
+    model,
+    messages: [{ role: "system", content: sysContent }, ...messages],
+    // Without these the model occasionally locks into a degenerate loop and
+    // emits one token — usually "!" — dozens of times in a row. Kept modest:
+    // roleplay prose legitimately repeats names, pet names and phrasings, and
+    // heavy penalties make the writing read as strained.
+    params: { frequency_penalty: 0.4, presence_penalty: 0.2, repetition_penalty: 1.05 },
+  });
+  return sanitizeReply(reply);
+}
+
+// Belt and braces for the same loop: sampling penalties make it rarer, but
+// only cleaning the text guarantees it never reaches the transcript, where it
+// would otherwise be fed back as context and encourage more of the same.
+function sanitizeReply(text) {
+  if (typeof text !== "string") return text;
+  return text
+    // "!!!!!!!!!!" / "??????" / mixed runs -> at most three
+    .replace(/([!?])[!?]{3,}/g, "$1$1$1")
+    // ".........." -> a normal ellipsis
+    .replace(/\.{4,}/g, "...")
+    // any other punctuation mark run: one is enough
+    .replace(/([,;:\-—~])\1{2,}/g, "$1")
+    // a single word repeated over and over ("no no no no no no no")
+    .replace(/\b(\w+)(\s+\1\b){4,}/gi, "$1 $1 $1")
+    .trim();
 }
 
 async function generateImageWiro({ prompt, model, initImage, resolution, aspectRatio, outputFormat, seed }) {
