@@ -1044,6 +1044,21 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
   return dataUrl;
 }
 
+// Wardrobe tracking only runs when the recent turns actually talk about
+// clothing. Broad on purpose — a false positive just means one extra model
+// call, while a false negative means a real change is missed.
+const CLOTHING_MENTION_RE = /\b(wear|wears|wearing|wore|worn|dress|dresses|dressed|undress|undressed|undressing|outfit|clothes|clothing|change[sd]? into|changing into|put[s]? on|putting on|take[s]? off|taking off|took off|slip[s]? (?:on|off|out of)|slipped (?:on|off|out of)|pull[s]? (?:on|off)|pulled (?:on|off)|strip|strips|stripped|stripping|button|unbutton|zip|unzip|unzipped|naked|nude|topless|bare|shirt|blouse|top|sweater|jumper|hoodie|jacket|coat|pants|trousers|jeans|shorts|skirt|gown|robe|towel|pyjamas|pajamas|nightie|lingerie|bra|panties|underwear|knickers|boxers|briefs|stockings|tights|socks|shoes|heels|boots|sneakers|trainers|sandals|uniform|swimsuit|bikini|apron|scarf|hat|glasses)\b/i;
+
+// The tracker returns null for "no change". Guard against the small model
+// answering with a placeholder string instead, which would otherwise be
+// written into the wardrobe as if it were a real outfit.
+const NON_UPDATES = new Set(["", "null", "none", "unknown", "unchanged", "n/a", "na", "same", "no change", "-"]);
+function cleanOutfitUpdate(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return NON_UPDATES.has(trimmed.toLowerCase()) ? null : (trimmed || null);
+}
+
 async function buildImagePromptFromContext({ messages, character, model }) {
   const recent = messages.slice(-10).filter(m => m.role !== "image").map(m => `${m.role === "user" ? "User" : character.name}: ${m.content}`).join("\n");
   const appearanceDesc = buildAppearancePrompt(character.appearance);
@@ -2174,6 +2189,13 @@ No other text.` }]
     try {
       const recent = newMessages.filter(m => m.role !== "image").slice(-3)
         .map(m => `${m.role === "user" ? "User" : currentChar.name}: ${m.content}`).join("\n");
+      // Cheap deterministic gate: if nothing in the recent turns even mentions
+      // clothing, skip the model call entirely. The tracker used to run on
+      // every single turn, and a small model asked to echo back the outfit
+      // would quietly paraphrase it ("a white cotton shirt, jeans and
+      // sneakers" -> "white top and blue jeans"), so the wardrobe drifted
+      // even in conversations where nobody touched their clothes.
+      if (!CLOTHING_MENTION_RE.test(recent)) return;
       const raw = await aiComplete({
         model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
         messages: [{ role: "user", content:
@@ -2186,13 +2208,15 @@ Current wardrobe state:
 Recent conversation:
 ${recent}
 
+Your job is to detect CHANGES only. The current state above is already correct.
+
 Instructions:
-- Only update a field if clothing was explicitly mentioned or changed in the conversation
-- If nothing about clothing was mentioned, return the current values unchanged
-- Be specific and concise — e.g. "a white cotton shirt, jeans, and sneakers"
-- If a character undresses or removes items, reflect that accurately
-- Return ONLY valid JSON: {"charOutfit": "...", "userOutfit": "..."}
-- If a field is unknown and nothing was mentioned, use null
+- Return null for a field unless the recent conversation explicitly shows that person putting on, taking off, or changing clothing.
+- null means "no change" — the existing value is kept. This is the correct answer almost every time.
+- Clothing merely being mentioned, described, touched, admired, or referred to is NOT a change. Only an actual change of what is worn is.
+- Never rewrite, reword, shorten or "tidy up" an existing value. If it did not change, return null. Do not echo the current value back.
+- If a change did happen, write the person's complete new outfit, specific and concise — e.g. "a white cotton shirt, jeans, and sneakers". Use "nothing" if they are now fully undressed.
+- Return ONLY valid JSON: {"charOutfit": null, "userOutfit": null}
 No other text.` }]
       });
       const parsed = parseJsonReply(raw);
@@ -2201,8 +2225,8 @@ No other text.` }]
       // everything else (notably sliders, which reactivity may have just moved)
       // untouched. Returning prev unchanged makes commitCharacter a no-op.
       commitCharacter(prev => {
-        const charOutfit = parsed.charOutfit ?? prev.charOutfit ?? null;
-        const userOutfit = parsed.userOutfit ?? prev.userOutfit ?? null;
+        const charOutfit = cleanOutfitUpdate(parsed.charOutfit) ?? prev.charOutfit ?? null;
+        const userOutfit = cleanOutfitUpdate(parsed.userOutfit) ?? prev.userOutfit ?? null;
         if (charOutfit === prev.charOutfit && userOutfit === prev.userOutfit) return prev;
         return { ...prev, charOutfit, userOutfit };
       });
