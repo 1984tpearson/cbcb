@@ -448,12 +448,28 @@ const POV_TORSO_MODIFIER = "the viewer's own chest and legs stretching away belo
 // character's NSFW toggle, same as every other explicit path in the app, so
 // an SFW character never gets this clause regardless of scene wording.
 const POV_INTIMATE_RE = /\b(sex|sexual|fucking|fucks|thrust|thrusting|riding|rides|straddling|straddles|grinding|penetrat\w*|oral|blowjob|going down on|cock|dick|pussy|clit|nipples?|breasts?|tits|cum|climax|orgasm|moaning|naked|nude|undressed|topless|bare[- ]?chested)\b/i;
-const POV_INTIMATE_MODIFIER = "the viewer's own nude body in the immediate foreground below the camera, their bare chest, hips and thighs framing the bottom of the shot, one body and one pair of arms only";
+// Whether the VIEWER is dressed is decided by the tracked userOutfit, never by
+// the scene text: "naked" and "undressed" in a scene prompt are almost always
+// describing the character, and reading them as the viewer's state stripped
+// the user in shots where they were fully clothed.
+const UNDRESSED_VALUES = ["nothing", "nude", "naked", "undressed", "none", "no clothes", "topless"];
+function isUserUndressed(userOutfit) {
+  if (!userOutfit) return false; // unknown is not the same as naked
+  return UNDRESSED_VALUES.includes(String(userOutfit).trim().toLowerCase());
+}
+// Says what the viewer's own body looks like from inside the frame. Clothing
+// wins whenever it is known — a POV shot that crops to a bare chest when the
+// user is in a shirt and jeans is the same error as the spare arms.
+function povSelfBody(userOutfit, bare, clothed) {
+  if (!userOutfit || isUserUndressed(userOutfit)) return bare;
+  return `${clothed}, the viewer wearing ${userOutfit}`;
+}
+const POV_INTIMATE_MODIFIER = "the viewer's own body in the immediate foreground below the camera, framing the bottom of the shot, one body and one pair of arms only";
 function isIntimateScene(sceneText, staging, nsfw) {
   const userPose = (staging && staging.userPose) || "";
   return !!nsfw && POV_INTIMATE_RE.test(`${sceneText || ""} ${userPose}`);
 }
-function buildPovModifiers(sceneText, staging, nsfw) {
+function buildPovModifiers(sceneText, staging, nsfw, userOutfit) {
   const parts = [POV_BASE];
   const scene = sceneText || "";
   const userPose = (staging && staging.userPose) || "";
@@ -467,13 +483,20 @@ function buildPovModifiers(sceneText, staging, nsfw) {
   // replaces the seated/reclined clauses rather than stacking with them and
   // asking for the same body twice.
   if (intimate) {
-    parts.push(POV_INTIMATE_MODIFIER);
+    parts.push(povSelfBody(
+      userOutfit,
+      `${POV_INTIMATE_MODIFIER}, their bare chest, hips and thighs`,
+      `${POV_INTIMATE_MODIFIER}, still dressed`,
+    ));
     return parts.join(", ");
   }
   // Reclined wins over seated — you can be described as both, and lying down
   // is the more specific framing of the two.
-  if (POV_RECLINED_RE.test(userPose)) parts.push(POV_TORSO_MODIFIER);
-  else if (POV_SEATED_RE.test(userPose)) parts.push(POV_LAP_MODIFIER);
+  if (POV_RECLINED_RE.test(userPose)) {
+    parts.push(povSelfBody(userOutfit, POV_TORSO_MODIFIER, POV_TORSO_MODIFIER));
+  } else if (POV_SEATED_RE.test(userPose)) {
+    parts.push(povSelfBody(userOutfit, POV_LAP_MODIFIER, POV_LAP_MODIFIER));
+  }
   return parts.join(", ");
 }
 const DATA_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/data-proxy";
@@ -2756,7 +2779,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // reaches the model when NSFW is on and the scene reads as intimate.
       const explicitDesc = isIntimateScene(customImgPrompt, character.staging, character.nsfw)
         ? (character.explicitDetail || "") : "";
-      const fullPrompt = [buildPovModifiers(customImgPrompt, character.staging, character.nsfw), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, explicitDesc, styleModifiers].filter(Boolean).join(", ");
+      const fullPrompt = [buildPovModifiers(customImgPrompt, character.staging, character.nsfw, character.userOutfit), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, explicitDesc, styleModifiers].filter(Boolean).join(", ");
       const url = await generateImageWiro({
         prompt: fullPrompt,
         model: settings.imageModel,
@@ -2807,7 +2830,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const stagingDesc = buildStagingImageDesc(character.staging);
       const explicitDesc = isIntimateScene(prompt, character.staging, character.nsfw)
         ? (character.explicitDetail || "") : "";
-      const fullImgPrompt = [buildPovModifiers(prompt, character.staging, character.nsfw), charDesc, wardrobeDesc, stagingDesc, prompt, explicitDesc, styleModifiers].filter(Boolean).join(", ");
+      const fullImgPrompt = [buildPovModifiers(prompt, character.staging, character.nsfw, character.userOutfit), charDesc, wardrobeDesc, stagingDesc, prompt, explicitDesc, styleModifiers].filter(Boolean).join(", ");
       const url = await generateImageWiro({
         prompt: fullImgPrompt,
         model: settings.imageModel,
