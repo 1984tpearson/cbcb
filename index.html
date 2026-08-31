@@ -2490,45 +2490,53 @@ No other text.` }]
 
   const applyStaging = async (newMessages, currentChar) => {
     try {
-      // Action beats are the primary signal, but not the only one: moving to
-      // another room is often narrated in prose, and reading beats alone left
-      // location stuck at wherever the scene opened while the poses moved on
-      // to a completely different place.
+      // Staging is a full restatement, not change detection. Wardrobe uses the
+      // "null means no change" contract because clothes rarely change and
+      // drift is the risk; position changes almost every turn, so that
+      // contract made a small model reason about what changed instead of just
+      // reading where people are — and it kept answering "no change" through
+      // an explicit "I sit down beside you on the couch". Describing the
+      // current state outright is a much easier question, and staleness, not
+      // drift, is the failure that actually hurts here.
       const actions = extractActionText(newMessages, currentChar.name);
-      const recentText = newMessages.filter(m => m.role !== "image").slice(-3)
+      const recentText = newMessages.filter(m => m.role !== "image").slice(-4)
         .map(m => `${m.role === "user" ? "User" : currentChar.name}: ${m.content}`).join("\n");
       if (!actions && !MOVEMENT_RE.test(recentText)) return;
       const prevStaging = currentChar.staging || EMPTY_STAGING;
       const raw = await aiComplete({
-        model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
+        // The conversation model, not the small reactivity one. This needs to
+        // follow a scene across several turns, which is exactly what the 8B
+        // model was failing at.
+        model: settings.selectedModel,
         messages: [{ role: "user", content:
-`You are tracking the physical staging (blocking) of a roleplay scene.
+`Read this roleplay conversation and describe where the two people physically are RIGHT NOW, at the end of it.
 
-Current staging:
-- Location: ${prevStaging.location || "unknown"}
-- ${currentChar.name}'s position/pose: ${prevStaging.charPose || "unknown"}
-- User's position/pose: ${prevStaging.userPose || "unknown"}
-- Distance between them: ${prevStaging.proximity || "unknown"}
+${currentChar.name} is the character. The other person is the User.
 
-Recent action beats (what people physically did):
-${actions || "(none)"}
-
-Recent conversation, for context on where they are:
+Conversation:
 ${recentText}
 
-Your job is to detect CHANGES only. The current staging above is already correct.
+Action beats (physical actions, most reliable signal):
+${actions || "(none)"}
 
-Instructions:
-- Return null for a field unless the action beats show it actually changing. null means "no change" — the existing value is kept.
-- Never reword, shorten or tidy up a value that did not change. Return null instead. Do not echo current values back.
-- location: where the scene is, e.g. "a small kitchen at night", "on a bench in a park".
-- charPose: ${currentChar.name}'s body position, as a phrase completing "she is ...", e.g. "sitting on the edge of the bed, leaning forward", "standing at the stove with her back turned".
-- userPose: the User's body position, same phrasing, e.g. "sitting opposite her at the table", "lying on his back".
-- proximity: physical distance, e.g. "an arm's length apart", "pressed close against each other", "across the room".
-- Keep each value under 15 words, concrete and physical. No emotions, no dialogue, no clothing.
-- The four fields must describe ONE coherent scene. If a change makes another field impossible, update that field too, even though it was not itself mentioned: if they move to a new room, location changes; if their poses put them side by side, proximity must agree; if someone stands up and walks away, proximity changes.
-- Check the current staging above against the conversation. If a field contradicts where they plainly are now, correct it rather than returning null — a stale value is worse than a changed one.
-- Return ONLY valid JSON: {"location": null, "charPose": null, "userPose": null, "proximity": null}
+Staging as it was BEFORE these messages — use it only for detail the conversation does not mention, never in place of what the conversation says:
+- Location: ${prevStaging.location || "unknown"}
+- ${currentChar.name}: ${prevStaging.charPose || "unknown"}
+- User: ${prevStaging.userPose || "unknown"}
+- Distance: ${prevStaging.proximity || "unknown"}
+
+Describe the CURRENT state, after everything above has happened:
+- location: where they are now, e.g. "the living room of her house, evening". If someone moved rooms, use the new room.
+- charPose: ${currentChar.name}'s body position now, completing "she is ...", e.g. "sitting on the couch, turned toward him". POSTURE ONLY — sitting, standing, lying, leaning, kneeling, and where. Not gestures, not expressions, not emotions.
+- userPose: the User's body position now, same rules, e.g. "sitting beside her on the couch".
+- proximity: how far apart they are now, e.g. "side by side, almost touching", "a metre apart", "across the room".
+
+Rules:
+- The most recent action wins. If someone sat down, they are sitting, even if they were standing a moment ago.
+- All four must describe one coherent scene: two people sitting together on a couch are not a metre apart.
+- Under 15 words each, concrete and physical.
+- Use null ONLY if nothing in the conversation or previous staging supports a value.
+Return ONLY valid JSON: {"location": "...", "charPose": "...", "userPose": "...", "proximity": "..."}
 No other text.` }]
       });
       const parsed = parseJsonReply(raw);
