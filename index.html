@@ -1098,25 +1098,49 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
   // flow required), so this just passes the character's stored image URL.
   if (initImage) body.inputImage = initImage;
 
-  // No automatic retry here. Wiro is submit-then-poll: a 504 from the proxy
-  // means the proxy stopped waiting, NOT that the task stopped — Wiro goes on
-  // to finish and bill the generation. Retrying submits a second task and pays
-  // for the same image twice while still showing an error. The fix belongs in
-  // the proxy, which should hand back the task id instead of holding the
-  // connection open.
-  const r = await fetch(IMAGE_PROXY_URL, {
+  // Two-step: submit, then poll from here. The proxy used to block while
+  // polling Wiro itself, but it has a wall-clock limit — so any generation
+  // slower than its budget came back 504 while Wiro finished and billed the
+  // image anyway, and the result was simply lost. The browser has no such
+  // limit, so the waiting belongs here.
+  const submitRes = await fetch(IMAGE_PROXY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, action: "submit" }),
   });
-
-  if (!r.ok) {
-    const err = await r.text().catch(() => "");
-    const hint = r.status === 504
-      ? " — the image was probably generated; the proxy stopped waiting before it came back."
-      : "";
-    throw new Error(`Wiro error: ${r.status} ${err}${hint}`);
+  if (!submitRes.ok) {
+    const err = await submitRes.text().catch(() => "");
+    throw new Error(`Wiro error: ${submitRes.status} ${err}`);
   }
+  const { taskId } = await submitRes.json();
+  if (!taskId) throw new Error("Wiro error: no task id returned");
+
+  // Generations are usually single-digit seconds; this allows five minutes
+  // before giving up, which costs nothing but a few extra polls.
+  const POLL_INTERVAL_MS = 2000;
+  const MAX_POLLS = 150;
+  let r = null;
+  for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
+    await new Promise(res => setTimeout(res, POLL_INTERVAL_MS));
+    let statusRes;
+    try {
+      statusRes = await fetch(IMAGE_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "status", taskId, outputFormat: body.outputFormat }),
+      });
+    } catch {
+      continue; // transient network blip — the task is still running
+    }
+    if (statusRes.status === 202) continue; // still generating
+    if (!statusRes.ok) {
+      const err = await statusRes.text().catch(() => "");
+      throw new Error(`Wiro error: ${statusRes.status} ${err}`);
+    }
+    r = statusRes;
+    break;
+  }
+  if (!r) throw new Error(`Wiro error: generation did not finish in time (task ${taskId})`);
 
   const blob = await r.blob();
   const dataUrl = await new Promise((resolve, reject) => {
