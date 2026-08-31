@@ -421,10 +421,20 @@ const POV_BASE = "POV, first person perspective, seen through the viewer's own e
 // instead: limb words in the scene text are ambiguous about whose limb it is
 // ("her legs crossed" must not put the viewer's legs in the foreground),
 // while the staging tracker knows who is sitting or lying down.
-const POV_CONTACT_RE = /\b(hand|hands|arm|arms|wrist|finger|fingers|palm|touch|touches|touching|hold|holds|holding|grip|gripping|grab|grabbing|grasp|grasping|reach|reaches|reaching|stroke|stroking|caress|caressing|push|pushing|pull|pulling|lift|lifting|handing|passing|offering|cup|cupping)\b/i;
+// Split deliberately. The old single regex matched limb nouns AND contact
+// verbs, so a scene that already said "a hand on her shoulder" triggered a
+// second, independent request for a hand entering the frame — the model was
+// told about two arms and duly drew two, usually with the spare pair coming
+// in at the top of the image.
+const POV_CONTACT_VERB_RE = /\b(touch|touches|touching|hold|holds|holding|grip|gripping|grab|grabbing|grasp|grasping|reach|reaches|reaching|stroke|stroking|caress|caressing|push|pushing|pull|pulling|lift|lifting|handing|passing|offering|cup|cupping)\b/i;
+const POV_LIMB_NOUN_RE = /\b(hand|hands|forearm|forearms|arm|arms|wrist|wrists|finger|fingers|palm|palms|thumb)\b/i;
 const POV_SEATED_RE = /\b(sitting|seated|sat|sits|perched|kneeling|knelt|crouching|squatting|straddling|straddled)\b/i;
 const POV_RECLINED_RE = /\b(lying|laying|lain|lies|reclining|reclined|sprawled|on his back|on her back|on my back|in bed|propped up)\b/i;
 const POV_ARMS_MODIFIER = "the viewer's own hand and forearm visible in the foreground entering the frame from the camera";
+// When the scene already names the limb, claim it rather than adding another:
+// this tells the model whose arms those are and that there is only one pair,
+// instead of introducing a second pair alongside them.
+const POV_ARMS_OWNED_MODIFIER = "the hand and arm in the foreground belong to the viewer, a single pair of arms entering the frame from the camera, no other arms";
 const POV_LAP_MODIFIER = "the viewer's own thighs and knees visible in the lower foreground, seen looking down from their own seated position";
 const POV_TORSO_MODIFIER = "the viewer's own chest and legs stretching away below the camera in the lower foreground";
 // In an intimate scene the viewer's own body is part of the shot, and framing
@@ -433,7 +443,7 @@ const POV_TORSO_MODIFIER = "the viewer's own chest and legs stretching away belo
 // character's NSFW toggle, same as every other explicit path in the app, so
 // an SFW character never gets this clause regardless of scene wording.
 const POV_INTIMATE_RE = /\b(sex|sexual|fucking|fucks|thrust|thrusting|riding|rides|straddling|straddles|grinding|penetrat\w*|oral|blowjob|going down on|cock|dick|pussy|clit|nipples?|breasts?|tits|cum|climax|orgasm|moaning|naked|nude|undressed|topless|bare[- ]?chested)\b/i;
-const POV_INTIMATE_MODIFIER = "the viewer's own nude body in the immediate foreground below the camera, their bare chest, hips and thighs framing the bottom of the shot";
+const POV_INTIMATE_MODIFIER = "the viewer's own nude body in the immediate foreground below the camera, their bare chest, hips and thighs framing the bottom of the shot, one body and one pair of arms only";
 function isIntimateScene(sceneText, staging, nsfw) {
   const userPose = (staging && staging.userPose) || "";
   return !!nsfw && POV_INTIMATE_RE.test(`${sceneText || ""} ${userPose}`);
@@ -443,7 +453,8 @@ function buildPovModifiers(sceneText, staging, nsfw) {
   const scene = sceneText || "";
   const userPose = (staging && staging.userPose) || "";
   const intimate = isIntimateScene(scene, staging, nsfw);
-  if (POV_CONTACT_RE.test(scene)) parts.push(POV_ARMS_MODIFIER);
+  if (POV_LIMB_NOUN_RE.test(scene)) parts.push(POV_ARMS_OWNED_MODIFIER);
+  else if (POV_CONTACT_VERB_RE.test(scene)) parts.push(POV_ARMS_MODIFIER);
   // The intimate framing already covers the viewer's torso and legs, so it
   // replaces the seated/reclined clauses rather than stacking with them and
   // asking for the same body twice.
@@ -1047,7 +1058,7 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
   // each call site so every generation gets it. Addresses a caricature-like
   // failure mode (tiny torso, stretched limbs) seen on extreme appearance
   // slider combinations.
-  const guardedPrompt = `${prompt}, natural realistic human body proportions, anatomically correct, not exaggerated, not stylized, not caricature`;
+  const guardedPrompt = `${prompt}, natural realistic human body proportions, anatomically correct, exactly two arms and two hands per person, no duplicated or extra limbs, not exaggerated, not stylized, not caricature`;
 
   const body = {
     prompt: guardedPrompt,
