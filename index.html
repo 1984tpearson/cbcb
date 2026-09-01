@@ -1638,16 +1638,14 @@ apparent sex and build rather than leaving it out.`;
     }],
   })).trim();
 
-  // Same two-step recovery as autoGenerateCharacter — models wrap JSON in
-  // fences or prose often enough that a bare JSON.parse is not enough.
-  let parsed = null;
-  try {
-    parsed = JSON.parse(raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim());
-  } catch {
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (match) { try { parsed = JSON.parse(match[0]); } catch {} }
+  // parseJsonReply already handles fences and JSON buried in prose.
+  const parsed = parseJsonReply(raw);
+  if (!parsed) {
+    // The reply itself is the diagnosis — a refusal reads very differently
+    // from truncated JSON — so carry it rather than reporting "failed".
+    console.error("Appearance read returned unparseable reply:", raw);
+    throw new Error(`model replied: ${raw.slice(0, 140)}`);
   }
-  if (!parsed) throw new Error("Could not read appearance from that image.");
 
   const age = Math.round(Number(parsed.age));
   return {
