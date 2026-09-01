@@ -613,14 +613,28 @@ const storage = {
 // Per-trait phrase for a given slider value — shared by the prompt builder
 // below and the live preview text under each slider, so they can never drift
 // out of sync with each other.
+// The height slider is stored 0-100 like every other appearance slider —
+// saved characters already hold values on that scale — but is shown and
+// described in centimetres. HEIGHT_CM_MIN/MAX bracket adult height; the
+// mapping is linear, so each slider step is half a centimetre.
+const HEIGHT_CM_MIN = 145;
+const HEIGHT_CM_MAX = 195;
+const sliderToCm = (value) => Math.round(HEIGHT_CM_MIN + ((value ?? 50) / 100) * (HEIGHT_CM_MAX - HEIGHT_CM_MIN));
+const cmToSlider = (cm) => Math.min(100, Math.max(0, Math.round(((cm - HEIGHT_CM_MIN) / (HEIGHT_CM_MAX - HEIGHT_CM_MIN)) * 100)));
+
 function appearancePhrasePreview(key, value) {
   switch (key) {
-    case "height":
-      if (value <= 25) return "short stature";
-      if (value <= 45) return "petite frame";
-      if (value >= 75) return "tall";
-      if (value >= 55) return "above average height";
-      return "average height";
+    case "height": {
+      // Both the measurement and a descriptive phrase: image models read
+      // "tall" far more reliably than they read a number, but the number is
+      // what the user actually set.
+      const cm = sliderToCm(value);
+      if (value <= 25) return `${cm} cm, short stature`;
+      if (value <= 45) return `${cm} cm, petite frame`;
+      if (value >= 75) return `${cm} cm, tall`;
+      if (value >= 55) return `${cm} cm, above average height`;
+      return `${cm} cm, average height`;
+    }
     case "build":
       if (value <= 20) return "slim build";
       if (value <= 40) return "slender build";
@@ -690,9 +704,11 @@ function buildAppearancePrompt(appearance) {
   // modifiers — that combination is what was pushing generations toward
   // caricature proportions (tiny torso, stretched limbs) rather than a
   // proportionally short, slim figure.
+  const heightCm = `${sliderToCm(h)} cm tall`;
   if (h <= 25 && b <= 20) {
-    parts.push("short, slender frame");
+    parts.push(`${heightCm}, short, slender frame`);
   } else {
+    parts.push(heightCm);
     if (h <= 25) parts.push("short stature");
     else if (h <= 45) parts.push("petite frame");
     else if (h >= 75) parts.push("tall");
@@ -1387,7 +1403,7 @@ const DEFAULT_APPEARANCE = {
 };
 
 const APPEARANCE_SLIDER_DEFS = [
-  { key: "height",  label: "Height", left: "Petite",   right: "Tall" },
+  { key: "height",  label: "Height", left: `${HEIGHT_CM_MIN} cm`, right: `${HEIGHT_CM_MAX} cm`, displayFn: v => `${sliderToCm(v)} cm` },
   { key: "build",   label: "Build",  left: "Slim",     right: "Stocky" },
   { key: "chest",   label: "Breasts",  left: "A cup",  right: "DD cup" },
   { key: "waist",   label: "Waist",  left: "Narrow",   right: "Full" },
@@ -1535,6 +1551,15 @@ function matchOption(value, options) {
     || null;
 }
 
+// The model answers in centimetres (a real-world quantity it can actually
+// judge) while the slider stores 0-100, so this converts. A model that
+// answered on the old 0-100 scale anyway is still honoured.
+const heightFromVision = (parsed, fallback) => {
+  const cm = Number(parsed.heightCm);
+  if (Number.isFinite(cm) && cm >= 120 && cm <= 220) return cmToSlider(cm);
+  return clampSlider(parsed.height, fallback);
+};
+
 const clampSlider = (value, fallback) => {
   const n = Math.round(Number(value));
   return Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : fallback;
@@ -1562,7 +1587,7 @@ function appearanceFromVision(parsed, current) {
     skinToneCustom: skin ? "" : base.skinToneCustom,
     ethnicity: ethnicity || base.ethnicity,
     ethnicityCustom: ethnicity ? "" : base.ethnicityCustom,
-    height: clampSlider(parsed.height, base.height),
+    height: heightFromVision(parsed, base.height),
     build: clampSlider(parsed.build, base.build),
     chest: clampSlider(parsed.chest, base.chest),
     waist: clampSlider(parsed.waist, base.waist),
@@ -1584,7 +1609,7 @@ Return ONLY valid JSON with these exact fields, no markdown and no commentary:
   "eyeColour": one of [${list(EYE_COLOURS)}],
   "skinTone": one of [${list(SKIN_TONES)}],
   "ethnicity": one of [${list(ETHNICITIES)}],
-  "height": 0-100 (0 = very short, 50 = average, 100 = very tall),
+  "heightCm": estimated height in centimetres as a number (${HEIGHT_CM_MIN}-${HEIGHT_CM_MAX}),
   "build": 0-100 (0 = very slim, 50 = athletic, 100 = stocky),
   "chest": 0-100 (0 = A cup, 50 = C cup, 100 = DD cup),
   "waist": 0-100 (0 = very narrow, 50 = average, 100 = full),
@@ -1595,7 +1620,9 @@ Return ONLY valid JSON with these exact fields, no markdown and no commentary:
 Pick the closest option from each list even if none is exact — use "Coloured"
 for dyed or unnatural hair colours. For the 0-100
 fields, judge relative to an average adult and use 50 when the photo does not
-show enough to tell (a head-and-shoulders shot rarely shows build or hips).`;
+show enough to tell (a head-and-shoulders shot rarely shows build or hips).
+If height cannot be judged from the photo, estimate from the person's
+apparent sex and build rather than leaving it out.`;
 
   // Multimodal message shape: content is an array of parts rather than a
   // string. Data URLs are valid here, so this works on the raw FileReader
@@ -1735,7 +1762,7 @@ function SliderRow({ def, value, onChange }) {
     <div style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
         <span style={S.label}>{def.label}</span>
-        <span style={{ fontSize: 11, color: "#7a7268" }}>{value}</span>
+        <span style={{ fontSize: 11, color: "#7a7268" }}>{def.displayFn ? def.displayFn(value) : value}</span>
       </div>
       <input type="range" min={0} max={100} value={value} onChange={e => onChange(Number(e.target.value))} />
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
