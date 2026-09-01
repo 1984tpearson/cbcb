@@ -613,14 +613,28 @@ const storage = {
 // Per-trait phrase for a given slider value — shared by the prompt builder
 // below and the live preview text under each slider, so they can never drift
 // out of sync with each other.
+// The height slider is stored 0-100 like every other appearance slider —
+// saved characters already hold values on that scale — but is shown and
+// described in centimetres. HEIGHT_CM_MIN/MAX bracket adult height; the
+// mapping is linear, so each slider step is half a centimetre.
+const HEIGHT_CM_MIN = 145;
+const HEIGHT_CM_MAX = 195;
+const sliderToCm = (value) => Math.round(HEIGHT_CM_MIN + ((value ?? 50) / 100) * (HEIGHT_CM_MAX - HEIGHT_CM_MIN));
+const cmToSlider = (cm) => Math.min(100, Math.max(0, Math.round(((cm - HEIGHT_CM_MIN) / (HEIGHT_CM_MAX - HEIGHT_CM_MIN)) * 100)));
+
 function appearancePhrasePreview(key, value) {
   switch (key) {
-    case "height":
-      if (value <= 25) return "short stature";
-      if (value <= 45) return "petite frame";
-      if (value >= 75) return "tall";
-      if (value >= 55) return "above average height";
-      return "average height";
+    case "height": {
+      // Both the measurement and a descriptive phrase: image models read
+      // "tall" far more reliably than they read a number, but the number is
+      // what the user actually set.
+      const cm = sliderToCm(value);
+      if (value <= 25) return `${cm} cm, short stature`;
+      if (value <= 45) return `${cm} cm, petite frame`;
+      if (value >= 75) return `${cm} cm, tall`;
+      if (value >= 55) return `${cm} cm, above average height`;
+      return `${cm} cm, average height`;
+    }
     case "build":
       if (value <= 20) return "slim build";
       if (value <= 40) return "slender build";
@@ -690,9 +704,11 @@ function buildAppearancePrompt(appearance) {
   // modifiers — that combination is what was pushing generations toward
   // caricature proportions (tiny torso, stretched limbs) rather than a
   // proportionally short, slim figure.
+  const heightCm = `${sliderToCm(h)} cm tall`;
   if (h <= 25 && b <= 20) {
-    parts.push("short, slender frame");
+    parts.push(`${heightCm}, short, slender frame`);
   } else {
+    parts.push(heightCm);
     if (h <= 25) parts.push("short stature");
     else if (h <= 45) parts.push("petite frame");
     else if (h >= 75) parts.push("tall");
@@ -1387,7 +1403,7 @@ const DEFAULT_APPEARANCE = {
 };
 
 const APPEARANCE_SLIDER_DEFS = [
-  { key: "height",  label: "Height", left: "Petite",   right: "Tall" },
+  { key: "height",  label: "Height", left: `${HEIGHT_CM_MIN} cm`, right: `${HEIGHT_CM_MAX} cm`, displayFn: v => `${sliderToCm(v)} cm` },
   { key: "build",   label: "Build",  left: "Slim",     right: "Stocky" },
   { key: "chest",   label: "Breasts",  left: "A cup",  right: "DD cup" },
   { key: "waist",   label: "Waist",  left: "Narrow",   right: "Full" },
@@ -1503,6 +1519,143 @@ async function autoGenerateCharacter({ vibe, model, constraints = {} }) {
   };
 }
 
+// ─── APPEARANCE FROM AN UPLOADED IMAGE ───────────────────────────────────────
+// An uploaded reference image and the appearance sliders are two descriptions
+// of the same person, and nothing kept them in agreement: the sliders sat at
+// their defaults while the photo showed someone else entirely, and BOTH reach
+// the image model on every chat generation (the photo as inputImage, the
+// sliders as prompt text). Contradictory input is worse than either alone —
+// it drifts the face away from the upload. So the upload now sets the sliders
+// to match, and the two stop fighting.
+//
+// Pinned rather than using settings.selectedModel: most of OPENROUTER_MODELS
+// are text-only and would either error or invent an answer from nothing.
+const VISION_MODEL = "mistralai/mistral-small-3.1-24b-instruct";
+
+// Snap a model's free-text answer onto one of our option lists. Exact match
+// first, then a loose contains-match, since the model will happily return
+// "dark blonde" or "light brown skin" for lists that have neither.
+function matchOption(value, options) {
+  if (!value || typeof value !== "string") return null;
+  const v = value.trim().toLowerCase();
+  if (!v) return null;
+  const exact = options.find(o => o.toLowerCase() === v);
+  if (exact) return exact;
+  // Longest option first so "Dark brown" wins over "Brown" for "dark brown".
+  const sorted = [...options].sort((a, b) => b.length - a.length);
+  // Options contained in the answer are tried before options that merely
+  // contain it — otherwise "light brown" matches "Dark brown" (which does
+  // contain "brown") ahead of plain "Brown".
+  return sorted.find(o => v.includes(o.toLowerCase()))
+    || sorted.find(o => o.toLowerCase().includes(v))
+    || null;
+}
+
+// The model answers in centimetres (a real-world quantity it can actually
+// judge) while the slider stores 0-100, so this converts. A model that
+// answered on the old 0-100 scale anyway is still honoured.
+const heightFromVision = (parsed, fallback) => {
+  const cm = Number(parsed.heightCm);
+  if (Number.isFinite(cm) && cm >= 120 && cm <= 220) return cmToSlider(cm);
+  return clampSlider(parsed.height, fallback);
+};
+
+const clampSlider = (value, fallback) => {
+  const n = Math.round(Number(value));
+  return Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : fallback;
+};
+
+// Coerce whatever the model returned into a valid appearance object. Anything
+// unrecognised falls back to the current value rather than a default, so a
+// partial answer never wipes settings the user already chose.
+function appearanceFromVision(parsed, current) {
+  const base = { ...DEFAULT_APPEARANCE, ...(current || {}) };
+  if (!parsed || typeof parsed !== "object") return base;
+
+  const hair = matchOption(parsed.hairColour, HAIR_COLOURS.filter(c => c !== "Custom"));
+  const eyes = matchOption(parsed.eyeColour, EYE_COLOURS.filter(c => c !== "Custom"));
+  const skin = matchOption(parsed.skinTone, SKIN_TONES.filter(c => c !== "Custom"));
+  const ethnicity = matchOption(parsed.ethnicity, ETHNICITIES.filter(e => e !== "Custom"));
+
+  return {
+    ...base,
+    hairColour: hair || base.hairColour,
+    hairColourCustom: hair ? "" : base.hairColourCustom,
+    eyeColour: eyes || base.eyeColour,
+    eyeColourCustom: eyes ? "" : base.eyeColourCustom,
+    skinTone: skin || base.skinTone,
+    skinToneCustom: skin ? "" : base.skinToneCustom,
+    ethnicity: ethnicity || base.ethnicity,
+    ethnicityCustom: ethnicity ? "" : base.ethnicityCustom,
+    height: heightFromVision(parsed, base.height),
+    build: clampSlider(parsed.build, base.build),
+    chest: clampSlider(parsed.chest, base.chest),
+    waist: clampSlider(parsed.waist, base.waist),
+    hips: clampSlider(parsed.hips, base.hips),
+  };
+}
+
+// Reads an uploaded image and returns appearance settings matching it.
+// Also returns an estimated age, which the caller offers as a suggestion
+// rather than applying — age from a photo is a guess, and the user's own
+// number should win.
+async function analyseAppearanceFromImage({ imageUrl, current }) {
+  const list = arr => arr.filter(o => o !== "Custom").map(o => `"${o}"`).join(", ");
+  const instruction = `Look at this photograph of a person and describe their physical appearance.
+
+Return ONLY valid JSON with these exact fields, no markdown and no commentary:
+{
+  "hairColour": one of [${list(HAIR_COLOURS)}],
+  "eyeColour": one of [${list(EYE_COLOURS)}],
+  "skinTone": one of [${list(SKIN_TONES)}],
+  "ethnicity": one of [${list(ETHNICITIES)}],
+  "heightCm": estimated height in centimetres as a number (${HEIGHT_CM_MIN}-${HEIGHT_CM_MAX}),
+  "build": 0-100 (0 = very slim, 50 = athletic, 100 = stocky),
+  "chest": 0-100 (0 = A cup, 50 = C cup, 100 = DD cup),
+  "waist": 0-100 (0 = very narrow, 50 = average, 100 = full),
+  "hips": 0-100 (0 = very narrow, 50 = average, 100 = wide),
+  "age": estimated age in years as a number
+}
+
+Pick the closest option from each list even if none is exact — use "Coloured"
+for dyed or unnatural hair colours. For the 0-100
+fields, judge relative to an average adult and use 50 when the photo does not
+show enough to tell (a head-and-shoulders shot rarely shows build or hips).
+If height cannot be judged from the photo, estimate from the person's
+apparent sex and build rather than leaving it out.`;
+
+  // Multimodal message shape: content is an array of parts rather than a
+  // string. Data URLs are valid here, so this works on the raw FileReader
+  // result without waiting for the Storage upload to finish.
+  const raw = (await aiComplete({
+    model: VISION_MODEL,
+    messages: [{
+      role: "user",
+      content: [
+        { type: "text", text: instruction },
+        { type: "image_url", image_url: { url: imageUrl } },
+      ],
+    }],
+  })).trim();
+
+  // Same two-step recovery as autoGenerateCharacter — models wrap JSON in
+  // fences or prose often enough that a bare JSON.parse is not enough.
+  let parsed = null;
+  try {
+    parsed = JSON.parse(raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim());
+  } catch {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) { try { parsed = JSON.parse(match[0]); } catch {} }
+  }
+  if (!parsed) throw new Error("Could not read appearance from that image.");
+
+  const age = Math.round(Number(parsed.age));
+  return {
+    appearance: appearanceFromVision(parsed, current),
+    age: Number.isFinite(age) && age >= 18 && age <= 100 ? age : null,
+  };
+}
+
 async function generateOpeningScenarios({ character, model, settings, exclude = [] }) {
   const addendum = buildPersonalityAddendum(character.sliders || DEFAULT_SLIDERS, character.gender || "Female", character.customGender || "", character.age || "", character.maritalStatus || "", character.relationship || "", character.relationshipCustom || "");
   const personaNote = buildUserPersonaNote(resolveUserPersona(character, settings || {}));
@@ -1609,7 +1762,7 @@ function SliderRow({ def, value, onChange }) {
     <div style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
         <span style={S.label}>{def.label}</span>
-        <span style={{ fontSize: 11, color: "#7a7268" }}>{value}</span>
+        <span style={{ fontSize: 11, color: "#7a7268" }}>{def.displayFn ? def.displayFn(value) : value}</span>
       </div>
       <input type="range" min={0} max={100} value={value} onChange={e => onChange(Number(e.target.value))} />
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
@@ -2007,6 +2160,9 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const [error, setError] = useState("");
   const [showSliders, setShowSliders] = useState(false);
   const [showAppearance, setShowAppearance] = useState(false);
+  const [analysing, setAnalysing] = useState(false);
+  const [appearanceNote, setAppearanceNote] = useState("");
+  const [suggestedAge, setSuggestedAge] = useState(null);
   const [generatedImages, setGeneratedImages] = useState(form.referenceImage ? [form.referenceImage] : []);
   const fileRef = useRef();
 
@@ -2040,8 +2196,47 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    e.target.value = ""; // so re-picking the same file fires onChange again
     const reader = new FileReader();
-    reader.onload = ev => setForm(f => ({ ...f, referenceImage: ev.target.result, backgroundImage: ev.target.result }));
+    reader.onload = async ev => {
+      const dataUrl = ev.target.result;
+      // Show it immediately — the upload and the appearance read both take a
+      // few seconds, and neither should hold up the preview.
+      setForm(f => ({ ...f, referenceImage: dataUrl, backgroundImage: dataUrl }));
+      setError("");
+      setAppearanceNote("");
+      setAnalysing(true);
+
+      // Persist to Storage and keep the https URL instead of the data URL.
+      // The data URL was being stored on the character and passed to Wiro as
+      // inputImage, which expects a URL it can fetch — so an uploaded
+      // reference never actually anchored anything. Generated images already
+      // go through this path (see generateImageWiro).
+      try {
+        const uploadRes = await fetch(UPLOAD_IMAGE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dataUrl, token: ACCESS_TOKEN, filename: `upload_${Date.now()}_${Math.random().toString(36).slice(2)}` }),
+        });
+        if (uploadRes.ok) {
+          const { url } = await uploadRes.json();
+          if (url) setForm(f => (f.referenceImage === dataUrl ? { ...f, referenceImage: url, backgroundImage: f.backgroundImage === dataUrl ? url : f.backgroundImage } : f));
+        }
+      } catch {} // the data URL still renders locally; only Wiro needs the real one
+
+      // Match the sliders to the photo. Failure here is not fatal — the
+      // image is already set, the settings just stay as they were.
+      try {
+        const { appearance, age } = await analyseAppearanceFromImage({ imageUrl: dataUrl, current: form.appearance });
+        setForm(f => ({ ...f, appearance }));
+        setSuggestedAge(age && !form.age ? age : null);
+        setAppearanceNote("Appearance settings matched to your image — check them below and adjust anything that looks off.");
+        setShowAppearance(true);
+      } catch (err) {
+        setAppearanceNote("Couldn't read appearance from that image — set the appearance settings manually so they don't fight the photo.");
+      }
+      setAnalysing(false);
+    };
     reader.readAsDataURL(file);
   };
 
@@ -2202,9 +2397,19 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
             <img src={form.referenceImage} alt="ref" style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 8, marginBottom: 8, background: "var(--bg3)" }} />
           )}
           <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <button style={S.btnSecondary} onClick={() => fileRef.current.click()}>Upload Image</button>
+            <button style={S.btnSecondary} onClick={() => fileRef.current.click()} disabled={analysing}>{analysing ? "Reading image…" : "Upload Image"}</button>
             <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileUpload} />
           </div>
+          {appearanceNote && (
+            <p style={{ fontSize: 12, color: "var(--text4)", margin: "0 0 8px" }}>{appearanceNote}</p>
+          )}
+          {suggestedAge && (
+            <p style={{ fontSize: 12, color: "var(--text4)", margin: "0 0 8px" }}>
+              Looks around {suggestedAge} years old.{" "}
+              <button style={{ ...S.btnSecondary, padding: "2px 8px", fontSize: 12 }}
+                onClick={() => { setForm(f => ({ ...f, age: String(suggestedAge) })); setSuggestedAge(null); }}>Use this age</button>
+            </p>
+          )}
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input style={{ ...S.input, flex: 1, marginBottom: 0 }} placeholder="Optional — leave blank to use appearance settings"
               value={imgPrompt} onChange={e => setImgPrompt(e.target.value)} />
