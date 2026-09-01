@@ -1595,6 +1595,22 @@ function appearanceFromVision(parsed, current) {
   };
 }
 
+// Last resort for a reply that stopped mid-JSON: take the fields that did
+// arrive. appearanceFromVision falls back to the current value for anything
+// missing, so a partial answer is still worth more than none.
+function salvagePartialAppearance(raw) {
+  const out = {};
+  for (const key of ["hairColour", "eyeColour", "skinTone", "ethnicity"]) {
+    const m = raw.match(new RegExp(`"${key}"\\s*:\\s*"([^"]+)"`));
+    if (m) out[key] = m[1];
+  }
+  for (const key of ["heightCm", "height", "build", "chest", "waist", "hips", "age"]) {
+    const m = raw.match(new RegExp(`"${key}"\\s*:\\s*(\\d+)`));
+    if (m) out[key] = Number(m[1]);
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 // Reads an uploaded image and returns appearance settings matching it.
 // Also returns an estimated age, which the caller offers as a suggestion
 // rather than applying — age from a photo is a guess, and the user's own
@@ -1629,6 +1645,10 @@ apparent sex and build rather than leaving it out.`;
   // result without waiting for the Storage upload to finish.
   const raw = (await aiComplete({
     model: VISION_MODEL,
+    // The proxy's default output cap is short enough to cut this reply off
+    // mid-JSON — ten fields of it did not fit. Nothing else here asks for a
+    // long structured answer, so nothing else had hit it.
+    params: { max_tokens: 400 },
     messages: [{
       role: "user",
       content: [
@@ -1639,7 +1659,7 @@ apparent sex and build rather than leaving it out.`;
   })).trim();
 
   // parseJsonReply already handles fences and JSON buried in prose.
-  const parsed = parseJsonReply(raw);
+  const parsed = parseJsonReply(raw) || salvagePartialAppearance(raw);
   if (!parsed) {
     // The reply itself is the diagnosis — a refusal reads very differently
     // from truncated JSON — so carry it rather than reporting "failed".
