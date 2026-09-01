@@ -2233,7 +2233,11 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
         setAppearanceNote("Appearance settings matched to your image — check them below and adjust anything that looks off.");
         setShowAppearance(true);
       } catch (err) {
-        setAppearanceNote("Couldn't read appearance from that image — set the appearance settings manually so they don't fight the photo.");
+        // Surface the proxy's own words rather than a generic failure: the
+        // difference between a rejected model name and a rejected message
+        // shape is the whole diagnosis, and it is only in this message.
+        console.error("Appearance read failed:", err);
+        setAppearanceNote(`Couldn't read appearance from that image (${err.message}) — set the appearance settings manually so they don't fight the photo.`);
       }
       setAnalysing(false);
     };
