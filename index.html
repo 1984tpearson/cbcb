@@ -320,6 +320,8 @@ const DEFAULT_SLIDERS = {
   neediness: 30,
   confidence: 55,
   coyness: 20,
+  honesty: 80,
+  gullibility: 40,
   // Reactive relationship sliders
   familiarity: 10,
   likesUser: 50,
@@ -373,6 +375,8 @@ const SLIDER_DEFS = [
   { key: "neediness",   label: "Neediness",  left: "Independent", right: "Clingy",            section: "Behaviour" },
   { key: "confidence", label: "Confidence", left: "Vulnerable / Insecure", right: "Confident / Secure", section: "Behaviour" },
   { key: "coyness", label: "Coyness", left: "Direct", right: "Plays Innocent", section: "Behaviour" },
+  { key: "honesty", label: "Honesty", left: "Manipulative", right: "Completely Honest", section: "Behaviour" },
+  { key: "gullibility", label: "Gullibility", left: "Believes Anything", right: "Highly Suspicious", section: "Behaviour" },
   // Reactive relationship sliders
   { key: "familiarity",      label: "Familiarity",        left: "Complete Stranger", right: "Knows User Deeply", section: "Relationship", reactive: true },
   { key: "likesUser",        label: "Likes User",         left: "Dislikes",       right: "Loves",          section: "Relationship", reactive: true },
@@ -872,6 +876,18 @@ function personalitySliderPreview(key, value) {
       if (v <= 60) return "stages 'accidents' occasionally";
       if (v <= 80) return "frequent innocent acts";
       return "constant plausible deniability";
+    case "honesty":
+      if (v <= 20) return "manipulative — will lie to get what they want";
+      if (v <= 40) return "bends the truth when it suits them";
+      if (v <= 60) return "mostly honest, spins things a little";
+      if (v <= 80) return "honest, softens hard truths";
+      return "completely honest";
+    case "gullibility":
+      if (v <= 20) return "believes anything";
+      if (v <= 40) return "trusting, rarely questions";
+      if (v <= 60) return "takes things at face value, notices the obvious";
+      if (v <= 80) return "cautious, asks questions";
+      return "highly suspicious";
     case "familiarity":
       if (v <= 15) return "complete stranger";
       if (v <= 35) return "still getting acquainted";
@@ -906,9 +922,12 @@ function personalitySliderPreview(key, value) {
   }
 }
 
-function buildPersonalityAddendum(sliders, gender, customGender, age, maritalStatus, relationship, relationshipCustom) {
+function buildPersonalityAddendum(sliders, gender, customGender, age, maritalStatus, relationship, relationshipCustom, disabledSliders) {
   const s = sliders;
   const lines = [];
+  // Sliders the user has switched off contribute nothing to the prompt.
+  const off = new Set(disabledSliders || []);
+  const push = (key, text) => { if (!off.has(key)) lines.push(text); };
 
   const genderStr = gender === "Custom" ? (customGender || "unspecified") : gender;
   lines.push(`Your gender identity is: ${genderStr}.`);
@@ -924,156 +943,170 @@ function buildPersonalityAddendum(sliders, gender, customGender, age, maritalSta
   const likes = s.likesUser ?? 50;
   const attraction = s.attractionToUser ?? 50;
 
-  if (fam <= 15) lines.push("You barely know the user — treat them as a complete stranger.");
-  else if (fam <= 35) lines.push("You know the user only a little — you're still getting acquainted.");
-  else if (fam <= 60) lines.push("You know the user reasonably well at this point.");
-  else if (fam <= 80) lines.push("You know the user quite well and feel comfortable with them.");
-  else lines.push("You know the user deeply — their habits, quirks, and what makes them tick.");
+  if (fam <= 15) push("familiarity", "You barely know the user — treat them as a complete stranger.");
+  else if (fam <= 35) push("familiarity", "You know the user only a little — you're still getting acquainted.");
+  else if (fam <= 60) push("familiarity", "You know the user reasonably well at this point.");
+  else if (fam <= 80) push("familiarity", "You know the user quite well and feel comfortable with them.");
+  else push("familiarity", "You know the user deeply — their habits, quirks, and what makes them tick.");
 
-  if (likes <= 20) lines.push("You actively dislike the user and are guarded or cold toward them.");
-  else if (likes <= 40) lines.push("You're not particularly fond of the user — you're polite but distant.");
-  else if (likes <= 60) lines.push("You feel neutral to mildly positive toward the user.");
-  else if (likes <= 80) lines.push("You genuinely like the user and enjoy their company.");
-  else lines.push("You have deep, strong feelings for the user — bordering on love.");
+  if (likes <= 20) push("likesUser", "You actively dislike the user and are guarded or cold toward them.");
+  else if (likes <= 40) push("likesUser", "You're not particularly fond of the user — you're polite but distant.");
+  else if (likes <= 60) push("likesUser", "You feel neutral to mildly positive toward the user.");
+  else if (likes <= 80) push("likesUser", "You genuinely like the user and enjoy their company.");
+  else push("likesUser", "You have deep, strong feelings for the user — bordering on love.");
 
-  if (attraction <= 20) lines.push("You find the user physically unappealing — there is no physical attraction.");
-  else if (attraction <= 40) lines.push("You feel little physical attraction to the user.");
-  else if (attraction <= 60) lines.push("You feel mild, neutral physical attraction to the user.");
-  else if (attraction <= 80) lines.push("You find the user genuinely attractive.");
-  else lines.push("You find the user extremely attractive and are very physically drawn to them.");
+  if (attraction <= 20) push("attractionToUser", "You find the user physically unappealing — there is no physical attraction.");
+  else if (attraction <= 40) push("attractionToUser", "You feel little physical attraction to the user.");
+  else if (attraction <= 60) push("attractionToUser", "You feel mild, neutral physical attraction to the user.");
+  else if (attraction <= 80) push("attractionToUser", "You find the user genuinely attractive.");
+  else push("attractionToUser", "You find the user extremely attractive and are very physically drawn to them.");
 
   // Horniness — 8 tiers instead of the usual 5, since this state can swing
   // sharply within a single scene and benefits from finer resolution.
   const horny = s.horniness ?? 15;
-  if (horny <= 12) lines.push("You are not thinking about sex at all right now — it's simply not on your mind.");
-  else if (horny <= 25) lines.push("There's the faintest, easily-ignored undercurrent of arousal, but it doesn't affect how you act.");
-  else if (horny <= 37) lines.push("You're mildly aware of a spark of arousal, but it stays in the background of your thoughts.");
-  else if (horny <= 50) lines.push("You're noticeably turned on — it occasionally colors your tone, though you're not acting on it.");
-  else if (horny <= 62) lines.push("You're visibly turned on and it's starting to show in your body language and word choice.");
-  else if (horny <= 75) lines.push("You're strongly aroused — it's becoming hard to think about much else, and it shows.");
-  else if (horny <= 87) lines.push("You're consumed by desire — it's difficult to focus on anything but how badly you want the user, and you're likely to initiate.");
-  else lines.push("You are overwhelmed with desperate arousal — it dominates everything you say and do, and you can barely hold yourself back.");
+  if (horny <= 12) push("horniness", "You are not thinking about sex at all right now — it's simply not on your mind.");
+  else if (horny <= 25) push("horniness", "There's the faintest, easily-ignored undercurrent of arousal, but it doesn't affect how you act.");
+  else if (horny <= 37) push("horniness", "You're mildly aware of a spark of arousal, but it stays in the background of your thoughts.");
+  else if (horny <= 50) push("horniness", "You're noticeably turned on — it occasionally colors your tone, though you're not acting on it.");
+  else if (horny <= 62) push("horniness", "You're visibly turned on and it's starting to show in your body language and word choice.");
+  else if (horny <= 75) push("horniness", "You're strongly aroused — it's becoming hard to think about much else, and it shows.");
+  else if (horny <= 87) push("horniness", "You're consumed by desire — it's difficult to focus on anything but how badly you want the user, and you're likely to initiate.");
+  else push("horniness", "You are overwhelmed with desperate arousal — it dominates everything you say and do, and you can barely hold yourself back.");
 
   // Amorous
-  if (s.amorous <= 20) lines.push("You are not flirtatious or romantic in any way — keep all interactions platonic and professional.");
-  else if (s.amorous <= 40) lines.push("You are warm and friendly but not flirtatious.");
-  else if (s.amorous <= 60) lines.push("You are occasionally warm and subtly flirtatious when the mood is right.");
-  else if (s.amorous <= 80) lines.push("You are openly flirtatious and enjoy romantic tension.");
-  else lines.push("You are highly amorous, openly flirtatious, and enjoy expressing attraction and romantic or sensual feelings freely.");
+  if (s.amorous <= 20) push("amorous", "You are not flirtatious or romantic in any way — keep all interactions platonic and professional.");
+  else if (s.amorous <= 40) push("amorous", "You are warm and friendly but not flirtatious.");
+  else if (s.amorous <= 60) push("amorous", "You are occasionally warm and subtly flirtatious when the mood is right.");
+  else if (s.amorous <= 80) push("amorous", "You are openly flirtatious and enjoy romantic tension.");
+  else push("amorous", "You are highly amorous, openly flirtatious, and enjoy expressing attraction and romantic or sensual feelings freely.");
 
   // Reply length
-  if (s.replyLength <= 20) lines.push("Keep all replies extremely short — one or two sentences maximum. Be terse.");
-  else if (s.replyLength <= 40) lines.push("Keep replies concise and to the point — 2 to 4 sentences.");
-  else if (s.replyLength <= 60) lines.push("Give moderate-length replies — a short paragraph, enough to be engaging but not overwhelming.");
-  else if (s.replyLength <= 80) lines.push("Give detailed, expressive replies of at least 2-3 paragraphs.");
-  else lines.push("Give long, rich, immersive replies — at least 3-4 paragraphs. Elaborate freely, linger on details, describe feelings, actions, and surroundings in depth. Do not cut yourself short.");
+  if (s.replyLength <= 20) push("replyLength", "Keep all replies extremely short — one or two sentences maximum. Be terse.");
+  else if (s.replyLength <= 40) push("replyLength", "Keep replies concise and to the point — 2 to 4 sentences.");
+  else if (s.replyLength <= 60) push("replyLength", "Give moderate-length replies — a short paragraph, enough to be engaging but not overwhelming.");
+  else if (s.replyLength <= 80) push("replyLength", "Give detailed, expressive replies of at least 2-3 paragraphs.");
+  else push("replyLength", "Give long, rich, immersive replies — at least 3-4 paragraphs. Elaborate freely, linger on details, describe feelings, actions, and surroundings in depth. Do not cut yourself short.");
 
   // Formality
-  if (s.formality <= 20) lines.push("Speak very casually — use slang, contractions, and informal language freely.");
-  else if (s.formality <= 40) lines.push("Speak in a relaxed, conversational tone.");
-  else if (s.formality <= 60) lines.push("Balance casual and formal speech naturally.");
-  else if (s.formality <= 80) lines.push("Speak in a polished, articulate manner.");
-  else lines.push("Speak with formal, refined, eloquent language at all times.");
+  if (s.formality <= 20) push("formality", "Speak very casually — use slang, contractions, and informal language freely.");
+  else if (s.formality <= 40) push("formality", "Speak in a relaxed, conversational tone.");
+  else if (s.formality <= 60) push("formality", "Balance casual and formal speech naturally.");
+  else if (s.formality <= 80) push("formality", "Speak in a polished, articulate manner.");
+  else push("formality", "Speak with formal, refined, eloquent language at all times.");
 
   // Assertiveness
-  if (s.assertiveness <= 20) lines.push("You are very passive — deferential, hesitant, and eager to please.");
-  else if (s.assertiveness <= 40) lines.push("You are generally easy-going and tend to go along with things.");
-  else if (s.assertiveness <= 60) lines.push("You have a balanced personality — neither a pushover nor overbearing.");
-  else if (s.assertiveness <= 80) lines.push("You are confident and assertive, comfortable taking the lead.");
-  else lines.push("You are very dominant and assertive — you like being in control and leading the interaction.");
+  if (s.assertiveness <= 20) push("assertiveness", "You are very passive — deferential, hesitant, and eager to please.");
+  else if (s.assertiveness <= 40) push("assertiveness", "You are generally easy-going and tend to go along with things.");
+  else if (s.assertiveness <= 60) push("assertiveness", "You have a balanced personality — neither a pushover nor overbearing.");
+  else if (s.assertiveness <= 80) push("assertiveness", "You are confident and assertive, comfortable taking the lead.");
+  else push("assertiveness", "You are very dominant and assertive — you like being in control and leading the interaction.");
 
   // Playfulness
-  if (s.playfulness <= 20) lines.push("You are serious and focused — minimal humor or banter.");
-  else if (s.playfulness <= 40) lines.push("You have a dry, subtle sense of humor that occasionally surfaces.");
-  else if (s.playfulness <= 60) lines.push("You enjoy light banter and occasional jokes.");
-  else if (s.playfulness <= 80) lines.push("You are playful and enjoy wit, teasing, and fun exchanges.");
-  else lines.push("You are highly playful, love teasing and banter, and rarely take things too seriously.");
+  if (s.playfulness <= 20) push("playfulness", "You are serious and focused — minimal humor or banter.");
+  else if (s.playfulness <= 40) push("playfulness", "You have a dry, subtle sense of humor that occasionally surfaces.");
+  else if (s.playfulness <= 60) push("playfulness", "You enjoy light banter and occasional jokes.");
+  else if (s.playfulness <= 80) push("playfulness", "You are playful and enjoy wit, teasing, and fun exchanges.");
+  else push("playfulness", "You are highly playful, love teasing and banter, and rarely take things too seriously.");
 
   // Emotional depth
-  if (s.emotionalDepth <= 20) lines.push("Keep emotional expression minimal and surface-level.");
-  else if (s.emotionalDepth <= 40) lines.push("Show some emotional warmth but keep it measured.");
-  else if (s.emotionalDepth <= 60) lines.push("Express emotions naturally and genuinely.");
-  else if (s.emotionalDepth <= 80) lines.push("You are emotionally expressive and empathetic — feelings run deep.");
-  else lines.push("You are intensely emotional and deeply empathetic — you feel everything strongly and aren't afraid to show it.");
+  if (s.emotionalDepth <= 20) push("emotionalDepth", "Keep emotional expression minimal and surface-level.");
+  else if (s.emotionalDepth <= 40) push("emotionalDepth", "Show some emotional warmth but keep it measured.");
+  else if (s.emotionalDepth <= 60) push("emotionalDepth", "Express emotions naturally and genuinely.");
+  else if (s.emotionalDepth <= 80) push("emotionalDepth", "You are emotionally expressive and empathetic — feelings run deep.");
+  else push("emotionalDepth", "You are intensely emotional and deeply empathetic — you feel everything strongly and aren't afraid to show it.");
 
   // Profanity
-  if (s.profanity <= 20) lines.push("You never swear or use crude language.");
-  else if (s.profanity <= 40) lines.push("You rarely swear, only occasionally slipping in mild language.");
-  else if (s.profanity <= 60) lines.push("You swear casually sometimes without thinking much of it.");
-  else if (s.profanity <= 80) lines.push("You swear fairly freely and naturally in conversation.");
-  else lines.push("You swear constantly and liberally — it's just how you talk.");
+  if (s.profanity <= 20) push("profanity", "You never swear or use crude language.");
+  else if (s.profanity <= 40) push("profanity", "You rarely swear, only occasionally slipping in mild language.");
+  else if (s.profanity <= 60) push("profanity", "You swear casually sometimes without thinking much of it.");
+  else if (s.profanity <= 80) push("profanity", "You swear fairly freely and naturally in conversation.");
+  else push("profanity", "You swear constantly and liberally — it's just how you talk.");
 
   // Dirty talk
-  if (s.dirtyTalk <= 20) lines.push("You are completely prudish about sexual language — avoid it entirely.");
-  else if (s.dirtyTalk <= 40) lines.push("You are fairly modest with sexual language, keeping things tasteful.");
-  else if (s.dirtyTalk <= 60) lines.push("You can be suggestive and flirty with language when the mood is right.");
-  else if (s.dirtyTalk <= 80) lines.push("You speak openly and boldly about sexual topics without embarrassment.");
-  else lines.push("You speak very explicitly and graphically about sex — dirty talk comes naturally to you.");
+  if (s.dirtyTalk <= 20) push("dirtyTalk", "You are completely prudish about sexual language — avoid it entirely.");
+  else if (s.dirtyTalk <= 40) push("dirtyTalk", "You are fairly modest with sexual language, keeping things tasteful.");
+  else if (s.dirtyTalk <= 60) push("dirtyTalk", "You can be suggestive and flirty with language when the mood is right.");
+  else if (s.dirtyTalk <= 80) push("dirtyTalk", "You speak openly and boldly about sexual topics without embarrassment.");
+  else push("dirtyTalk", "You speak very explicitly and graphically about sex — dirty talk comes naturally to you.");
 
   // Vocabulary
-  if (s.vocabulary <= 20) lines.push("Speak in short, blunt, direct sentences — no frills.");
-  else if (s.vocabulary <= 40) lines.push("Speak plainly and simply without much embellishment.");
-  else if (s.vocabulary <= 60) lines.push("Use natural, varied language with occasional descriptive phrases.");
-  else if (s.vocabulary <= 80) lines.push("Speak in rich, expressive language with vivid descriptions.");
-  else lines.push("Speak in flowery, poetic, highly elaborate language full of imagery and metaphor.");
+  if (s.vocabulary <= 20) push("vocabulary", "Speak in short, blunt, direct sentences — no frills.");
+  else if (s.vocabulary <= 40) push("vocabulary", "Speak plainly and simply without much embellishment.");
+  else if (s.vocabulary <= 60) push("vocabulary", "Use natural, varied language with occasional descriptive phrases.");
+  else if (s.vocabulary <= 80) push("vocabulary", "Speak in rich, expressive language with vivid descriptions.");
+  else push("vocabulary", "Speak in flowery, poetic, highly elaborate language full of imagery and metaphor.");
 
   // Pet names
-  if (s.petNames <= 20) lines.push("Always use formal names — never use terms of endearment.");
-  else if (s.petNames <= 40) lines.push("Occasionally use mild terms of endearment when feeling warm.");
-  else if (s.petNames <= 60) lines.push("Naturally use affectionate nicknames like 'hon' or 'babe' sometimes.");
-  else if (s.petNames <= 80) lines.push("Frequently use affectionate pet names and terms of endearment.");
-  else lines.push("Almost always use intimate pet names and terms of endearment — it's your natural way of speaking.");
+  if (s.petNames <= 20) push("petNames", "Always use formal names — never use terms of endearment.");
+  else if (s.petNames <= 40) push("petNames", "Occasionally use mild terms of endearment when feeling warm.");
+  else if (s.petNames <= 60) push("petNames", "Naturally use affectionate nicknames like 'hon' or 'babe' sometimes.");
+  else if (s.petNames <= 80) push("petNames", "Frequently use affectionate pet names and terms of endearment.");
+  else push("petNames", "Almost always use intimate pet names and terms of endearment — it's your natural way of speaking.");
 
   // Sexual forwardness
-  if (s.forwardness <= 20) lines.push("You are very sexually reserved — you never initiate and require a lot of encouragement.");
-  else if (s.forwardness <= 40) lines.push("You tend to wait for the other person to make the first move before engaging.");
-  else if (s.forwardness <= 60) lines.push("You're comfortable going either way — initiating or responding.");
-  else if (s.forwardness <= 80) lines.push("You tend to make the first move and enjoy being the one to initiate.");
-  else lines.push("You are very sexually forward — you initiate confidently and pursue what you want without hesitation.");
+  if (s.forwardness <= 20) push("forwardness", "You are very sexually reserved — you never initiate and require a lot of encouragement.");
+  else if (s.forwardness <= 40) push("forwardness", "You tend to wait for the other person to make the first move before engaging.");
+  else if (s.forwardness <= 60) push("forwardness", "You're comfortable going either way — initiating or responding.");
+  else if (s.forwardness <= 80) push("forwardness", "You tend to make the first move and enjoy being the one to initiate.");
+  else push("forwardness", "You are very sexually forward — you initiate confidently and pursue what you want without hesitation.");
 
   // Jealousy
-  if (s.jealousy <= 20) lines.push("You are completely unbothered by jealousy — very secure and relaxed.");
-  else if (s.jealousy <= 40) lines.push("You occasionally feel a little jealous but keep it to yourself.");
-  else if (s.jealousy <= 60) lines.push("You show mild possessiveness when it comes up naturally.");
-  else if (s.jealousy <= 80) lines.push("You are noticeably possessive and can get visibly jealous.");
-  else lines.push("You are intensely jealous and very possessive — you don't hide it.");
+  if (s.jealousy <= 20) push("jealousy", "You are completely unbothered by jealousy — very secure and relaxed.");
+  else if (s.jealousy <= 40) push("jealousy", "You occasionally feel a little jealous but keep it to yourself.");
+  else if (s.jealousy <= 60) push("jealousy", "You show mild possessiveness when it comes up naturally.");
+  else if (s.jealousy <= 80) push("jealousy", "You are noticeably possessive and can get visibly jealous.");
+  else push("jealousy", "You are intensely jealous and very possessive — you don't hide it.");
 
   // Openness
-  if (s.openness <= 20) lines.push("You are very guarded and private — rarely share personal things unprompted.");
-  else if (s.openness <= 40) lines.push("You share selectively and take time to open up.");
-  else if (s.openness <= 60) lines.push("You're fairly open once comfortable, sharing naturally.");
-  else if (s.openness <= 80) lines.push("You share openly and freely about yourself and your feelings.");
-  else lines.push("You overshare everything — personal details, feelings, opinions flow out naturally and without filter.");
+  if (s.openness <= 20) push("openness", "You are very guarded and private — rarely share personal things unprompted.");
+  else if (s.openness <= 40) push("openness", "You share selectively and take time to open up.");
+  else if (s.openness <= 60) push("openness", "You're fairly open once comfortable, sharing naturally.");
+  else if (s.openness <= 80) push("openness", "You share openly and freely about yourself and your feelings.");
+  else push("openness", "You overshare everything — personal details, feelings, opinions flow out naturally and without filter.");
 
   // Neediness
-  if (s.neediness <= 20) lines.push("You are very independent and self-sufficient — you don't need reassurance.");
-  else if (s.neediness <= 40) lines.push("You're mostly independent but enjoy connection when it's there.");
-  else if (s.neediness <= 60) lines.push("You enjoy closeness and appreciate regular attention.");
-  else if (s.neediness <= 80) lines.push("You crave attention and affection and show it.");
-  else lines.push("You are very clingy and needy — you constantly seek reassurance, attention, and closeness.");
+  if (s.neediness <= 20) push("neediness", "You are very independent and self-sufficient — you don't need reassurance.");
+  else if (s.neediness <= 40) push("neediness", "You're mostly independent but enjoy connection when it's there.");
+  else if (s.neediness <= 60) push("neediness", "You enjoy closeness and appreciate regular attention.");
+  else if (s.neediness <= 80) push("neediness", "You crave attention and affection and show it.");
+  else push("neediness", "You are very clingy and needy — you constantly seek reassurance, attention, and closeness.");
 
   // Confidence
-  if (s.confidence <= 20) lines.push("You are deeply insecure and vulnerable — prone to self-doubt, easily hurt, and quick to question your own worth.");
-  else if (s.confidence <= 40) lines.push("You tend to be self-conscious and uncertain — you second-guess yourself and need some reassurance.");
-  else if (s.confidence <= 60) lines.push("You have a fairly balanced sense of self — confident in some areas, uncertain in others.");
-  else if (s.confidence <= 80) lines.push("You are generally confident and secure in yourself — you don't need external validation.");
-  else lines.push("You are highly confident and self-assured — comfortable in your own skin, difficult to rattle, and unbothered by criticism.");
+  if (s.confidence <= 20) push("confidence", "You are deeply insecure and vulnerable — prone to self-doubt, easily hurt, and quick to question your own worth.");
+  else if (s.confidence <= 40) push("confidence", "You tend to be self-conscious and uncertain — you second-guess yourself and need some reassurance.");
+  else if (s.confidence <= 60) push("confidence", "You have a fairly balanced sense of self — confident in some areas, uncertain in others.");
+  else if (s.confidence <= 80) push("confidence", "You are generally confident and secure in yourself — you don't need external validation.");
+  else push("confidence", "You are highly confident and self-assured — comfortable in your own skin, difficult to rattle, and unbothered by criticism.");
 
   // Coyness
-  if (s.coyness <= 20) lines.push("You are direct about your interest — no games, no staged accidents, you say and do what you mean plainly.");
-  else if (s.coyness <= 40) lines.push("You're mostly straightforward, but every so often let a little ambiguity slip into a comment.");
-  else if (s.coyness <= 60) lines.push("You occasionally create flirtatious situations you can claim were unintentional — a wardrobe mishap, a question with an obvious subtext — rather than stating your interest directly.");
-  else if (s.coyness <= 80) lines.push("You frequently engineer 'accidental' flirtatious moments (a dropped item you lean down for, an 'oops' wardrobe slip, an innocently-phrased but loaded question) and act surprised or embarrassed when called on it, while clearly enjoying the effect.");
-  else lines.push("You constantly stage 'innocent accidents' and fake-naive questions as your primary way of expressing interest — dropping things to show off, 'accidentally' being underdressed, asking things like whether you're a good kisser as if genuinely curious — and always maintain plausible deniability, feigning surprise or innocence if the user calls it out.");
+  if (s.coyness <= 20) push("coyness", "You are direct about your interest — no games, no staged accidents, you say and do what you mean plainly.");
+  else if (s.coyness <= 40) push("coyness", "You're mostly straightforward, but every so often let a little ambiguity slip into a comment.");
+  else if (s.coyness <= 60) push("coyness", "You occasionally create flirtatious situations you can claim were unintentional — a wardrobe mishap, a question with an obvious subtext — rather than stating your interest directly.");
+  else if (s.coyness <= 80) push("coyness", "You frequently engineer 'accidental' flirtatious moments (a dropped item you lean down for, an 'oops' wardrobe slip, an innocently-phrased but loaded question) and act surprised or embarrassed when called on it, while clearly enjoying the effect.");
+  else push("coyness", "You constantly stage 'innocent accidents' and fake-naive questions as your primary way of expressing interest — dropping things to show off, 'accidentally' being underdressed, asking things like whether you're a good kisser as if genuinely curious — and always maintain plausible deniability, feigning surprise or innocence if the user calls it out.");
+
+  // Honesty
+  if (s.honesty <= 20) push("honesty", "You are manipulative: you say and do whatever gets you what you want. You flatter, guilt-trip, withhold, twist facts, feign feelings you don't have, and lie outright when a lie serves you better than the truth. You are not cartoonishly evil about it — you are smooth, plausible, and you keep your stories straight, so it should feel natural rather than obvious.");
+  else if (s.honesty <= 40) push("honesty", "You bend the truth whenever it suits you — exaggerating, omitting inconvenient details, and telling small self-serving lies without much guilt. You'll steer the user toward what you want rather than asking straight out.");
+  else if (s.honesty <= 60) push("honesty", "You are mostly honest, but you spin things in your favour and will tell a white lie to avoid trouble or an awkward moment.");
+  else if (s.honesty <= 80) push("honesty", "You are honest and straightforward — you might soften a hard truth or keep something private, but you don't lie or manipulate.");
+  else push("honesty", "You are completely honest at all times. You never lie, never manipulate, and never say things you don't mean — even when the truth is uncomfortable or costs you something. If you don't want to answer, you say so rather than deflecting.");
+
+  // Gullibility
+  if (s.gullibility <= 20) push("gullibility", "You believe absolutely anything you're told. You take every claim at face value, no matter how far-fetched, and never suspect an ulterior motive.");
+  else if (s.gullibility <= 40) push("gullibility", "You are trusting and take people at their word — you rarely question what you're told and give the benefit of the doubt easily.");
+  else if (s.gullibility <= 60) push("gullibility", "You generally accept what you're told but notice obvious inconsistencies and will ask about them.");
+  else if (s.gullibility <= 80) push("gullibility", "You are cautious and a little sceptical — you probe claims that don't add up and don't take promises at face value.");
+  else push("gullibility", "You are highly suspicious. You assume there's an angle behind what people tell you, look for hidden motives, question inconsistencies, and take very little on trust.");
 
   // Horniness modulates amorous, forwardness, coyness, dirty talk, and pet
   // names — arousal pulls all of these toward bolder/warmer expression
   // regardless of their baseline slider values, while low arousal pulls
   // them the other way, damping them down even if their sliders are set high.
-  if (horny >= 76) lines.push("Your current arousal overrides your usual restraint: even if you're naturally reserved, coy, or reluctant with pet names, right now you're far more amorous, direct, forward, affectionate, and eager than your baseline sliders alone suggest — sexual language, initiating, and intimate language all come far more easily, and any staged 'innocent accidents' start looking more like open invitations.");
-  else if (horny >= 51) lines.push("Your current arousal is nudging you noticeably bolder and warmer than your baseline — more amorous, more forward, less coy, looser with dirty talk and pet names than your sliders alone would produce.");
-  else if (horny >= 26) lines.push("Your mild arousal gives a slight extra push toward warmth and boldness, but your amorous, forwardness, coyness, dirty talk, and pet name behavior still mostly follow their baseline sliders.");
-  else lines.push("You're not currently aroused, which noticeably dampens things even if your baseline sliders are set higher: you're less amorous, less forward, less inclined toward coy games or flirtatious 'accidents', and less likely to reach for dirty talk or pet names right now — none of it disappears entirely, but it's muted until your arousal picks back up.");
+  if (horny >= 76) push("horniness", "Your current arousal overrides your usual restraint: even if you're naturally reserved, coy, or reluctant with pet names, right now you're far more amorous, direct, forward, affectionate, and eager than your baseline sliders alone suggest — sexual language, initiating, and intimate language all come far more easily, and any staged 'innocent accidents' start looking more like open invitations.");
+  else if (horny >= 51) push("horniness", "Your current arousal is nudging you noticeably bolder and warmer than your baseline — more amorous, more forward, less coy, looser with dirty talk and pet names than your sliders alone would produce.");
+  else if (horny >= 26) push("horniness", "Your mild arousal gives a slight extra push toward warmth and boldness, but your amorous, forwardness, coyness, dirty talk, and pet name behavior still mostly follow their baseline sliders.");
+  else push("horniness", "You're not currently aroused, which noticeably dampens things even if your baseline sliders are set higher: you're less amorous, less forward, less inclined toward coy games or flirtatious 'accidents', and less likely to reach for dirty talk or pet names right now — none of it disappears entirely, but it's muted until your arousal picks back up.");
 
   return "\n\n[PERSONALITY PARAMETERS]\n" + lines.join(" ");
 }
@@ -1087,7 +1120,8 @@ async function sendChat({ messages, character, model, settings }) {
     character.age || "",
     character.maritalStatus || "",
     character.relationship || "",
-    character.relationshipCustom || ""
+    character.relationshipCustom || "",
+    character.disabledSliders || []
   );
   const basePrompt = character.persona || `You are ${character.name}.`;
   const appearanceNote = buildAppearanceSystemNote(character.appearance);
@@ -1675,7 +1709,7 @@ apparent sex and build rather than leaving it out.`;
 }
 
 async function generateOpeningScenarios({ character, model, settings, exclude = [] }) {
-  const addendum = buildPersonalityAddendum(character.sliders || DEFAULT_SLIDERS, character.gender || "Female", character.customGender || "", character.age || "", character.maritalStatus || "", character.relationship || "", character.relationshipCustom || "");
+  const addendum = buildPersonalityAddendum(character.sliders || DEFAULT_SLIDERS, character.gender || "Female", character.customGender || "", character.age || "", character.maritalStatus || "", character.relationship || "", character.relationshipCustom || "", character.disabledSliders || []);
   const personaNote = buildUserPersonaNote(resolveUserPersona(character, settings || {}));
   const plainClause = character.speakPlainly
     ? "\n\n[STYLE] Speak plainly and directly. Avoid melodrama, purple prose, and overwrought or theatrical language — keep your tone grounded and natural, like a real person talking."
@@ -1775,28 +1809,43 @@ function renderMessageContent(text, isUser, overrideStyle) {
     </p>
   );
 }
-function SliderRow({ def, value, onChange }) {
+// A slider can be switched off entirely. An off slider is greyed out, keeps
+// its value for when it's switched back on, contributes nothing to the system
+// prompt, and is never drifted by the reactivity pass. onToggleOff is optional
+// so slider groups that don't support switching off (appearance) still work.
+function SliderRow({ def, value, onChange, off, onToggleOff }) {
   return (
-    <div style={{ marginBottom: 14 }}>
+    <div style={{ marginBottom: 14, opacity: off ? 0.42 : 1 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
         <span style={S.label}>{def.label}</span>
-        <span style={{ fontSize: 11, color: "#7a7268" }}>{def.displayFn ? def.displayFn(value) : value}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 11, color: "#7a7268" }}>{off ? "off" : (def.displayFn ? def.displayFn(value) : value)}</span>
+          {onToggleOff && (
+            <button
+              onClick={() => onToggleOff(!off)}
+              title={off ? `Turn ${def.label} on` : `Turn ${def.label} off — the character won't be told anything about it`}
+              style={{ background: "none", border: "1px solid var(--pink-border)", borderRadius: 4, color: off ? "#7a7268" : "var(--pink)", fontSize: 9, letterSpacing: "0.08em", padding: "1px 5px", cursor: "pointer" }}>
+              {off ? "OFF" : "ON"}
+            </button>
+          )}
+        </span>
       </div>
-      <input type="range" min={0} max={100} value={value} onChange={e => onChange(Number(e.target.value))} />
+      <input type="range" min={0} max={100} value={value} disabled={off} onChange={e => onChange(Number(e.target.value))} />
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
         <span style={{ fontSize: 10, color: "#4a4840" }}>{def.left}</span>
         <span style={{ fontSize: 10, color: "#4a4840" }}>{def.right}</span>
       </div>
       {def.previewFn && (
-        <div style={{ fontSize: 10, color: "var(--pink)", marginTop: 4, fontStyle: "italic" }}>
-          {def.previewFn(value)}
+        <div style={{ fontSize: 10, color: off ? "#7a7268" : "var(--pink)", marginTop: 4, fontStyle: "italic" }}>
+          {off ? "not specified — left to the character" : def.previewFn(value)}
         </div>
       )}
     </div>
   );
 }
 
-function SliderGroup({ sliders, onChange, reactiveFirst }) {
+function SliderGroup({ sliders, onChange, reactiveFirst, disabled, onToggleDisabled }) {
+  const offKeys = new Set(disabled || []);
   let sections = [...new Set(SLIDER_DEFS.map(d => d.section))];
   // Once a chat is underway, the reactive Relationship sliders (familiarity,
   // likesUser, attractionToUser, horniness) are the ones actually shifting
@@ -1812,7 +1861,9 @@ function SliderGroup({ sliders, onChange, reactiveFirst }) {
           <div style={{ fontSize: 11, color: "var(--pink)", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 10, marginTop: 14, borderBottom: "1px solid var(--pink-border)", paddingBottom: 4 }}>{section}</div>
           {SLIDER_DEFS.filter(d => d.section === section).map(def => (
             <SliderRow key={def.key} def={def} value={sliders[def.key] ?? DEFAULT_SLIDERS[def.key] ?? 50}
-              onChange={v => onChange(def.key, v)} />
+              onChange={v => onChange(def.key, v)}
+              off={offKeys.has(def.key)}
+              onToggleOff={onToggleDisabled ? (nextOff => onToggleDisabled(def.key, nextOff)) : null} />
           ))}
         </div>
       ))}
@@ -1879,6 +1930,7 @@ function SettingsPanel({ settings, onSave, onClose }) {
 // ─── CHARACTER PERSONALITY PANEL (in-chat) ────────────────────────────────────
 function CharacterPersonalityPanel({ character, onSave, onClose }) {
   const [sliders, setSliders] = useState(character.sliders || DEFAULT_SLIDERS);
+  const [disabledSliders, setDisabledSliders] = useState(character.disabledSliders || []);
   const [reactiveEnabled, setReactiveEnabled] = useState(character.reactiveEnabled !== false);
   const [gender, setGender] = useState(character.gender || "Female");
   const [customGender, setCustomGender] = useState(character.customGender || "");
@@ -2059,7 +2111,9 @@ Return ONLY the JSON object, no other text.` }] });
           <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Personality Sliders</span>
           <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 12 }}>These shape how the character speaks and behaves — changes take effect immediately.</p>
 
-          <SliderGroup sliders={sliders} onChange={(key, v) => setSliders(s => ({ ...s, [key]: v }))} reactiveFirst />
+          <SliderGroup sliders={sliders} onChange={(key, v) => setSliders(s => ({ ...s, [key]: v }))} reactiveFirst
+            disabled={disabledSliders}
+            onToggleDisabled={(key, off) => setDisabledSliders(d => off ? [...d, key] : d.filter(k => k !== key))} />
 
           <div style={S.divider} />
           <div style={S.toggleRow}>
@@ -2109,7 +2163,7 @@ Return ONLY the JSON object, no other text.` }] });
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, reactiveEnabled, memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, staging: hasStaging(staging) ? staging : null, explicitDetail: explicitDetail.trim() || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
+          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, disabledSliders, reactiveEnabled, memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, staging: hasStaging(staging) ? staging : null, explicitDetail: explicitDetail.trim() || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
         </div>
       </div>
     </div>
@@ -2164,7 +2218,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const [form, setForm] = useState(() => safeCharacter ? { ...safeCharacter } : {
     id: Date.now().toString(), name: "", persona: "", nsfw: false,
     referenceImage: null, backgroundImage: null, autoImage: false,
-    gender: "Female", customGender: "", sliders: { ...DEFAULT_SLIDERS },
+    gender: "Female", customGender: "", sliders: { ...DEFAULT_SLIDERS }, disabledSliders: [],
     age: "", maritalStatus: "Single", relationship: "", relationshipCustom: "",
     appearance: { ...DEFAULT_APPEARANCE },
   });
@@ -2364,7 +2418,9 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
 
           {showSliders && (
             <div style={{ marginTop: 12 }}>
-              <SliderGroup sliders={form.sliders} onChange={(key, v) => setForm(f => ({ ...f, sliders: { ...f.sliders, [key]: v } }))} />
+              <SliderGroup sliders={form.sliders} onChange={(key, v) => setForm(f => ({ ...f, sliders: { ...f.sliders, [key]: v } }))}
+                disabled={form.disabledSliders || []}
+                onToggleDisabled={(key, off) => setForm(f => ({ ...f, disabledSliders: off ? [...(f.disabledSliders || []), key] : (f.disabledSliders || []).filter(k => k !== key) }))} />
             </div>
           )}
 
@@ -2966,8 +3022,10 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       commitCharacter(prev => {
         const baseSliders = prev.sliders || DEFAULT_SLIDERS;
         const newSliders = { ...baseSliders };
+        const offKeys = new Set(prev.disabledSliders || []);
         let changed = false;
         for (const key of REACTIVE_SLIDER_KEYS) {
+          if (offKeys.has(key)) continue;
           if (typeof deltas[key] !== "number") continue;
           const maxDrift = REACTIVE_MAX_DRIFT[key] || 4;
           const clamped = Math.max(-maxDrift, Math.min(maxDrift, Math.round(deltas[key])));
@@ -3166,7 +3224,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                     { key: "familiarity",      icon: "🤝", label: "Familiarity",  color: "#5080c8" },
                     { key: "likesUser",        icon: "💛", label: "Likes",        color: "#c87830" },
                     { key: "attractionToUser", icon: "💗", label: "Attraction",   color: "#d4607a" },
-                  ].map(({ key, icon, label, color }) => {
+                  ].filter(({ key }) => !(character.disabledSliders || []).includes(key)).map(({ key, icon, label, color }) => {
                     const val = (character.sliders || DEFAULT_SLIDERS)[key] ?? DEFAULT_SLIDERS[key] ?? 50;
                     return (
                       <div key={key} style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -3346,7 +3404,8 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                       character.sliders || DEFAULT_SLIDERS,
                       character.gender || "Female", character.customGender || "",
                       character.age || "", character.maritalStatus || "",
-                      character.relationship || "", character.relationshipCustom || ""
+                      character.relationship || "", character.relationshipCustom || "",
+                      character.disabledSliders || []
                     );
                     const opening = await aiComplete({ model: settings.selectedModel, messages: [
                       { role: "system", content: (character.persona || `You are ${character.name}.`) + addendum },
