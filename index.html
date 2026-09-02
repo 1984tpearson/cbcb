@@ -288,18 +288,36 @@
 
 const { useState, useEffect, useRef } = React;
 
+// Ordered strongest-first, so OPENROUTER_MODELS[0] is a defensible default.
+// The older Llama and Gemma entries are kept at the bottom because they are
+// cheap and some characters are tuned against them, not because they compete.
 const OPENROUTER_MODELS = [
-  { id: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B (Best)" },
-  { id: "mistralai/mistral-small-3.1-24b-instruct", label: "Mistral Small 3.1 24B" },
-  { id: "meta-llama/llama-3.1-8b-instruct", label: "Llama 3.1 8B (Fast)" },
-  { id: "mistralai/mistral-7b-instruct", label: "Mistral 7B" },
-  { id: "google/gemma-3-27b-it", label: "Gemma 3 27B" },
+  { id: "minimax/minimax-m3", label: "MiniMax M3 (Best)" },
   { id: "moonshotai/kimi-k2.6", label: "Kimi K2.6" },
-  { id: "minimax/minimax-m3", label: "MiniMax M3" },
-  { id: "mistralai/mistral-small-2603", label: "Mistral Small 4" },
-  { id: "mistralai/mistral-large-2512", label: "Mistral large" },
+  { id: "mistralai/mistral-large-2512", label: "Mistral Large 3" },
   { id: "nousresearch/hermes-4-70b", label: "Hermes 4 70B" },
+  { id: "mistralai/mistral-small-2603", label: "Mistral Small 4" },
+  { id: "mistralai/mistral-small-3.2-24b-instruct", label: "Mistral Small 3.2 24B" },
+  { id: "google/gemma-4-31b-it", label: "Gemma 4 31B" },
+  { id: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B" },
+  { id: "meta-llama/llama-3.1-8b-instruct", label: "Llama 3.1 8B (Fast)" },
 ];
+
+// Saved settings outlive the model list: an id that has since been delisted by
+// OpenRouter (mistral-7b-instruct) or superseded (gemma-3-27b-it) would 404 on
+// every send and leave the Settings dropdown blank. Retired ids move to their
+// nearest surviving equivalent, anything else unrecognised falls back to the
+// default rather than failing at request time.
+const RETIRED_MODELS = {
+  "mistralai/mistral-7b-instruct": "meta-llama/llama-3.1-8b-instruct",
+  "google/gemma-3-27b-it": "google/gemma-4-31b-it",
+  "mistralai/mistral-small-3.1-24b-instruct": "mistralai/mistral-small-3.2-24b-instruct",
+};
+
+function migrateModelId(id, fallback) {
+  if (OPENROUTER_MODELS.some(m => m.id === id)) return id;
+  return RETIRED_MODELS[id] || fallback;
+}
 
 const GENDERS = ["Female", "Male", "Non-binary", "Custom"];
 
@@ -1564,7 +1582,7 @@ async function autoGenerateCharacter({ vibe, model, constraints = {} }) {
 //
 // Pinned rather than using settings.selectedModel: most of OPENROUTER_MODELS
 // are text-only and would either error or invent an answer from nothing.
-const VISION_MODEL = "mistralai/mistral-small-3.1-24b-instruct";
+const VISION_MODEL = "mistralai/mistral-small-3.2-24b-instruct";
 
 // Snap a model's free-text answer onto one of our option lists. Exact match
 // first, then a loose contains-match, since the model will happily return
@@ -3496,7 +3514,14 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 function App() {
-  const [settings, setSettings] = useState(() => storage.get("personachat_settings", DEFAULT_SETTINGS));
+  const [settings, setSettings] = useState(() => {
+    const saved = storage.get("personachat_settings", DEFAULT_SETTINGS);
+    return {
+      ...saved,
+      selectedModel: migrateModelId(saved.selectedModel, DEFAULT_SETTINGS.selectedModel),
+      reactivityModel: migrateModelId(saved.reactivityModel, DEFAULT_SETTINGS.reactivityModel),
+    };
+  });
   const [characters, setCharacters] = useState([]);
   const [loadingChars, setLoadingChars] = useState(true);
   const [loadError, setLoadError] = useState("");
