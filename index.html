@@ -1075,6 +1075,13 @@ const CLOTHING_MENTION_RE = /\b(wear|wears|wearing|wore|worn|dress|dresses|dress
 // The tracker returns null for "no change". Guard against the small model
 // answering with a placeholder string instead, which would otherwise be
 // written into the wardrobe as if it were a real outfit.
+// "a dress" tells the image model almost nothing, so every outfit it renders
+// is a different dress. Shared by the two places that write an outfit, so the
+// seeded one and the tracked one describe clothing to the same standard.
+// Capped at 15 words: the outfit is only one part of the image prompt, and an
+// over-long value crowds out the scene.
+const OUTFIT_DETAIL_RULE = `Describe it as if to someone drawing it: colour, the garment itself, and one distinguishing detail of cut, length or fabric, plus footwear if it would be visible. Write "a fitted black knee-length dress with thin straps, and black heels", not "a dress". Under 15 words. Do not invent details the conversation contradicts — where it is silent, choose something ordinary and plausible for the setting.`;
+
 // A wardrobe change must come with the words from the conversation that show
 // it. Without this the tracker would assert changes nothing supported —
 // re-dressing someone who was naked, or stripping someone nobody mentioned.
@@ -2644,8 +2651,9 @@ Setting: ${scenario.setting || ""}
 Opening: ${scenario.message || ""}
 
 Infer:
-- charOutfit: what ${currentChar.name} is wearing, e.g. "a black dress and heels"
+- charOutfit: what ${currentChar.name} is wearing
 - userOutfit: what the other person (the User) is plausibly wearing given the same setting
+- Both outfits: ${OUTFIT_DETAIL_RULE}
 - location: where the scene takes place, e.g. "a small kitchen at night"
 - charPose: ${currentChar.name}'s body position as a phrase completing "she is ...", e.g. "standing at the stove with her back turned"
 - userPose: the User's body position, same phrasing, e.g. "standing in the doorway"
@@ -2713,7 +2721,8 @@ Rules:
 - null means no change, and is the right answer for a person the conversation does not show changing.
 - Clothing being mentioned, described, touched or admired is not a change.
 - Never reword an unchanged value. Return null rather than restating it.
-- Describe what they are wearing NOW, in full. If they removed some clothing, list what REMAINS: someone stripped to their underwear is wearing "a black bra and panties", NOT "nothing".
+- Describe what they are wearing NOW, in full. If they removed some clothing, list what REMAINS: someone stripped to their underwear is wearing "a black lace bra and matching panties", NOT "nothing".
+- ${OUTFIT_DETAIL_RULE}
 - Use "nothing" only when that person is completely naked.
 - Never dress someone who was undressed unless the conversation shows them putting clothing on.
 - Evidence must be a short quote copied from the conversation above. If you cannot quote it, the answer is null.
