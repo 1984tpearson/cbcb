@@ -1075,6 +1075,20 @@ const CLOTHING_MENTION_RE = /\b(wear|wears|wearing|wore|worn|dress|dresses|dress
 // The tracker returns null for "no change". Guard against the small model
 // answering with a placeholder string instead, which would otherwise be
 // written into the wardrobe as if it were a real outfit.
+// A wardrobe change must come with the words from the conversation that show
+// it. Without this the tracker would assert changes nothing supported —
+// re-dressing someone who was naked, or stripping someone nobody mentioned.
+// The quote is checked against the real text, so an invented one is rejected.
+function evidenceSupported(evidence, text) {
+  if (typeof evidence !== "string") return false;
+  const norm = (v) => v.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  const haystack = norm(text);
+  const words = norm(evidence).split(" ").filter(w => w.length > 3);
+  if (words.length < 2) return false;
+  const hits = words.filter(w => haystack.includes(w)).length;
+  return hits / words.length >= 0.6;
+}
+
 const NON_UPDATES = new Set(["", "null", "none", "unknown", "unchanged", "n/a", "na", "same", "no change", "-"]);
 function cleanOutfitUpdate(value) {
   if (typeof value !== "string") return null;
@@ -2676,26 +2690,36 @@ No other text.` }]
       // even in conversations where nobody touched their clothes.
       if (!CLOTHING_MENTION_RE.test(recent)) return;
       const raw = await aiComplete({
-        model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
+        // The conversation model, not the 8B one. Two people, partial states
+        // and "did this actually change?" is more than the small model could
+        // do: it was collapsing "stripped to her underwear" to "nothing",
+        // applying her changes to the User as well, and re-dressing people
+        // nobody had dressed.
+        model: settings.selectedModel,
         messages: [{ role: "user", content:
-`You are tracking what characters are wearing in a roleplay conversation.
+`You are tracking what two people are wearing in a roleplay conversation.
 
-Current wardrobe state:
+Current state:
 - ${currentChar.name} is wearing: ${currentChar.charOutfit || "unknown"}
 - User is wearing: ${currentChar.userOutfit || "unknown"}
 
 Recent conversation:
 ${recent}
 
-Your job is to detect CHANGES only. The current state above is already correct.
+Report a change ONLY where the conversation shows that person's clothing actually changing, and quote the words that show it.
 
-Instructions:
-- Return null for a field unless the recent conversation explicitly shows that person putting on, taking off, or changing clothing.
-- null means "no change" — the existing value is kept. This is the correct answer almost every time.
-- Clothing merely being mentioned, described, touched, admired, or referred to is NOT a change. Only an actual change of what is worn is.
-- Never rewrite, reword, shorten or "tidy up" an existing value. If it did not change, return null. Do not echo the current value back.
-- If a change did happen, write the person's complete new outfit, specific and concise — e.g. "a white cotton shirt, jeans, and sneakers". Use "nothing" if they are now fully undressed.
-- Return ONLY valid JSON: {"charOutfit": null, "userOutfit": null}
+Rules:
+- ${currentChar.name} and the User are tracked separately. NEVER apply one person's change to the other. If only ${currentChar.name} undressed, the User's outfit is unchanged.
+- null means no change, and is the right answer for a person the conversation does not show changing.
+- Clothing being mentioned, described, touched or admired is not a change.
+- Never reword an unchanged value. Return null rather than restating it.
+- Describe what they are wearing NOW, in full. If they removed some clothing, list what REMAINS: someone stripped to their underwear is wearing "a black bra and panties", NOT "nothing".
+- Use "nothing" only when that person is completely naked.
+- Never dress someone who was undressed unless the conversation shows them putting clothing on.
+- Evidence must be a short quote copied from the conversation above. If you cannot quote it, the answer is null.
+
+Return ONLY valid JSON:
+{"charOutfit": null, "charEvidence": null, "userOutfit": null, "userEvidence": null}
 No other text.` }]
       });
       const parsed = parseJsonReply(raw);
@@ -2703,9 +2727,18 @@ No other text.` }]
       // Patch only the wardrobe fields against the latest character, leaving
       // everything else (notably sliders, which reactivity may have just moved)
       // untouched. Returning prev unchanged makes commitCharacter a no-op.
+      // A proposed change is only accepted if its quote really appears in the
+      // conversation. This is what stops the two failure modes that survived
+      // every prompt tweak: a change invented for someone nobody mentioned,
+      // and one person's undressing being copied onto the other.
+      const charProposed = evidenceSupported(parsed.charEvidence, recent)
+        ? cleanOutfitUpdate(parsed.charOutfit) : null;
+      const userProposed = evidenceSupported(parsed.userEvidence, recent)
+        ? cleanOutfitUpdate(parsed.userOutfit) : null;
+      if (!charProposed && !userProposed) return;
       commitCharacter(prev => {
-        const charOutfit = cleanOutfitUpdate(parsed.charOutfit) ?? prev.charOutfit ?? null;
-        const userOutfit = cleanOutfitUpdate(parsed.userOutfit) ?? prev.userOutfit ?? null;
+        const charOutfit = charProposed ?? prev.charOutfit ?? null;
+        const userOutfit = userProposed ?? prev.userOutfit ?? null;
         if (charOutfit === prev.charOutfit && userOutfit === prev.userOutfit) return prev;
         return { ...prev, charOutfit, userOutfit };
       });
