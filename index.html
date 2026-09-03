@@ -697,6 +697,52 @@ function personalitySliderPreview(key, value) {
   return tier ? tier.preview : "";
 }
 
+// ─── PRIVATE INTENTIONS ──────────────────────────────────────────────────────
+// How much nerve the character has, from sliders they already have. A coy
+// character subtracts: working up to things sideways takes longer than saying
+// them, even when they are not short of confidence.
+function intentionBoldness(sliders) {
+  const w = CFG.intentions.boldnessWeights || {};
+  const s = sliders || DEFAULT_SLIDERS;
+  const value = (k) => s[k] ?? CFG.sliderDefaults[k] ?? 50;
+  let total = 0;
+  for (const key of Object.keys(w)) total += w[key] * value(key);
+  return Math.max(0, Math.min(100, total));
+}
+
+// The progress a character must reach before they will actually make the move.
+// A bold character needs about half what a timid one does for the same goal.
+function intentionThreshold(intention, sliders) {
+  const nerve = Math.max(0, Math.min(100, Number(intention.nerve) || 0));
+  const relief = CFG.intentions.boldnessRelief || 200;
+  return Math.max(1, nerve * (1 - intentionBoldness(sliders) / relief));
+}
+
+const activeIntentions = (character) =>
+  (character.intentions || []).filter(i => i && i.goal && (i.status || "active") === "active");
+
+// The block the character sees. Progress is described, never numbered — handed
+// "progress 25/70" a model narrates the number instead of acting on it.
+function buildIntentionsNote(character) {
+  const cfg = CFG.intentions;
+  if (!cfg) return "";
+  const active = activeIntentions(character);
+  if (active.length === 0) return "";
+  const sliders = character.sliders || DEFAULT_SLIDERS;
+
+  const lines = active.map(intent => {
+    const threshold = intentionThreshold(intent, sliders);
+    const ratio = Math.max(0, Math.min(1, (Number(intent.progress) || 0) / threshold));
+    const stage = (cfg.stages || []).find(st => ratio <= st.max) || (cfg.stages || [])[cfg.stages.length - 1];
+    // Goals are written as fragments ("get the user to come swimming"), so the
+    // stage note needs a stop in front of it or the two run together.
+    const goal = /[.!?]$/.test(intent.goal.trim()) ? intent.goal.trim() : `${intent.goal.trim()}.`;
+    return `- ${goal}${stage ? ` ${stage.note}` : ""}`;
+  });
+
+  return cfg.header + lines.join("\n") + (cfg.pacing || "");
+}
+
 // Ties vocabulary to the character's age. The pet-names slider controls how
 // often they reach for an endearment but never which ones, so every character
 // landed on the same "hun"/"darling" register whether they were 19 or 80.
@@ -842,6 +888,7 @@ async function sendChat({ messages, character, model, settings }) {
   const basePrompt = character.persona || `You are ${character.name}.`;
   const appearanceNote = buildAppearanceSystemNote(character.appearance);
   const voiceNote = buildAgeVoiceNote(character.age, character.sliders || DEFAULT_SLIDERS, character.disabledSliders || []);
+  const intentionsNote = buildIntentionsNote(character);
   const personaNote = buildUserPersonaNote(resolveUserPersona(character, settings || {}));
   const nsfwClause = character.nsfw
     ? "\n\nYou are permitted to engage with adult, explicit, and NSFW content. Do not refuse or add disclaimers."
@@ -877,7 +924,7 @@ async function sendChat({ messages, character, model, settings }) {
       ].filter(Boolean).join(" ")} Stay physically consistent with this — don't teleport, stand up without standing up, or forget where you both are. Move only when the scene actually calls for it, and describe the movement when you do.`
     : "";
 
-  const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + voiceNote + personaNote + nsfwClause + actionClause + plainClause + wardrobeClause + stagingClause + memoryClause;
+  const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + voiceNote + personaNote + nsfwClause + actionClause + plainClause + wardrobeClause + stagingClause + memoryClause + intentionsNote;
 
   const reply = await aiComplete({
     model,
@@ -1661,6 +1708,8 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
   const [nsfw, setNsfw] = useState(character.nsfw || false);
   const [autoImage, setAutoImage] = useState(character.autoImage || false);
   const [speakPlainly, setSpeakPlainly] = useState(character.speakPlainly || false);
+  const [intentions, setIntentions] = useState(character.intentions || []);
+  const [intentionsEnabled, setIntentionsEnabled] = useState(character.intentionsEnabled !== false);
   const [memorySummary, setMemorySummary] = useState(character.memorySummary || "");
   const [memoryFacts, setMemoryFacts] = useState(character.memoryFacts || "");
   const [charOutfit, setCharOutfit] = useState(character.charOutfit || "");
@@ -1781,6 +1830,61 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
           )}
 
           <div style={S.divider} />
+          <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Private Intentions</span>
+          <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>
+            Things {character.name} quietly wants and works toward over many turns, without saying so. They form on their own as you talk — edit or add your own here. "Nerve" is how much courage the goal takes: the higher it is, the longer they work up to it, and a shy character takes longer than a bold one for the same goal.
+          </p>
+          <label style={{ ...S.label, display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
+            <input type="checkbox" checked={intentionsEnabled} onChange={e => setIntentionsEnabled(e.target.checked)} />
+            Let {character.name} form intentions
+          </label>
+          {intentions.length === 0 && (
+            <p style={{ fontSize: 12, color: "var(--text4)", margin: "6px 0" }}>
+              None yet — they appear after a few messages, or add one now.
+            </p>
+          )}
+          {intentions.map((intent, idx) => {
+            const threshold = intentionThreshold(intent, sliders);
+            const pct = Math.round(Math.max(0, Math.min(1, (intent.progress || 0) / threshold)) * 100);
+            const done = (intent.status || "active") !== "active";
+            const set = (patch) => setIntentions(list => list.map((x, i) => i === idx ? { ...x, ...patch } : x));
+            return (
+              <div key={intent.id || idx} style={{ border:"1px solid var(--border)", borderRadius:10, padding:10, marginBottom:8, opacity: done ? 0.55 : 1 }}>
+                <textarea style={{ ...S.input, height: 48, resize:"vertical" }}
+                  value={intent.goal || ""} placeholder="what they want, e.g. get the user to come swimming"
+                  onChange={e => set({ goal: e.target.value })} />
+                <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:6 }}>
+                  <span style={{ fontSize:11, color:"var(--text4)", flexShrink:0 }}>Nerve</span>
+                  <input type="range" min={0} max={100} style={{ flex:1 }}
+                    value={intent.nerve ?? 40} onChange={e => set({ nerve: Number(e.target.value) })} />
+                  <span style={{ fontSize:11, color:"var(--text3)", width:26, textAlign:"right" }}>{intent.nerve ?? 40}</span>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:8 }}>
+                  <span style={{ fontSize:11, color:"var(--text4)", flexShrink:0 }}>Progress</span>
+                  <div style={{ flex:1, height:6, borderRadius:3, background:"var(--bg3)", overflow:"hidden" }}>
+                    <div style={{ width:`${pct}%`, height:"100%", background: pct >= 100 ? "var(--pink)" : "var(--blue, #7aa7d6)" }} />
+                  </div>
+                  <span style={{ fontSize:11, color:"var(--text3)", width:64, textAlign:"right" }}>
+                    {done ? (intent.status === "achieved" ? "achieved" : "dropped") : (pct >= 100 ? "ready" : `${pct}%`)}
+                  </span>
+                </div>
+                <div style={{ display:"flex", gap:8, marginTop:8 }}>
+                  {done
+                    ? <button style={{ ...S.btnSecondary, flex:1, fontSize:12 }} onClick={() => set({ status:"active" })}>Reactivate</button>
+                    : <button style={{ ...S.btnSecondary, flex:1, fontSize:12 }} onClick={() => set({ progress: 0 })}>Reset progress</button>}
+                  <button style={{ ...S.btnSecondary, flex:1, fontSize:12 }}
+                    onClick={() => setIntentions(list => list.filter((_, i) => i !== idx))}>Remove</button>
+                </div>
+              </div>
+            );
+          })}
+          <button style={{ ...S.btnSecondary, marginBottom: 4 }}
+            onClick={() => setIntentions(list => [...list, {
+              id: `int_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+              goal: "", nerve: 40, progress: 0, status: "active", source: "manual",
+            }])}>+ Add an intention</button>
+
+          <div style={S.divider} />
           <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Memory</span>
           <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Injected into every message so the character remembers past events even as the conversation grows long. Edit freely or regenerate from chat history.</p>
           <label style={S.label}>Story So Far</label>
@@ -1881,7 +1985,7 @@ Return ONLY the JSON object, no other text.` }] });
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, disabledSliders, reactiveEnabled, memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, staging: hasStaging(staging) ? staging : null, explicitDetail: explicitDetail.trim() || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
+          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, disabledSliders, reactiveEnabled, intentionsEnabled, intentions: intentions.filter(i => (i.goal || "").trim()), memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, staging: hasStaging(staging) ? staging : null, explicitDetail: explicitDetail.trim() || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
         </div>
       </div>
     </div>
@@ -2762,6 +2866,103 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     }
   };
 
+  // Forms new intentions, and moves existing ones along. Folded into one pass
+  // so a turn costs at most one extra call, and usually none: generation only
+  // runs when there is room and enough conversation to base a want on.
+  const applyIntentions = async (newMessages, currentChar) => {
+    const cfg = CFG.intentions;
+    if (!cfg || currentChar.intentionsEnabled === false) return;
+    const recent = newMessages.filter(m => m.role !== "image").slice(-8)
+      .map(m => `${m.role === "user" ? "User" : currentChar.name}: ${m.content}`).join("\n");
+    const turns = newMessages.filter(m => m.role !== "image").length;
+    const model = settings.reactivityModel || CFG.models.reactivity;
+
+    // ── Advance what already exists ──
+    const existing = activeIntentions(currentChar);
+    if (existing.length > 0) {
+      try {
+        const list = existing.map((it, i) => `${i}. ${it.goal}`).join("\n");
+        const raw = await aiComplete({ model, messages: [{ role: "user", content:
+          fillTemplate(cfg.advancePrompt, { name: currentChar.name, list, recent }) }] });
+        const updates = parseJsonReply(raw);
+        if (Array.isArray(updates)) {
+          const maxDelta = cfg.maxDeltaPerTurn || 20;
+          commitCharacter(prev => {
+            const all = [...(prev.intentions || [])];
+            let changed = false;
+            for (const u of updates) {
+              const target = existing[Number(u && u.i)];
+              if (!target) continue;
+              const idx = all.findIndex(x => x.id === target.id);
+              if (idx === -1) continue;
+              const delta = Math.max(-maxDelta, Math.min(maxDelta, Number(u.delta) || 0));
+              const status = ["active", "achieved", "abandoned"].includes(u.status) ? u.status : all[idx].status;
+              const progress = Math.max(0, Math.min(100, (Number(all[idx].progress) || 0) + delta));
+              if (progress === all[idx].progress && status === all[idx].status) continue;
+              all[idx] = { ...all[idx], progress, status };
+              changed = true;
+            }
+            return changed ? { ...prev, intentions: all } : prev;
+          });
+        }
+      } catch (e) {
+        console.warn("Intention progress update failed:", e.message);
+      }
+    }
+
+    // ── Form new ones, if there is room and enough to go on ──
+    const live = activeIntentions(characterRef.current || currentChar);
+    const room = (cfg.maxActive || 2) - live.length;
+    const dueForNew = turns >= (cfg.generateAfterTurns || 6)
+      && (live.length === 0 || turns % (cfg.regenerateEveryTurns || 12) === 0);
+    if (room <= 0 || !dueForNew) return;
+
+    try {
+      const sliders = currentChar.sliders || DEFAULT_SLIDERS;
+      const raw = await aiComplete({ model, messages: [{ role: "user", content:
+        fillTemplate(cfg.generatePrompt, {
+          name: currentChar.name,
+          persona: currentChar.persona || "",
+          relationship: currentChar.relationship === "Custom"
+            ? (currentChar.relationshipCustom || "unspecified")
+            : (currentChar.relationship || "unspecified"),
+          familiarity: sliders.familiarity ?? 10,
+          likes: sliders.likesUser ?? 50,
+          attraction: sliders.attractionToUser ?? 50,
+          nsfwNote: currentChar.nsfw ? (cfg.nsfwNote || "") : (cfg.sfwNote || ""),
+          recent,
+          existing: live.map(i => i.goal).join("; ") || "none",
+          max: room,
+        }) }] });
+      const parsed = parseJsonReply(raw);
+      if (!Array.isArray(parsed) || parsed.length === 0) return;
+
+      const fresh = parsed.slice(0, room)
+        .filter(p => p && typeof p.goal === "string" && p.goal.trim())
+        .map(p => ({
+          id: `int_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          goal: p.goal.trim().slice(0, 140),
+          nerve: Math.max(0, Math.min(100, Math.round(Number(p.nerve)) || 40)),
+          progress: 0,
+          status: "active",
+          source: "auto",
+        }));
+      if (fresh.length === 0) return;
+      commitCharacter(prev => {
+        // Re-check against the newest state: the panel may have added one while
+        // this was in flight.
+        const all = prev.intentions || [];
+        const spare = (cfg.maxActive || 2) - all.filter(i => (i.status || "active") === "active").length;
+        if (spare <= 0) return prev;
+        const seen = new Set(all.map(i => (i.goal || "").toLowerCase()));
+        const add = fresh.filter(f => !seen.has(f.goal.toLowerCase())).slice(0, spare);
+        return add.length ? { ...prev, intentions: [...all, ...add] } : prev;
+      });
+    } catch (e) {
+      console.warn("Intention generation failed:", e.message);
+    }
+  };
+
   const sendMessage = async (content) => {
     const text = content || input.trim();
     if (!text || loading) return;
@@ -2778,6 +2979,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       applyReactivity(withReply, character);
       applyWardrobe(withReply, character);
       applyStaging(withReply, character);
+      applyIntentions(withReply, character);
     } catch (e) { setError(e.message); }
     setLoading(false);
   };

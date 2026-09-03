@@ -400,6 +400,45 @@
       noEndearments: " You do not use endearments; this describes your general speech register only.",
     },
 
+    // ── Private intentions ───────────────────────────────────────────────────
+    // Things the character wants and works toward quietly across many turns —
+    // asking the user out, getting them to the pool, steering the evening
+    // somewhere. The hard part is not storing a goal, it is stopping the model
+    // from simply achieving it in the very next message, which is worse than
+    // having no intentions at all. Two things hold it back: the pacing rules,
+    // and a gate that keeps the character from acting until progress has
+    // caught up with how much nerve the goal takes for them specifically.
+    intentions: {
+      maxActive: 2,
+      header: "\n\n[PRIVATE INTENTIONS — yours alone, never stated outright]\n",
+      pacing: "\nThese are private. Never announce them, never explain them, never let them run the conversation. At most ONE small, natural step toward ONE of them per reply — a question, a hint, an excuse to be nearer, a suggestion dropped lightly — and only when the conversation offers an opening. If there is no natural opening this turn, do nothing about them at all; they simply sit in the back of your mind. If the user deflects, changes the subject, or does not take you up on it, let it drop for now rather than pushing.",
+      // Said per intention, in place of a number: a model handed "progress
+      // 25/70" tends to narrate the number rather than act on it.
+      stages: [
+        { max: 0.25, note: "You have barely begun working toward this." },
+        { max: 0.60, note: "You have made a little headway on this." },
+        { max: 0.99, note: "You are close to this, but not quite there yet." },
+        { max: 1.00, note: "You are ready to act on this — take the chance when it next comes naturally." },
+      ],
+      // How much courage a character has, from the sliders they already have.
+      // Coyness subtracts: a coy character works up to things sideways rather
+      // than directly, so they take longer to make the actual move.
+      boldnessWeights: { confidence: 0.4, forwardness: 0.4, coyness: -0.2 },
+      // A maximally bold character needs half the progress a timid one does.
+      // threshold = nerve * (1 - boldness / 200)
+      boldnessRelief: 200,
+      // Turns of conversation before the character may form an intention, and
+      // how often to reconsider after that. Too eager and every chat opens with
+      // an agenda before anyone has said anything.
+      generateAfterTurns: 6,
+      regenerateEveryTurns: 12,
+      generatePrompt: "Read this roleplay conversation and decide what {name} privately WANTS right now — a concrete thing they would quietly work toward over the next while, not a mood or a feeling.\n\nGood intentions are specific and achievable within a conversation: getting the user to come swimming, working up the nerve to ask them out, finding out whether they are seeing someone, getting them to stay longer, moving somewhere more private. Bad intentions are vague states like \"grow closer\" or \"be happy\".\n\nCharacter: {name}. {persona}\nRelationship to the user: {relationship}\nHow well they know the user: {familiarity}/100. How much they like them: {likes}/100. Attraction: {attraction}/100.\n{nsfwNote}\nConversation so far:\n{recent}\n\nExisting intentions (do not repeat or restate these): {existing}\n\nReturn at most {max} intentions, fewer if only one fits — an empty array is a fine answer if nothing has been set up yet. For each, give:\n- goal: what they want, second person, under 15 words, e.g. \"get the user to come swimming with you\"\n- nerve: 0-100, how much courage this takes THEM specifically given their personality — asking a casual question is 10, admitting feelings is 80\n\nReturn ONLY valid JSON: [{\"goal\": \"...\", \"nerve\": 40}]\nNo other text.",
+      nsfwNote: "This character is written for adult content: sexual and explicit intentions are appropriate where the conversation supports them.",
+      sfwNote: "Keep intentions non-sexual.",
+      advancePrompt: "Read the end of this roleplay conversation and judge what happened to {name}'s private goals.\n\n{name}'s goals:\n{list}\n\nConversation:\n{recent}\n\nFor each goal, by its number, return:\n- delta: -20 to 20, how much closer they got this exchange. 0 if it did not come up at all, which is common and correct. Small positive numbers for a hint landing well or the user responding warmly. Negative if the user deflected, refused, or the moment was lost.\n- status: \"active\" normally, \"achieved\" if the goal has actually happened, \"abandoned\" if it has become impossible or the user has clearly refused.\n\nReturn ONLY valid JSON: [{\"i\": 0, \"delta\": 5, \"status\": \"active\"}]\nNo other text.",
+      maxDeltaPerTurn: 20,
+    },
+
     // ── Prompt fragments ─────────────────────────────────────────────────────
     prompts: {
       personalityHeader: "\n\n[PERSONALITY PARAMETERS]\n",

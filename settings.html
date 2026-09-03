@@ -429,6 +429,7 @@
     ["appearance", "Appearance", buildAppearance],
     ["prompts", "Prompt text", buildPrompts],
     ["voice", "Age & voice", buildVoice],
+    ["intentions", "Intentions", buildIntentions],
     ["image", "Image prompts", buildImage],
     ["models", "Models & options", buildModels],
     ["advanced", "Advanced", buildAdvanced],
@@ -544,6 +545,43 @@
         field("Used when the character has no age set", "ageVoice.templateNoAge", "area", "{banned} is substituted in."),
       ],
     )];
+  }
+
+  function buildIntentions() {
+    const i = "intentions.";
+    return [
+      card("Private intentions",
+        "Things a character quietly wants and works toward over many turns without saying so. The pacing rules and the nerve gate are what stop a model simply achieving the goal in its next message \u2014 loosen them and characters start blurting.",
+        [
+          field("Most active at once", i + "maxActive", "number"),
+          field("Block heading", i + "header", "area"),
+          field("Pacing rules", i + "pacing", "area",
+            "Sent every turn alongside the goals. This is the part doing the real work."),
+          jsonField("Progress wording", i + "stages",
+            "Said instead of a number \u2014 a model handed \u201cprogress 25/70\u201d narrates the figure rather than acting on it. \u201cmax\u201d is the fraction of the way to the gate."),
+        ]),
+      card("The nerve gate",
+        "How much progress a character needs before they will actually make their move. Nerve is per goal; boldness comes from the character\u2019s own sliders, so a shy character takes longer than a bold one for the same goal.",
+        [
+          jsonField("Boldness weights", i + "boldnessWeights",
+            "Slider keys to weights. Coyness is negative: a coy character works up to things sideways."),
+          field("Boldness relief", i + "boldnessRelief", "number",
+            "threshold = nerve \u00d7 (1 \u2212 boldness \u00f7 this). Higher means boldness helps less."),
+          field("Most progress per turn", i + "maxDeltaPerTurn", "number"),
+        ]),
+      card("Forming intentions",
+        "When a character may invent a goal of their own, and what they are told to aim for.",
+        [
+          field("Turns before the first one", i + "generateAfterTurns", "number"),
+          field("Reconsider every N turns", i + "regenerateEveryTurns", "number"),
+          field("Generation prompt", i + "generatePrompt", "area",
+            "{name}, {persona}, {relationship}, {familiarity}, {likes}, {attraction}, {nsfwNote}, {recent}, {existing} and {max} are substituted in."),
+          field("Added for an adult character", i + "nsfwNote", "area"),
+          field("Added otherwise", i + "sfwNote", "area"),
+          field("Progress prompt", i + "advancePrompt", "area",
+            "{name}, {list} and {recent} are substituted in."),
+        ]),
+    ];
   }
 
   function buildImage() {
