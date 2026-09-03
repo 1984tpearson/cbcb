@@ -724,7 +724,8 @@ function intentionBoldness(sliders) {
 function intentionThreshold(intention, sliders) {
   const nerve = Math.max(0, Math.min(100, Number(intention.nerve) || 0));
   const relief = CFG.intentions.boldnessRelief || 200;
-  return Math.max(1, nerve * (1 - intentionBoldness(sliders) / relief));
+  const scale = CFG.intentions.nerveToProgress ?? 1;
+  return Math.max(1, nerve * scale * (1 - intentionBoldness(sliders) / relief));
 }
 
 const activeIntentions = (character) =>
@@ -739,9 +740,13 @@ function buildIntentionsNote(character) {
   if (active.length === 0) return "";
   const sliders = character.sliders || DEFAULT_SLIDERS;
 
-  const lines = active.map(intent => {
+  const ratioFor = (intent) => {
     const threshold = intentionThreshold(intent, sliders);
-    const ratio = Math.max(0, Math.min(1, (Number(intent.progress) || 0) / threshold));
+    return Math.max(0, Math.min(1, (Number(intent.progress) || 0) / threshold));
+  };
+
+  const lines = active.map(intent => {
+    const ratio = ratioFor(intent);
     const stage = (cfg.stages || []).find(st => ratio <= st.max) || (cfg.stages || [])[cfg.stages.length - 1];
     // Goals are written as fragments ("get the user to come swimming"), so the
     // stage note needs a stop in front of it or the two run together.
@@ -752,15 +757,30 @@ function buildIntentionsNote(character) {
   // How they will go about it, from the honesty slider. Sits with the goals
   // rather than relying on the personality block far above to be connected to
   // them. Skipped when honesty has been switched off, like any other trait.
-  let methods = "";
+  // A manipulative character is working the goal from the start and escalates
+  // their tactics as it advances; an honest one does not begin manoeuvring at
+  // all. So the method depends on honesty AND on how far along this particular
+  // goal is — not on honesty alone.
   const honestyOff = new Set(character.disabledSliders || []).has("honesty");
-  if (!honestyOff && Array.isArray(cfg.methodTiers)) {
-    const honesty = sliders.honesty ?? CFG.sliderDefaults.honesty ?? 80;
-    const tier = tierFor(cfg.methodTiers, honesty);
-    if (tier && tier.note) methods = `\n${tier.note}`;
-  }
+  const honesty = sliders.honesty ?? CFG.sliderDefaults.honesty ?? 80;
+  const methodTier = honestyOff ? null : tierFor(cfg.methodTiers, honesty);
+  const [midAt, lateAt] = cfg.methodProgressBands || [0.4, 0.8];
+  const methodFor = (ratio) => {
+    if (!methodTier) return "";
+    const band = ratio >= lateAt ? "late" : (ratio >= midAt ? "mid" : "early");
+    return methodTier[band] || "";
+  };
 
-  return cfg.header + lines.join("\n") + methods + (cfg.pacing || "");
+  const notes = active.map(intent => methodFor(ratioFor(intent)));
+  const shared = notes.length > 0 && notes.every(n => n === notes[0]) ? notes[0] : "";
+
+  // When both goals sit in the same band the method is stated once rather than
+  // repeated verbatim under each; when they differ it goes with its own goal.
+  const body = shared
+    ? lines.join("\n")
+    : lines.map((line, i) => notes[i] ? `${line} ${notes[i]}` : line).join("\n");
+
+  return cfg.header + body + (shared ? `\n${shared}` : "") + (cfg.pacing || "");
 }
 
 // Rolls intentions back to a snapshot taken before a reply that has since been

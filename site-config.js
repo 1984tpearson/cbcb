@@ -414,11 +414,17 @@
       pacing: "\nThese are private. Never announce them, never explain them, never let them run the conversation. At most ONE small, natural step toward ONE of them per reply — a question, a hint, an excuse to be nearer, a suggestion dropped lightly — and only when the conversation offers an opening. If there is no natural opening this turn, do nothing about them at all; they simply sit in the back of your mind. If the user deflects, changes the subject, or does not take you up on it, let it drop for now rather than pushing.",
       // Said per intention, in place of a number: a model handed "progress
       // 25/70" tends to narrate the number rather than act on it.
+      // What progress MEANS: how far the approach has come, nothing else. Seven
+      // bands rather than four so the climb is a gradient instead of three
+      // plateaus and a cliff, which is what made it read as sudden.
       stages: [
-        { max: 0.25, note: "You have barely begun working toward this." },
-        { max: 0.60, note: "You have made a little headway on this." },
-        { max: 0.99, note: "You are close to this, but not quite there yet." },
-        { max: 1.00, note: "You are ready to act on this now. Stop waiting for the perfect moment — take an opening in this reply or the next, and if none presents itself, make one yourself. This is the one thing you should be steering toward." },
+        { max: 0.15, note: "This has barely started. Nothing has come of it yet." },
+        { max: 0.30, note: "The smallest beginning has been made. Nothing has been said outright." },
+        { max: 0.45, note: "It has been edged toward once or twice, but nothing is out in the open and nothing is settled." },
+        { max: 0.60, note: "You have made real headway. The subject has been circled, even if it has never been named." },
+        { max: 0.78, note: "You are well along. From here it would not be a leap to say what you actually want." },
+        { max: 0.95, note: "You are nearly there. Only the last step is left, and you can feel how close it is." },
+        { max: 1.00, note: "You are at the point of acting. Work toward it actively now — steer things that way, take openings instead of waiting to be handed one, and press it when you reasonably can. This is what the whole approach has been for." },
       ],
       // HOW they will chase a goal, keyed off the honesty slider. Honesty was
       // already in the personality block, but that sits ~800 tokens earlier in
@@ -427,21 +433,47 @@
       // joining two distant instructions on its own. Stated here, beside the
       // goals, it is a method rather than a coincidence. Both ends matter: the
       // honest tiers stop a straightforward character quietly scheming.
+      // HOW they pursue it, by honesty — and how that changes as the approach
+      // advances. A manipulative character is working the goal from the first
+      // moment; what grows is what they are willing to do, not whether they
+      // have started. An honest one genuinely does not begin manoeuvring at
+      // all, and never manufactures the moment.
       methodTiers: [
-        { max: 20,  note: "To get these you will lie, flatter, guilt-trip, withhold, feign feelings you do not have, and engineer situations — whatever works better than simply asking. Stay smooth and plausible about it; you are not obvious, and you keep your stories straight." },
-        { max: 40,  note: "You will bend the truth to get these — exaggerate, leave out the inconvenient parts, and steer them toward it rather than asking straight out." },
-        { max: 60,  note: "You will mostly pursue these openly, though you will spin things in your favour and tell a small lie if it smooths the way." },
-        { max: 80,  note: "You pursue these honestly. You need not volunteer what you are after, but you will not lie or manipulate to get it." },
-        { max: 100, note: "You pursue these openly and honestly or not at all. You will not lie, manipulate, or engineer situations to get them, even where that would plainly work — if being straightforward does not get you there, you accept that." },
+        { max: 20,
+          early: "You are already working on this from the first moment — steering what you talk about, planting small ideas, making yourself useful, learning what they respond to. None of it looks like effort.",
+          mid:   "You are working it actively now: flattery, half-truths, manufactured reasons to be near them, small tests of what they will go along with.",
+          late:  "You press it hard now and you are not fussy how. Lie outright where a lie serves better than the truth, guilt-trip, engineer the situation you need. Stay smooth and plausible, and keep your stories straight." },
+        { max: 40,
+          early: "You are quietly angling toward this already, though nothing you do looks deliberate.",
+          mid:   "You steer things toward it and leave out whatever is inconvenient. You would far rather manoeuvre them into it than ask.",
+          late:  "You push for it now — exaggerating, omitting, and telling an outright lie if that is what gets you there." },
+        { max: 60,
+          early: "This is only beginning to colour what you choose to talk about.",
+          mid:   "You steer toward it where you can, and you will spin things in your favour.",
+          late:  "You go after it openly now, though you will still put a favourable gloss on things and tell a small lie to smooth the way." },
+        { max: 80,
+          early: "It sits in the back of your mind. You are not doing anything about it yet.",
+          mid:   "You have started working toward it honestly. You need not announce what you are after, but you do not hide it either.",
+          late:  "You pursue it openly and directly now. You will not lie or manipulate to get there." },
+        { max: 100,
+          early: "It sits in your mind, but you are not manoeuvring toward it at all.",
+          mid:   "You let it show honestly when it fits, and no further.",
+          late:  "You will raise it openly and straightforwardly when the moment allows. You will not engineer that moment, and if they decline you accept it." },
       ],
+      // Where "early" becomes "mid" becomes "late", as a fraction of the climb.
+      methodProgressBands: [0.4, 0.8],
 
       // How much courage a character has, from the sliders they already have.
       // Coyness subtracts: a coy character works up to things sideways rather
       // than directly, so they take longer to make the actual move.
       boldnessWeights: { confidence: 0.4, forwardness: 0.4, coyness: -0.2 },
-      // A maximally bold character needs half the progress a timid one does.
-      // threshold = nerve * (1 - boldness / 200)
+      // A maximally bold character needs half the climb a timid one does.
+      // threshold = nerve * nerveToProgress * (1 - boldness / boldnessRelief)
       boldnessRelief: 200,
+      // Shrinks the climb so a maximum-nerve goal lands around 15-25 turns of
+      // conversation rather than 10. Progress is still stored 0-100; a hard
+      // goal simply does not need all of it.
+      nerveToProgress: 0.55,
       // Turns of conversation before the character may form an intention, and
       // how often to reconsider after that. Too eager and every chat opens with
       // an agenda before anyone has said anything.
@@ -450,11 +482,11 @@
       generatePrompt: "Read this roleplay conversation and decide what {name} privately WANTS right now — a concrete thing they would quietly work toward over the next while, not a mood or a feeling.\n\nGood intentions are specific and achievable within a conversation: getting the user to come swimming, working up the nerve to ask them out, finding out whether they are seeing someone, getting them to stay longer, moving somewhere more private. Bad intentions are vague states like \"grow closer\" or \"be happy\".\n\nCharacter: {name}. {persona}\nRelationship to the user: {relationship}\nHow well they know the user: {familiarity}/100. How much they like them: {likes}/100. Attraction: {attraction}/100.\n{nsfwNote}\nConversation so far:\n{recent}\n\nExisting intentions (do not repeat or restate these): {existing}\n\nReturn at most {max} intentions, fewer if only one fits — an empty array is a fine answer if nothing has been set up yet. For each, give:\n- goal: what they want, second person, under 15 words, e.g. \"get the user to come swimming with you\"\n- nerve: 0-100, how much courage this takes THEM specifically given their personality — asking a casual question is 10, admitting feelings is 80\n\nReturn ONLY valid JSON: [{\"goal\": \"...\", \"nerve\": 40}]\nNo other text.",
       nsfwNote: "This character is written for adult content: sexual and explicit intentions are appropriate where the conversation supports them.",
       sfwNote: "Keep intentions non-sexual.",
-      advancePrompt: "Read the end of this roleplay conversation and judge whether {name} actually got CLOSER to each of their private goals.\n\nAward points ONLY for something concrete and nameable that happened in these messages — a question asked, a suggestion made, an invitation given or accepted, a boundary moved, an actual step taken toward the goal itself. A warm, friendly or flirtatious exchange that contains no step toward the goal is 0. MOST TURNS ARE 0. That is the correct and expected answer.\n\n{name}'s goals:\n{list}\n\nConversation:\n{recent}\n\nFor each goal, by its number:\n- delta: how much closer they got.\n    0 = the goal did not come up, or nothing concrete happened toward it. This is the usual answer.\n    1 to 3 = a small deliberate step: a hint dropped, the subject edged toward, an excuse made.\n    4 to 8 = a real step: asked outright, invited, agreed to something, a clear move made.\n    -1 to -8 = the user deflected, refused, or the chance was lost.\n  Before giving anything other than 0, name the step to yourself in one phrase. If you cannot point to one, it is 0.\n- status: \"active\" normally. \"achieved\" ONLY if the goal has actually and completely happened in the conversation — not if it merely looks likely or was agreed to. \"abandoned\" if it has become impossible or the user has clearly refused.\n\nReturn ONLY valid JSON: [{\"i\": 0, \"delta\": 0, \"status\": \"active\"}]\nNo other text.",
+      advancePrompt: "Read the end of this roleplay conversation and judge whether {name} actually got CLOSER to each of their private goals.\n\nAward points ONLY for something concrete and nameable that happened in these messages — a question asked, a suggestion made, an invitation given or accepted, a boundary moved, an actual step taken toward the goal itself. A warm, friendly or flirtatious exchange that contains no step toward the goal is 0. MOST TURNS ARE 0. That is the correct and expected answer.\n\n{name}'s goals:\n{list}\n\nConversation:\n{recent}\n\nFor each goal, by its number:\n- delta: how much closer they got.\n    0 = the goal did not come up, or nothing concrete happened toward it. This is the usual answer.\n    1 to 3 = a small deliberate step: a hint dropped, the subject edged toward, an excuse made.\n    4 to 5 = a real step: asked outright, invited, agreed to something, a clear move made.\n    -1 to -5 = the user deflected, refused, or the chance was lost.\n  Before giving anything other than 0, name the step to yourself in one phrase. If you cannot point to one, it is 0.\n- status: \"active\" normally. \"achieved\" ONLY if the goal has actually and completely happened in the conversation — not if it merely looks likely or was agreed to. \"abandoned\" if it has become impossible or the user has clearly refused.\n\nReturn ONLY valid JSON: [{\"i\": 0, \"delta\": 0, \"status\": \"active\"}]\nNo other text.",
       // Was 20, which let a single generous judgement move a goal a fifth of
       // the way in one turn. A step is worth a few points; the scale in the
       // prompt above matches this ceiling.
-      maxDeltaPerTurn: 8,
+      maxDeltaPerTurn: 5,
     },
 
     // ── Prompt fragments ─────────────────────────────────────────────────────
