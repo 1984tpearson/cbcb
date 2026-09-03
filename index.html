@@ -704,10 +704,23 @@ function personalitySliderPreview(key, value) {
 function buildAgeVoiceNote(age, sliders, disabledSliders) {
   const cfg = CFG.ageVoice;
   if (!cfg || !Array.isArray(cfg.bands)) return "";
+  // Terms the character must never reach for, phrased as one clause. Built
+  // first because it has to survive the no-age path too — a character whose
+  // age was never filled in still must not use them.
+  const terms = (cfg.bannedTerms || []).map(t => `"${t}"`);
+  const bannedList = terms.length > 1
+    ? `${terms.slice(0, -1).join(", ")} or ${terms[terms.length - 1]}`
+    : terms.join("");
+  const banned = terms.length > 0
+    ? fillTemplate(cfg.bannedTemplate || "", { terms: bannedList })
+    : "";
+
   const years = parseInt(age, 10);
-  if (!Number.isFinite(years)) return "";
+  if (!Number.isFinite(years)) {
+    return banned ? fillTemplate(cfg.templateNoAge || "", { banned }) : "";
+  }
   const band = cfg.bands.find(b => years <= b.max) || cfg.bands[cfg.bands.length - 1];
-  if (!band) return "";
+  if (!band) return banned ? fillTemplate(cfg.templateNoAge || "", { banned }) : "";
 
   // A character who uses formal names only should not be handed a list of
   // endearments: the register still applies, the vocabulary does not.
@@ -721,6 +734,7 @@ function buildAgeVoiceNote(age, sliders, disabledSliders) {
     age: years,
     register: band.register || "",
     endearments: usesNone ? (cfg.noEndearments || "") : (band.endearments || ""),
+    banned,
   });
 }
 

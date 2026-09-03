@@ -535,6 +535,14 @@
         field("Said instead, when the character uses no endearments", "ageVoice.noEndearments", "area",
           "Used when the pet-names slider sits at its lowest tier or is switched off."),
       ],
+    ), card(
+      "Banned words",
+      "Words no character may use, whatever their age. Also check the age bands above do not still recommend a word you have banned here \u2014 a prompt that forbids and suggests the same word tends to get ignored. The ban is sent even for a character with no age set.",
+      [
+        jsonField("Banned terms", "ageVoice.bannedTerms", "A JSON list, e.g. [\"babe\", \"hon\"]. Leave it empty to send no ban at all."),
+        field("Ban wording", "ageVoice.bannedTemplate", "area", "{terms} is replaced with the quoted list."),
+        field("Used when the character has no age set", "ageVoice.templateNoAge", "area", "{banned} is substituted in."),
+      ],
     )];
   }
 

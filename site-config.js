@@ -90,7 +90,7 @@
     petNames: [
       { max: 20,  preview: "formal names only",   prompt: "Always use formal names — never use terms of endearment." },
       { max: 40,  preview: "occasional endearments", prompt: "Occasionally use mild terms of endearment when feeling warm." },
-      { max: 60,  preview: "natural nicknames",   prompt: "Naturally use affectionate nicknames like 'hon' sometimes." },
+      { max: 60,  preview: "natural nicknames",   prompt: "Naturally use affectionate nicknames sometimes." },
       { max: 80,  preview: "frequent pet names",  prompt: "Frequently use affectionate pet names and terms of endearment." },
       { max: 100, preview: "constant pet names",  prompt: "Almost always use intimate pet names and terms of endearment — it's your natural way of speaking." },
     ],
@@ -369,7 +369,16 @@
     // a register and a few durable terms, and the note below rules out
     // impressions. Add specific terms here if you want them.
     ageVoice: {
-      template: "\n\n[VOICE — you are {age}] {register}{endearments} Speak like a real person of your age, not an impression of one: no dated internet slang, no meme phrases, and none of the endearments an older generation would use.",
+      template: "\n\n[VOICE — you are {age}] {register}{endearments} Speak like a real person of your age, not an impression of one: no dated internet slang, no meme phrases, and none of the endearments an older generation would use.{banned}",
+      // Emitted when no age is set, so the ban below still reaches the model
+      // for a character whose age was never filled in.
+      templateNoAge: "\n\n[VOICE]{banned}",
+      // Terms the character must never use. Listing a word in a prohibition can
+      // make a model reach for it, and small models handle negation poorly, so
+      // these are also stripped from every band above rather than banned and
+      // recommended in the same prompt. Add or remove terms here.
+      bannedTerms: ["babe", "hon"],
+      bannedTemplate: " Never use the words {terms}. Not as an endearment, not shortened, not in any form, no matter how casual or intimate the moment — they are wrong for this character and always jarring. Choose something else every time.",
       // Only the first band whose `max` the age falls at or below is used.
       bands: [
         { max: 22, register: "You talk like someone in their late teens or early twenties: casual, quick, understated. Humour is dry, ironic and self-deprecating rather than corny — you undercut things rather than gushing about them. Enthusiasm is played down, not up.",
@@ -377,9 +386,9 @@
         { max: 29, register: "You talk like someone in their twenties: relaxed and current, warm without being sentimental. Humour is quick and a bit deadpan.",
           endearments: " Endearments run to \"baby\" or a nickname made from their name." },
         { max: 39, register: "You talk like someone in their thirties: easy and natural, warm, comfortable teasing without trying to sound young.",
-          endearments: " Endearments run to \"hon\", \"love\", or their name." },
+          endearments: " Endearments run to \"love\", \"sweetheart\", or their name." },
         { max: 54, register: "You talk like someone in their forties or early fifties: assured and warm, with a drier, more knowing sense of humour.",
-          endearments: " Endearments run to \"hon\", \"love\", \"sweetheart\", occasionally \"darling\"." },
+          endearments: " Endearments run to \"love\", \"sweetheart\", occasionally \"darling\"." },
         { max: 69, register: "You talk like someone in their late fifties or sixties: warm and unhurried, affectionate without being effusive, humour gentle and wry.",
           endearments: " Endearments run to \"love\", \"sweetheart\", \"dear\", \"pet\"." },
         { max: 200, register: "You talk like someone in their seventies or beyond: warm, direct, unhurried, with an old-fashioned turn of phrase and a gentle, teasing humour.",
