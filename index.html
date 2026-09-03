@@ -697,6 +697,33 @@ function personalitySliderPreview(key, value) {
   return tier ? tier.preview : "";
 }
 
+// Ties vocabulary to the character's age. The pet-names slider controls how
+// often they reach for an endearment but never which ones, so every character
+// landed on the same "hun"/"darling" register whether they were 19 or 80.
+// Returns "" when no age is set — better to say nothing than to guess.
+function buildAgeVoiceNote(age, sliders, disabledSliders) {
+  const cfg = CFG.ageVoice;
+  if (!cfg || !Array.isArray(cfg.bands)) return "";
+  const years = parseInt(age, 10);
+  if (!Number.isFinite(years)) return "";
+  const band = cfg.bands.find(b => years <= b.max) || cfg.bands[cfg.bands.length - 1];
+  if (!band) return "";
+
+  // A character who uses formal names only should not be handed a list of
+  // endearments: the register still applies, the vocabulary does not.
+  const off = new Set(disabledSliders || []);
+  const tiers = CFG.traitTiers.petNames;
+  const value = (sliders || {}).petNames ?? CFG.sliderDefaults.petNames ?? 30;
+  const usesNone = off.has("petNames")
+    || (Array.isArray(tiers) && tiers.length > 0 && tierFor(tiers, value) === tiers[0]);
+
+  return fillTemplate(cfg.template, {
+    age: years,
+    register: band.register || "",
+    endearments: usesNone ? (cfg.noEndearments || "") : (band.endearments || ""),
+  });
+}
+
 function buildPersonalityAddendum(sliders, gender, customGender, age, maritalStatus, relationship, relationshipCustom, disabledSliders) {
   const s = sliders;
   const p = CFG.prompts;
@@ -800,6 +827,7 @@ async function sendChat({ messages, character, model, settings }) {
   );
   const basePrompt = character.persona || `You are ${character.name}.`;
   const appearanceNote = buildAppearanceSystemNote(character.appearance);
+  const voiceNote = buildAgeVoiceNote(character.age, character.sliders || DEFAULT_SLIDERS, character.disabledSliders || []);
   const personaNote = buildUserPersonaNote(resolveUserPersona(character, settings || {}));
   const nsfwClause = character.nsfw
     ? "\n\nYou are permitted to engage with adult, explicit, and NSFW content. Do not refuse or add disclaimers."
@@ -835,7 +863,7 @@ async function sendChat({ messages, character, model, settings }) {
       ].filter(Boolean).join(" ")} Stay physically consistent with this — don't teleport, stand up without standing up, or forget where you both are. Move only when the scene actually calls for it, and describe the movement when you do.`
     : "";
 
-  const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + personaNote + nsfwClause + actionClause + plainClause + wardrobeClause + stagingClause + memoryClause;
+  const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + voiceNote + personaNote + nsfwClause + actionClause + plainClause + wardrobeClause + stagingClause + memoryClause;
 
   const reply = await aiComplete({
     model,
@@ -1385,6 +1413,7 @@ apparent sex and build rather than leaving it out.`;
 
 async function generateOpeningScenarios({ character, model, settings, exclude = [] }) {
   const addendum = buildPersonalityAddendum(character.sliders || DEFAULT_SLIDERS, character.gender || "Female", character.customGender || "", character.age || "", character.maritalStatus || "", character.relationship || "", character.relationshipCustom || "", character.disabledSliders || []);
+  const voiceNote = buildAgeVoiceNote(character.age, character.sliders || DEFAULT_SLIDERS, character.disabledSliders || []);
   const personaNote = buildUserPersonaNote(resolveUserPersona(character, settings || {}));
   const plainClause = character.speakPlainly
     ? "\n\n[STYLE] Speak plainly and directly. Avoid melodrama, purple prose, and overwrought or theatrical language — keep your tone grounded and natural, like a real person talking."
@@ -1441,7 +1470,7 @@ async function generateOpeningScenarios({ character, model, settings, exclude = 
     : "";
 
   const raw = (await aiComplete({ model, messages: [
-      { role: "system", content: (character.persona || `You are ${character.name}.`) + addendum + personaNote + plainClause },
+      { role: "system", content: (character.persona || `You are ${character.name}.`) + addendum + voiceNote + personaNote + plainClause },
       { role: "user", content: `[seed:${seed}] Generate 5 opening scenarios for an in-person encounter with ${character.name}. Each scenario must match its assigned category exactly — do not substitute or blend categories.\n\n${categoryList}\n\nRules:\n- Write the opening message in FIRST PERSON — use "I", never "she", "he", or the character's name in third person\n- The two of you are physically together — never reference texting, messaging, screens, or anything virtual\n- Each opening must feel genuinely distinct in tone and energy from the others\n- Include physical actions and expressions in asterisks woven naturally into the message, in first person (e.g. *I glance up* not *she glances up*)\n- Vary locations, times of day, and energy levels\n- 1-3 sentences per opening message${character.nsfw ? "\n- For sexually charged scenarios be bold and explicit about the situation — don't sanitise it" : ""}${excludeClause}\n\nReturn ONLY valid JSON, an array of exactly 5 objects:\n[{"label": "short 2-4 word scenario name", "setting": "one sentence describing the scene/context", "message": "the in-character opening"}]\n\nNo extra text, no markdown, just the JSON array.` }
     ]})).trim();
 

@@ -356,6 +356,41 @@
       faceVariationPoolCount: 4,
     },
 
+    // ── Age-appropriate voice ────────────────────────────────────────────────
+    // The pet-names slider says how OFTEN a character reaches for an
+    // endearment, never WHICH ones, so every character defaulted to the same
+    // "hun"/"darling" register — which reads as a middle-aged voice coming out
+    // of a 20-year-old. The character's age is already in the prompt but
+    // nothing connected it to their vocabulary. This does.
+    //
+    // Deliberately no current slang. Specific slang dates faster than anything
+    // else in this file, and a character reaching for last year's meme sounds
+    // more out of character than one using no slang at all — so the bands give
+    // a register and a few durable terms, and the note below rules out
+    // impressions. Add specific terms here if you want them.
+    ageVoice: {
+      template: "\n\n[VOICE — you are {age}] {register}{endearments} Speak like a real person of your age, not an impression of one: no dated internet slang, no meme phrases, and none of the endearments an older generation would use.",
+      // Only the first band whose `max` the age falls at or below is used.
+      bands: [
+        { max: 22, register: "You talk like someone in their late teens or early twenties: casual, quick, understated. Humour is dry, ironic and self-deprecating rather than corny — you undercut things rather than gushing about them. Enthusiasm is played down, not up.",
+          endearments: " If you use endearments at all they are sparing and unfussy — mostly their actual name, sometimes a shortened version of it, occasionally \"babe\"." },
+        { max: 29, register: "You talk like someone in their twenties: relaxed and current, warm without being sentimental. Humour is quick and a bit deadpan.",
+          endearments: " Endearments run to \"babe\", \"baby\", or a nickname made from their name." },
+        { max: 39, register: "You talk like someone in their thirties: easy and natural, warm, comfortable teasing without trying to sound young.",
+          endearments: " Endearments run to \"babe\", \"hon\", \"love\", or their name." },
+        { max: 54, register: "You talk like someone in their forties or early fifties: assured and warm, with a drier, more knowing sense of humour.",
+          endearments: " Endearments run to \"hon\", \"love\", \"sweetheart\", occasionally \"darling\"." },
+        { max: 69, register: "You talk like someone in their late fifties or sixties: warm and unhurried, affectionate without being effusive, humour gentle and wry.",
+          endearments: " Endearments run to \"love\", \"sweetheart\", \"dear\", \"pet\"." },
+        { max: 200, register: "You talk like someone in their seventies or beyond: warm, direct, unhurried, with an old-fashioned turn of phrase and a gentle, teasing humour.",
+          endearments: " Endearments run to \"dear\", \"sweetie\", \"love\", \"duck\"." },
+      ],
+      // Said instead of the band's endearments when the pet-names slider is at
+      // its lowest tier or switched off — the register still applies, but
+      // nothing should be nudging them toward endearments they do not use.
+      noEndearments: " You do not use endearments; this describes your general speech register only.",
+    },
+
     // ── Prompt fragments ─────────────────────────────────────────────────────
     prompts: {
       personalityHeader: "\n\n[PERSONALITY PARAMETERS]\n",

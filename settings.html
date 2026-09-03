@@ -428,6 +428,7 @@
     ["traits", "Trait prompts", buildTraits],
     ["appearance", "Appearance", buildAppearance],
     ["prompts", "Prompt text", buildPrompts],
+    ["voice", "Age & voice", buildVoice],
     ["image", "Image prompts", buildImage],
     ["models", "Models & options", buildModels],
     ["advanced", "Advanced", buildAdvanced],
@@ -519,6 +520,20 @@
         field("About the user", p + "userPersonaNote", "area", "{details}"),
         field("User name fragment", p + "userPersonaName", "area", "{name}"),
         field("User gender fragment", p + "userPersonaGender", "area", "{gender}"),
+      ],
+    )];
+  }
+
+  function buildVoice() {
+    return [card(
+      "Age-appropriate voice",
+      "The pet-names slider sets how often a character reaches for an endearment; this sets which ones, and how they talk generally. Without it every character defaults to the same \u201chun\u201d/\u201cdarling\u201d register whether they are 19 or 80. Only the first band whose \u201cmax\u201d the character\u2019s age falls at or below is used, so keep them ascending.",
+      [
+        field("Template", "ageVoice.template", "area",
+          "{age}, {register} and {endearments} are substituted in."),
+        jsonField("Age bands", "ageVoice.bands"),
+        field("Said instead, when the character uses no endearments", "ageVoice.noEndearments", "area",
+          "Used when the pet-names slider sits at its lowest tier or is switched off."),
       ],
     )];
   }
