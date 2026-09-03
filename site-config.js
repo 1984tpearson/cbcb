@@ -249,6 +249,54 @@
     traitTiers: TRAIT_TIERS,
     horninessModulation: HORNINESS_MODULATION,
 
+    // How the personality block is assembled. A trait sitting in its middle
+    // band produces a sentence that says nothing ("neither a pushover nor
+    // overbearing") — a third of the block was this, diluting the traits that
+    // were actually dialled somewhere. So the middle band is dropped, and what
+    // is left is ordered by how far from centre it sits.
+    //
+    // Neutrality is worked out from the tier list's own shape — the middle
+    // entry of an odd-length list — never from a flag stored inside the tiers.
+    // Tier arrays are replaced wholesale by a saved override, so a flag in the
+    // defaults would never reach an edited trait, and suppression would skip
+    // precisely the traits that had been deliberately tuned.
+    addendum: {
+      // Where "unremarkable" sits for each trait. Not the middle of the slider:
+      // normal jealousy, coyness, profanity, dirty talk and neediness are all
+      // near the LOW end, and normal honesty near the HIGH end, so measuring
+      // from 50 makes an ordinary character look extreme on half its axes.
+      // Seeded from the slider defaults, which were chosen to describe an
+      // ordinary person, but kept separate so retuning a default does not
+      // silently move what counts as normal.
+      neutralPoints: {
+        amorous: 30, formality: 30, assertiveness: 50, playfulness: 50,
+        emotionalDepth: 50, profanity: 20, dirtyTalk: 20, vocabulary: 50,
+        petNames: 30, forwardness: 40, jealousy: 30, openness: 50,
+        neediness: 30, confidence: 55, coyness: 20, honesty: 80,
+        gullibility: 40, familiarity: 10, likesUser: 50,
+        attractionToUser: 50, horniness: 15,
+      },
+      // A trait whose neutral sits mid-scale says nothing useful when it is
+      // there — "neither a pushover nor overbearing" is pure filler, and a
+      // third of the block was this. But a trait whose neutral sits at an end
+      // is still a real instruction there ("you never swear"), so it keeps
+      // being sent; it just ranks last. Hence a window, not a blanket rule.
+      suppressNeutralWithin: [45, 55],
+      // Relationship state is worth stating even when it is unremarkable:
+      // "you know them reasonably well" describes the scene, unlike "you have
+      // balanced confidence".
+      alwaysSendMidTier: ["familiarity", "likesUser", "attractionToUser", "horniness"],
+      // The strongest few traits lead the block under their own heading, ranked
+      // by how far from their own neutral they sit, as a fraction of the room
+      // available on that side. Capped rather than thresholded, so a heavily
+      // tuned character still leads with a short, readable list.
+      definingCount: 5,
+      definingMinDistance: 0.4,
+      // replyLength is emitted separately, ahead of everything else, so that it
+      // carries more weight — including it here as well only repeats it.
+      excludeFromTraits: ["replyLength"],
+    },
+
     // ── Appearance ───────────────────────────────────────────────────────────
     appearance: {
       // HEIGHT_CM_MIN/MAX bracket adult height; the slider stores 0-100 and the
@@ -317,6 +365,8 @@
       relationshipLine: "Your relationship to the user is: {relationship}. Embody this relationship naturally in how you speak and interact.",
       appearanceNote: "\n\n[APPEARANCE] Your physical appearance: {description}. You are aware of how you look but only mention it naturally if directly relevant — never force it into conversation.",
       userPersonaNote: "\n\n[ABOUT THE PERSON YOU'RE TALKING TO] {details}. Address and refer to them accordingly.",
+      definingHeader: "DEFINING TRAITS — these must be visible in every reply:",
+      alsoTrueHeader: "Also true of you:",
       userPersonaName: "their name is {name}",
       userPersonaGender: "their gender is {gender}",
     },

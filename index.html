@@ -700,59 +700,91 @@ function personalitySliderPreview(key, value) {
 function buildPersonalityAddendum(sliders, gender, customGender, age, maritalStatus, relationship, relationshipCustom, disabledSliders) {
   const s = sliders;
   const p = CFG.prompts;
-  const lines = [];
-  // Sliders the user has switched off contribute nothing to the prompt.
+  const opts = CFG.addendum;
   const off = new Set(disabledSliders || []);
-  const push = (key, text) => { if (!off.has(key) && text) lines.push(text); };
-  // Every trait line is the tier its slider currently sits in.
-  const pushTier = (key, fallback) => {
-    const tier = tierFor(CFG.traitTiers[key], s[key] ?? fallback);
-    if (tier) push(key, tier.prompt);
-  };
+  const alwaysMid = new Set(opts.alwaysSendMidTier || []);
+  const excluded = new Set(opts.excludeFromTraits || []);
 
+  // Identity first: who they are, stated plainly, before any behaviour.
+  const identity = [];
   const genderStr = gender === "Custom" ? (customGender || "unspecified") : gender;
-  lines.push(fillTemplate(p.genderLine, { gender: genderStr }));
-  if (age) lines.push(fillTemplate(p.ageLine, { age }));
-  if (maritalStatus) lines.push(fillTemplate(p.maritalLine, { status: maritalStatus }));
+  identity.push(fillTemplate(p.genderLine, { gender: genderStr }));
+  if (age) identity.push(fillTemplate(p.ageLine, { age }));
+  if (maritalStatus) identity.push(fillTemplate(p.maritalLine, { status: maritalStatus }));
   if (relationship) {
     const relStr = relationship === "Custom" ? (relationshipCustom || "") : relationship;
-    if (relStr) lines.push(fillTemplate(p.relationshipLine, { relationship: relStr }));
+    if (relStr) identity.push(fillTemplate(p.relationshipLine, { relationship: relStr }));
   }
 
-  // Reactive relationship state injected into system prompt
-  pushTier("familiarity", 10);
-  pushTier("likesUser", 50);
-  pushTier("attractionToUser", 50);
-  pushTier("horniness", 15);
+  const neutralFor = (key) =>
+    (opts.neutralPoints && opts.neutralPoints[key] != null)
+      ? opts.neutralPoints[key]
+      : (CFG.sliderDefaults[key] ?? 50);
 
-  pushTier("amorous", 50);
-  pushTier("replyLength", 50);
-  pushTier("formality", 50);
-  pushTier("assertiveness", 50);
-  pushTier("playfulness", 50);
-  pushTier("emotionalDepth", 50);
-  pushTier("profanity", 50);
-  pushTier("dirtyTalk", 50);
-  pushTier("vocabulary", 50);
-  pushTier("petNames", 50);
-  pushTier("forwardness", 50);
-  pushTier("jealousy", 50);
-  pushTier("openness", 50);
-  pushTier("neediness", 50);
-  pushTier("confidence", 50);
-  pushTier("coyness", 50);
-  pushTier("honesty", 50);
-  pushTier("gullibility", 50);
+  // How far a trait is from its own neutral, as a fraction of the room on that
+  // side — so "pushed as far as it goes" reads as 1 whether neutral sits at 20,
+  // 50 or 80. Measuring from the midpoint instead made an ordinary character
+  // look extreme on every trait whose normal is near an end.
+  const extremity = (key, value) => {
+    const neutral = neutralFor(key);
+    const span = value >= neutral ? (100 - neutral) : neutral;
+    return span > 0 ? Math.abs(value - neutral) / span : 0;
+  };
 
-  // Horniness also modulates amorous, forwardness, coyness, dirty talk and
-  // pet names — arousal pulls all of these toward bolder/warmer expression
-  // regardless of their baseline slider values, while low arousal pulls them
-  // the other way, damping them down even if their sliders are set high.
-  const modulation = tierFor(CFG.horninessModulation, s.horniness ?? 15);
-  if (modulation) push("horniness", modulation.prompt);
+  // Only traits whose neutral is mid-scale go quiet when they are sitting on
+  // it. Where normal is near an end the neutral tier is still a live
+  // instruction — "you never swear" is normal AND a constraint — so it stays
+  // in, and simply ranks last.
+  const [lowBound, highBound] = opts.suppressNeutralWithin || [45, 55];
+  const suppressesWhenNeutral = (key) => {
+    const neutral = neutralFor(key);
+    return neutral >= lowBound && neutral <= highBound;
+  };
 
-  return p.personalityHeader + lines.join(" ");
+  const traits = [];
+  for (const def of CFG.sliderDefs) {
+    const key = def.key;
+    if (off.has(key) || excluded.has(key)) continue;
+    const tiers = CFG.traitTiers[key];
+    const value = s[key] ?? CFG.sliderDefaults[key] ?? 50;
+    const tier = tierFor(tiers, value);
+    if (!tier || !tier.prompt) continue;
+    // Comparing tiers rather than values: the trait is silent only when it
+    // lands in the very band its neutral point lands in.
+    const sittingOnNeutral = tier === tierFor(tiers, neutralFor(key));
+    if (sittingOnNeutral && suppressesWhenNeutral(key) && !alwaysMid.has(key)) continue;
+    traits.push({ prompt: tier.prompt, distance: extremity(key, value), leads: true });
+  }
+
+  // Arousal modulates amorousness, forwardness, coyness, dirty talk and pet
+  // names, so it belongs with the traits it overrides rather than after them.
+  // It rides at the horniness slider's own distance from centre.
+  if (!off.has("horniness")) {
+    const horny = s.horniness ?? CFG.sliderDefaults.horniness ?? 15;
+    const modulation = tierFor(CFG.horninessModulation, horny);
+    if (modulation && modulation.prompt) {
+      traits.push({ prompt: modulation.prompt, distance: extremity("horniness", horny), leads: false });
+    }
+  }
+
+  // Strongest first, so a trait dialled to an extreme is never buried behind
+  // half a dozen mild ones.
+  traits.sort((a, b) => b.distance - a.distance);
+  const minDistance = opts.definingMinDistance ?? 0.4;
+  const count = opts.definingCount ?? 5;
+  const leads = traits.filter(t => t.leads && t.distance >= minDistance).slice(0, count);
+  const promoted = new Set(leads);
+  const defining = leads;
+  const rest = traits.filter(t => !promoted.has(t));
+
+  const bullets = (list) => list.map(t => `- ${t.prompt}`).join("\n");
+  let body = identity.join(" ");
+  if (defining.length > 0) body += `\n\n${p.definingHeader}\n${bullets(defining)}`;
+  if (rest.length > 0) body += `\n\n${rest.length === traits.length ? "" : p.alsoTrueHeader + "\n"}${bullets(rest)}`;
+
+  return p.personalityHeader + body;
 }
+
 
 // ─── API HELPERS ──────────────────────────────────────────────────────────────
 async function sendChat({ messages, character, model, settings }) {
