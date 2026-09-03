@@ -756,6 +756,12 @@ const activeIntentions = (character) =>
 function buildIntentionsNote(character) {
   const cfg = CFG.intentions;
   if (!cfg) return "";
+  // The toggle has to gate the block as well as the progress updates. It only
+  // gated the updates, so a character with intentions switched OFF still had
+  // her goals and tactics injected — frozen at progress 0 forever, which is
+  // the deliberately invisible "early" band. Switched off, she read as not
+  // manipulative at all; switched on, she would at least climb.
+  if (character.intentionsEnabled === false) return "";
   const active = activeIntentions(character);
   if (active.length === 0) return "";
   const sliders = character.sliders || DEFAULT_SLIDERS;
