@@ -36,6 +36,10 @@ const ALLOWED_ORIGINS = Deno.env.get('ALLOWED_ORIGIN') || '*';
 const POLL_INTERVAL_MS = 2000;
 const MAX_POLL_ATTEMPTS = 45; // ~90s budget
 
+// Per Wiro's docs the terminal statuses are task_postprocess_end and
+// task_cancel; task_error is kept as a defensive extra. Everything else
+// (task_queue, task_accept, task_assign, task_preprocess_*, task_start,
+// task_output) means keep polling.
 const TERMINAL_STATUSES = ['task_postprocess_end', 'task_cancel', 'task_error'];
 
 function corsHeaders(extra: Record<string, string> = {}) {
@@ -75,7 +79,12 @@ async function fetchTask(taskId: string, apiKey: string) {
 // entirely — it used to download the whole file from Wiro's CDN and re-serve
 // it, which is a second full transfer for no benefit.
 function taskImageUrl(task: Record<string, unknown>) {
-  if (task.status !== 'task_postprocess_end' || String(task.pexit) !== '0') {
+  // pexit is absent from the Task/Detail response of some models, so it can
+  // only be treated as a failure when it is actually present and non-zero —
+  // requiring it to equal '0' reported every successful run as a failure.
+  const pexit = task.pexit;
+  const failed = pexit !== undefined && pexit !== null && String(pexit) !== '0';
+  if (task.status !== 'task_postprocess_end' || failed) {
     const debugErr = (task.debugerror as string) || (task.status as string) || 'unknown error';
     return { error: `Wiro generation failed: ${debugErr}` };
   }
@@ -204,13 +213,20 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  // Defaults deliberately conservative: 2k and 9:16 are accepted by every
+  // model in the allowlist, where the old '1k' default was Pro-only.
   const runBody: Record<string, unknown> = {
     prompt,
-    resolution: payload.resolution || '1k',
+    resolution: payload.resolution || '2k',
     aspectRatio: payload.aspectRatio || '9:16',
-    outputFormat: payload.outputFormat || 'png',
+    maxImages: payload.maxImages ?? 1,
     watermark: payload.watermark ?? 'false',
   };
+  // outputFormat is not a parameter on Lite or v4.5 — only forward it when the
+  // caller actually asked for one.
+  if (payload.outputFormat) {
+    runBody.outputFormat = payload.outputFormat;
+  }
   // inputImage is optional — a reference image URL (or comma-joined list of
   // URLs) for consistency. Omit entirely rather than sending an empty value.
   if (payload.inputImage) {

@@ -991,9 +991,14 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
     prompt: guardedPrompt,
     resolution: resolution || params.resolution,
     aspectRatio: aspectRatio || params.aspectRatio,
-    outputFormat: outputFormat || params.outputFormat,
+    // Wiro caps outputs at 15 including reference images; we only ever want one.
+    maxImages: 1,
     watermark: "false",
   };
+  // Pro-only parameter — Lite and v4.5 do not list it, so it is sent only
+  // where the model's params actually define one.
+  const format = outputFormat || params.outputFormat;
+  if (format) body.outputFormat = format;
   // Random seed per call so identical/near-identical prompts (e.g. clicking
   // "Regenerate" on a character with no wording changes) still produce
   // visually distinct results, rather than Wiro falling back to whatever it

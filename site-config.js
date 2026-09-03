@@ -500,9 +500,13 @@
         { id: "seedream-v4-5-uncensored", label: "Seedream v4.5 (Wiro)" },
         { id: "seedream-v5-pro-uncensored", label: "Seedream v5 Pro (Wiro) — slowest" },
       ],
+      // Resolutions differ per model and "1k" is not valid on the two newer
+      // ones: Lite takes auto/2k/3k, v4.5 takes ""/2k/4k. 2k is the smallest
+      // both accept, so it is the fastest setting available on each.
+      // outputFormat is a Pro-only parameter; the others do not list it.
       imageParams: {
-        "seedream-v5-lite-uncensored": { resolution: "1k", aspectRatio: "9:16", outputFormat: "png" },
-        "seedream-v4-5-uncensored": { resolution: "1k", aspectRatio: "9:16", outputFormat: "png" },
+        "seedream-v5-lite-uncensored": { resolution: "2k", aspectRatio: "9:16" },
+        "seedream-v4-5-uncensored": { resolution: "2k", aspectRatio: "9:16" },
         "seedream-v5-pro-uncensored": { resolution: "1k", aspectRatio: "9:16", outputFormat: "png" },
       },
       vision: "mistralai/mistral-small-3.1-24b-instruct",
