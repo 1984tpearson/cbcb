@@ -492,10 +492,17 @@
         { id: "mistralai/mistral-large-2512", label: "Mistral large" },
         { id: "nousresearch/hermes-4-70b", label: "Hermes 4 70B" },
       ],
+      // Lite is listed first because it is the fastest of the three; Pro is
+      // the slowest. The proxy keeps its own allowlist of these ids, so adding
+      // one here without adding it there will fail the run.
       image: [
-        { id: "seedream-v5-pro-uncensored", label: "Seedream v5 Pro (Wiro)" },
+        { id: "seedream-v5-lite-uncensored", label: "Seedream v5 Lite (Wiro) — fastest" },
+        { id: "seedream-v4-5-uncensored", label: "Seedream v4.5 (Wiro)" },
+        { id: "seedream-v5-pro-uncensored", label: "Seedream v5 Pro (Wiro) — slowest" },
       ],
       imageParams: {
+        "seedream-v5-lite-uncensored": { resolution: "1k", aspectRatio: "9:16", outputFormat: "png" },
+        "seedream-v4-5-uncensored": { resolution: "1k", aspectRatio: "9:16", outputFormat: "png" },
         "seedream-v5-pro-uncensored": { resolution: "1k", aspectRatio: "9:16", outputFormat: "png" },
       },
       vision: "mistralai/mistral-small-3.1-24b-instruct",

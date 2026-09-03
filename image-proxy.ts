@@ -19,7 +19,15 @@
 // browser, which has no such limit, so a slow generation is just more polls.
 // Legacy mode is kept only so an un-updated client keeps working.
 
-const WIRO_RUN_URL = 'https://api.wiro.ai/v1/Run/bytedance/seedream-v5-pro-uncensored';
+// Allowlisted models. The slug is never interpolated into the URL from the
+// request directly — a caller could otherwise point this at any Wiro endpoint
+// and spend the key on it. Keep in step with models.image in site-config.js.
+const WIRO_MODELS: Record<string, string> = {
+  'seedream-v5-pro-uncensored': 'https://api.wiro.ai/v1/Run/bytedance/seedream-v5-pro-uncensored',
+  'seedream-v5-lite-uncensored': 'https://api.wiro.ai/v1/Run/bytedance/seedream-v5-lite-uncensored',
+  'seedream-v4-5-uncensored': 'https://api.wiro.ai/v1/Run/bytedance/seedream-v4-5-uncensored',
+};
+const DEFAULT_MODEL = 'seedream-v5-pro-uncensored';
 const WIRO_TASK_DETAIL_URL = 'https://api.wiro.ai/v1/Task/Detail';
 const ALLOWED_ORIGINS = Deno.env.get('ALLOWED_ORIGIN') || '*';
 
@@ -131,7 +139,7 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Read JSON payload from the browser ──────────
-  // Expected shape: { action?, taskId?, prompt, inputImage?, resolution?, aspectRatio?, outputFormat?, watermark?, seed? }
+  // Expected shape: { action?, taskId?, model?, prompt, inputImage?, resolution?, aspectRatio?, outputFormat?, watermark?, seed? }
   let payload: Record<string, unknown>;
   try {
     payload = await req.json();
@@ -187,6 +195,15 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  const requestedModel = typeof payload.model === 'string' ? payload.model : DEFAULT_MODEL;
+  const runUrl = WIRO_MODELS[requestedModel];
+  if (!runUrl) {
+    return new Response(`Unknown image model: ${requestedModel}`, {
+      status: 400,
+      headers: corsHeaders(),
+    });
+  }
+
   const runBody: Record<string, unknown> = {
     prompt,
     resolution: payload.resolution || '1k',
@@ -210,7 +227,7 @@ Deno.serve(async (req: Request) => {
   // ── Kick off the run ─────────────────────────────
   let runRes: Response;
   try {
-    runRes = await fetch(WIRO_RUN_URL, {
+    runRes = await fetch(runUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

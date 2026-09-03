@@ -985,6 +985,9 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
   const guardedPrompt = `${prompt}, ${CFG.image.proportionGuard}`;
 
   const body = {
+    // The model was chosen here but never sent, so the proxy always ran its
+    // hardcoded default no matter what the dropdown said.
+    model: modelId,
     prompt: guardedPrompt,
     resolution: resolution || params.resolution,
     aspectRatio: aspectRatio || params.aspectRatio,
