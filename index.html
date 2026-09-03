@@ -756,12 +756,6 @@ const activeIntentions = (character) =>
 function buildIntentionsNote(character) {
   const cfg = CFG.intentions;
   if (!cfg) return "";
-  // The toggle has to gate the block as well as the progress updates. It only
-  // gated the updates, so a character with intentions switched OFF still had
-  // her goals and tactics injected — frozen at progress 0 forever, which is
-  // the deliberately invisible "early" band. Switched off, she read as not
-  // manipulative at all; switched on, she would at least climb.
-  if (character.intentionsEnabled === false) return "";
   const active = activeIntentions(character);
   if (active.length === 0) return "";
   const sliders = character.sliders || DEFAULT_SLIDERS;
@@ -3026,7 +3020,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
   // runs when there is room and enough conversation to base a want on.
   const applyIntentions = async (newMessages, currentChar) => {
     const cfg = CFG.intentions;
-    if (!cfg || currentChar.intentionsEnabled === false) return;
+    if (!cfg) return;
     const recent = newMessages.filter(m => m.role !== "image").slice(-8)
       .map(m => `${m.role === "user" ? "User" : currentChar.name}: ${m.content}`).join("\n");
     const turns = newMessages.filter(m => m.role !== "image").length;
@@ -3066,6 +3060,12 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     }
 
     // ── Form new ones, if there is room and enough to go on ──
+    // The toggle is "Let {name} form intentions", so it belongs here and only
+    // here. Gating the whole function also froze the progress of intentions
+    // added by hand, which left them stuck at zero — and for a manipulative
+    // character zero is the deliberately invisible band, so a goal you set
+    // yourself never grew into anything you could see.
+    if (currentChar.intentionsEnabled === false) return;
     const live = activeIntentions(characterRef.current || currentChar);
     const room = (cfg.maxActive || 2) - live.length;
     const dueForNew = turns >= (cfg.generateAfterTurns || 6)
