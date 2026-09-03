@@ -413,15 +413,36 @@ function isIntimateScene(sceneText, staging, nsfw) {
 // "I pour myself a drink" does not qualify and "I rest my hand on her knee"
 // does.
 const CONTACT_VERB_RE = /\b(touch\w*|hold\w*|held|grab\w*|grasp\w*|grip\w*|takes?|taking|took|reach\w*|stroke\w*|caress\w*|kiss\w*|hug\w*|embrac\w*|cuddl\w*|pull\w*|push\w*|press\w*|squeez\w*|cup\w*|brush\w*|rest\w*|place[sd]?|placing|slid\w*|slip\w*|lean\w*|straddl\w*|climb\w*|wrap\w*|tug\w*|guid\w*|lift\w*|carr\w*|thrust\w*|rid(?:e|es|ing)|grind\w*|fuck\w*|undress\w*|unbutton\w*|unzip\w*)\b/i;
-const CONTACT_OBJECT_RE = /\b(her|his|him|hers|you|your|yours|me|my|mine|us|our|each other|together)\b/i;
-function beatShowsContact(beat) {
-  return CONTACT_VERB_RE.test(beat) && CONTACT_OBJECT_RE.test(beat);
+// The object has to be the OTHER person. Accepting "my" and "me" made almost
+// every beat count — "I lean back in my chair", "I take a sip of my drink",
+// "I rest my head against the wall" are all a contact verb next to a
+// possessive, and none of them involve touching anybody. So which pronouns
+// qualify depends on who is speaking: the character reaches for "you", the
+// user reaches for "her".
+const CONTACT_TARGET_BY_CHARACTER = /\b(you|your|yours)\b/i;
+const CONTACT_TARGET_BY_USER = /\b(her|hers|him|his|she|he|them|their)\b/i;
+const MUTUAL_RE = /\b(each other|one another|together|our hands|between us)\b/i;
+function beatShowsContact(beat, speakerIsUser, characterName) {
+  if (!CONTACT_VERB_RE.test(beat)) return false;
+  if (MUTUAL_RE.test(beat)) return true;
+  if (speakerIsUser) {
+    const namePattern = characterName
+      ? new RegExp(`\\b${characterName.split(/\s+/)[0].replace(/[^\w]/g, "")}\\b`, "i")
+      : null;
+    return CONTACT_TARGET_BY_USER.test(beat) || (!!namePattern && namePattern.test(beat));
+  }
+  return CONTACT_TARGET_BY_CHARACTER.test(beat);
 }
 function detectPhysicalContact(messages, characterName) {
   // Only the latest exchange: contact three turns ago is over.
   const beats = extractActionText((messages || []).slice(-2), characterName);
   if (!beats) return false;
-  return beats.split("\n").some(beatShowsContact);
+  return beats.split("\n").some(line => {
+    // extractActionText labels each line with who acted, which is what makes
+    // the pronoun test possible at all.
+    const speakerIsUser = /^User:/i.test(line);
+    return beatShowsContact(line.replace(/^[^:]*:\s*/, ""), speakerIsUser, characterName);
+  });
 }
 
 // contact is the only gate on the viewer's body appearing. Nothing about the
