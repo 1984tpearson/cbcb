@@ -192,7 +192,16 @@ Deno.serve(async (req: Request) => {
     if (result.error) {
       return new Response(result.error, { status: 502, headers: corsHeaders() });
     }
-    return json({ status: 'done', imageUrl: result.imageUrl }, 200);
+    // Wiro's own timings, so slowness can be attributed rather than guessed at:
+    // queued is time spent waiting for a worker, generating is the model
+    // actually running. If queued dominates there is nothing to tune here.
+    const num = (v: unknown) => Number(v) || 0;
+    const timing = {
+      queuedSeconds: Math.max(0, num(task.starttime) - num(task.createtime)),
+      generatingSeconds: num(task.elapsedseconds),
+      postprocessSeconds: Math.max(0, num(task.postprocessendtime) - num(task.postprocessstarttime)),
+    };
+    return json({ status: 'done', imageUrl: result.imageUrl, timing }, 200);
   }
 
   // ── submit / legacy: build the run ───────────────

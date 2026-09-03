@@ -1018,6 +1018,7 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
   // flow required), so this just passes the character's stored image URL.
   if (initImage) body.inputImage = initImage;
 
+  const startedAt = Date.now();
   // Two-step: submit, then poll from here. The proxy used to block while
   // polling Wiro itself, but it has a wall-clock limit — so any generation
   // slower than its budget came back 504 while Wiro finished and billed the
@@ -1060,6 +1061,15 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
     }
     const done = await statusRes.json();
     imageUrl = done && done.imageUrl;
+    // Attribute the wait: Wiro's queue and generation times against our own
+    // round trip. Without this "it's slow" is unattributable — the fix for a
+    // long queue is a different model, the fix for our own overhead is code.
+    const t = (done && done.timing) || {};
+    console.info(
+      `[image] ${modelId} total ${((Date.now() - startedAt) / 1000).toFixed(1)}s` +
+      ` = queued ${t.queuedSeconds ?? "?"}s + generating ${t.generatingSeconds ?? "?"}s` +
+      ` + postprocess ${t.postprocessSeconds ?? "?"}s + our overhead`
+    );
     break;
   }
   if (!imageUrl) throw new Error(`Wiro error: generation did not finish in time (task ${taskId})`);
@@ -3156,9 +3166,13 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     if (imgLoading) return;
     setImgLoading(true);
     try {
+      // Timed separately: this is a full LLM call that runs before the image is
+      // even submitted, so it is part of the wait, and it is ours to fix.
+      const promptStartedAt = Date.now();
       const prompt = messages.length > 0
         ? await buildImagePromptFromContext({ messages, character, model: settings.selectedModel })
         : `${character.name}, looking at the viewer, character art`;
+      console.info(`[image] scene prompt built in ${((Date.now() - promptStartedAt) / 1000).toFixed(1)}s`);
       const appearanceDesc = buildAppearancePrompt(character.appearance);
       const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
       const ageDesc = character.age ? `${character.age} year old` : "";
