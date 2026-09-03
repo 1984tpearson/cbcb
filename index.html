@@ -433,6 +433,22 @@ function beatShowsContact(beat, speakerIsUser, characterName) {
   }
   return CONTACT_TARGET_BY_CHARACTER.test(beat);
 }
+// Last line of defence. The scene extractor is a language model told not to
+// mention the viewer's limbs unless they are touching something, and it does
+// not always comply — so when there is no contact, any clause naming the
+// viewer's hands or arms is cut from its output before the prompt is built.
+// A rule the code enforces beats a rule the model is asked to follow.
+const VIEWER_LIMB_CLAUSE_RE = /\b(?:viewer|user|my|your|his|her|the)?\s*(?:own\s+)?(?:hand|hands|arm|arms|forearm|forearms|finger|fingers|palm|palms|wrist|wrists)\b[^,]*\b(?:foreground|frame|camera|reaching|entering|extends?|extending|visible)\b|\b(?:foreground|frame|camera)\b[^,]*\b(?:hand|hands|arm|arms|forearm|fingers)\b/i;
+function stripViewerLimbs(sceneText) {
+  if (!sceneText) return sceneText;
+  const kept = String(sceneText)
+    .split(",")
+    .filter(clause => !VIEWER_LIMB_CLAUSE_RE.test(clause))
+    .map(c => c.trim())
+    .filter(Boolean);
+  return kept.join(", ");
+}
+
 function detectPhysicalContact(messages, characterName) {
   // Only the latest exchange: contact three turns ago is over.
   const beats = extractActionText((messages || []).slice(-2), characterName);
@@ -3215,7 +3231,10 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // reaches the model when NSFW is on and the scene reads as intimate.
       const explicitDesc = isIntimateScene(customImgPrompt, character.staging, character.nsfw)
         ? (character.explicitDetail || "") : "";
-      const fullPrompt = joinPromptParts([buildPovModifiers(customImgPrompt, character.staging, character.nsfw, character.userOutfit, detectPhysicalContact(messages, character.name)), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, explicitDesc, styleModifiers]);
+      // A hand-typed prompt is left alone — if they wrote a hand into it, they
+      // meant it. Only the contact flag decides the POV clause.
+      const contact = detectPhysicalContact(messages, character.name);
+      const fullPrompt = joinPromptParts([buildPovModifiers(customImgPrompt, character.staging, character.nsfw, character.userOutfit, contact), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, explicitDesc, styleModifiers]);
       const url = await generateImageWiro({
         prompt: fullPrompt,
         model: settings.imageModel,
@@ -3270,7 +3289,11 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const stagingDesc = buildStagingImageDesc(character.staging);
       const explicitDesc = isIntimateScene(prompt, character.staging, character.nsfw)
         ? (character.explicitDetail || "") : "";
-      const fullImgPrompt = joinPromptParts([buildPovModifiers(prompt, character.staging, character.nsfw, character.userOutfit, detectPhysicalContact(messages, character.name)), charDesc, wardrobeDesc, stagingDesc, prompt, explicitDesc, styleModifiers]);
+      const contact = detectPhysicalContact(messages, character.name);
+      // The extractor writes this text, so it is the one place a stray hand
+      // can still get in. Cut those clauses when nobody is touching.
+      const scenePrompt = contact ? prompt : stripViewerLimbs(prompt);
+      const fullImgPrompt = joinPromptParts([buildPovModifiers(scenePrompt, character.staging, character.nsfw, character.userOutfit, contact), charDesc, wardrobeDesc, stagingDesc, scenePrompt, explicitDesc, styleModifiers]);
       const url = await generateImageWiro({
         prompt: fullImgPrompt,
         model: settings.imageModel,

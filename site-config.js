@@ -514,7 +514,12 @@
       povBase: "first person POV through the viewer's own eyes, viewer's face never visible",
       povArmsModifier: "the viewer's own hand and forearm in the foreground, entering frame from the camera",
       povArmsOwnedModifier: "the foreground hand and arm belong to the viewer, one pair only",
-      povNoLimbs: "no disembodied hands or arms in frame",
+      // Phrased as what IS in the shot, not what is absent. "no hands or arms
+      // in frame" still puts hands and arms in the prompt, and image models
+      // are unreliable at negation in a positive prompt — the tokens summon
+      // the thing as often as they suppress it. Describing an empty
+      // foreground gives the model something to draw instead.
+      povNoLimbs: "empty foreground, clear unobstructed view of the scene, the viewer's arms down at their sides below the frame",
       povIntimateModifier: "the viewer's own body framing the bottom of the shot",
       // Wiro/Seedream has no negative_prompt parameter, so proportion guidance
       // goes into the positive prompt instead.
