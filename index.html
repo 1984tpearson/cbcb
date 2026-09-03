@@ -405,26 +405,46 @@ function isIntimateScene(sceneText, staging, nsfw) {
   const userPose = (staging && staging.userPose) || "";
   return !!nsfw && POV_INTIMATE_RE.test(`${sceneText || ""} ${userPose}`);
 }
-// The viewer's body is in shot only when they are physically interacting with
-// the character. It used to also appear in every seated shot (their lap) and
-// every reclined one (their torso), which made the user visible in most
-// images instead of the few where it means something.
-function buildPovModifiers(sceneText, staging, nsfw, userOutfit) {
+// Whether the two of them are ACTUALLY touching, read from the action beats
+// rather than from the image prompt. Naked, moaning and intimate are states,
+// not contact, and treating them as contact is what kept putting the viewer's
+// body into shots where nobody had laid a hand on anyone. A beat counts only
+// when a contact verb and a reference to the other person appear together, so
+// "I pour myself a drink" does not qualify and "I rest my hand on her knee"
+// does.
+const CONTACT_VERB_RE = /\b(touch\w*|hold\w*|held|grab\w*|grasp\w*|grip\w*|takes?|taking|took|reach\w*|stroke\w*|caress\w*|kiss\w*|hug\w*|embrac\w*|cuddl\w*|pull\w*|push\w*|press\w*|squeez\w*|cup\w*|brush\w*|rest\w*|place[sd]?|placing|slid\w*|slip\w*|lean\w*|straddl\w*|climb\w*|wrap\w*|tug\w*|guid\w*|lift\w*|carr\w*|thrust\w*|rid(?:e|es|ing)|grind\w*|fuck\w*|undress\w*|unbutton\w*|unzip\w*)\b/i;
+const CONTACT_OBJECT_RE = /\b(her|his|him|hers|you|your|yours|me|my|mine|us|our|each other|together)\b/i;
+function beatShowsContact(beat) {
+  return CONTACT_VERB_RE.test(beat) && CONTACT_OBJECT_RE.test(beat);
+}
+function detectPhysicalContact(messages, characterName) {
+  // Only the latest exchange: contact three turns ago is over.
+  const beats = extractActionText((messages || []).slice(-2), characterName);
+  if (!beats) return false;
+  return beats.split("\n").some(beatShowsContact);
+}
+
+// contact is the only gate on the viewer's body appearing. Nothing about the
+// scene's wording or the character's state opens it on its own — she can be
+// undressed, or the scene explicit, and the viewer still is not in frame
+// unless an action beat shows the two of them touching.
+function buildPovModifiers(sceneText, staging, nsfw, userOutfit, contact) {
   const scene = sceneText || "";
   const parts = [POV_BASE];
-  // Sex is physical interaction by definition, so it counts as contact.
+  if (!contact) {
+    // Hand-typed prompts are the one exception: someone who wrote "my hand on
+    // her waist" is asking for it explicitly.
+    parts.push(POV_CUSTOM_LIMB_RE.test(scene) ? POV_ARMS_MODIFIER : POV_NO_LIMBS);
+    return parts.join(", ");
+  }
   if (isIntimateScene(scene, staging, nsfw)) {
     parts.push(povSelfBody(
       userOutfit,
       `${POV_INTIMATE_MODIFIER}, bare chest and hips`,
       `${POV_INTIMATE_MODIFIER}, still dressed`,
     ));
-  } else if (POV_VIEWER_LIMB_RE.test(scene)) {
-    parts.push(POV_ARMS_OWNED_MODIFIER);
-  } else if (POV_CUSTOM_LIMB_RE.test(scene)) {
-    parts.push(POV_ARMS_MODIFIER);
   } else {
-    parts.push(POV_NO_LIMBS);
+    parts.push(POV_ARMS_OWNED_MODIFIER);
   }
   return parts.join(", ");
 }
@@ -3163,7 +3183,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // reaches the model when NSFW is on and the scene reads as intimate.
       const explicitDesc = isIntimateScene(customImgPrompt, character.staging, character.nsfw)
         ? (character.explicitDetail || "") : "";
-      const fullPrompt = joinPromptParts([buildPovModifiers(customImgPrompt, character.staging, character.nsfw, character.userOutfit), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, explicitDesc, styleModifiers]);
+      const fullPrompt = joinPromptParts([buildPovModifiers(customImgPrompt, character.staging, character.nsfw, character.userOutfit, detectPhysicalContact(messages, character.name)), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, explicitDesc, styleModifiers]);
       const url = await generateImageWiro({
         prompt: fullPrompt,
         model: settings.imageModel,
@@ -3218,7 +3238,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const stagingDesc = buildStagingImageDesc(character.staging);
       const explicitDesc = isIntimateScene(prompt, character.staging, character.nsfw)
         ? (character.explicitDetail || "") : "";
-      const fullImgPrompt = joinPromptParts([buildPovModifiers(prompt, character.staging, character.nsfw, character.userOutfit), charDesc, wardrobeDesc, stagingDesc, prompt, explicitDesc, styleModifiers]);
+      const fullImgPrompt = joinPromptParts([buildPovModifiers(prompt, character.staging, character.nsfw, character.userOutfit, detectPhysicalContact(messages, character.name)), charDesc, wardrobeDesc, stagingDesc, prompt, explicitDesc, styleModifiers]);
       const url = await generateImageWiro({
         prompt: fullImgPrompt,
         model: settings.imageModel,
