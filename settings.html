@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Site Settings</title>
+<script src="site-config.js"></script>
+<style>
+  :root {
+    --pink: #d4547a; --pink-bg: #fdf1f4; --pink-border: #f0c4d1;
+    --bg: #fdf6f8; --bg2: #ffffff; --bg3: #f7eef1;
+    --text: #3a2b30; --muted: #8b7379; --border: #ecd9df; --border2: #dcc2ca;
+    --ok: #2f8a5b; --err: #c0392b;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text); font-size:14px; }
+  header { position:sticky; top:0; z-index:20; background:rgba(253,246,248,.97); backdrop-filter:blur(10px);
+           border-bottom:1px solid var(--border); padding:12px 18px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  h1 { font-size:16px; margin:0; font-weight:800; letter-spacing:.01em; }
+  .spacer { flex:1; }
+  button { font-family:inherit; font-size:13px; font-weight:700; border-radius:10px; padding:8px 14px; cursor:pointer; border:1px solid var(--border2); background:var(--bg2); color:var(--text); }
+  button.primary { background:var(--pink); border-color:var(--pink); color:#fff; }
+  button.danger { color:var(--err); border-color:#e8b4ae; }
+  button:disabled { opacity:.5; cursor:default; }
+  #status { font-size:12px; font-weight:700; }
+  #status.ok { color:var(--ok); } #status.err { color:var(--err); } #status.busy { color:var(--muted); }
+  nav { display:flex; gap:6px; flex-wrap:wrap; padding:10px 18px; border-bottom:1px solid var(--border); background:var(--bg3); }
+  nav button { padding:6px 11px; font-size:12px; border-radius:999px; }
+  nav button.active { background:var(--pink-bg); border-color:var(--pink-border); color:var(--pink); }
+  main { padding:18px; max-width:1100px; margin:0 auto 80px; }
+  section { display:none; } section.active { display:block; }
+  .card { background:var(--bg2); border:1px solid var(--border); border-radius:14px; padding:14px 16px; margin-bottom:14px; }
+  .card > h2 { font-size:14px; margin:0 0 4px; font-weight:800; }
+  .card > p.hint { margin:0 0 12px; color:var(--muted); font-size:12px; line-height:1.5; }
+  label.field { display:block; margin-bottom:12px; }
+  label.field > span { display:block; font-size:12px; font-weight:700; color:var(--muted); margin-bottom:4px; }
+  input[type=text], input[type=number], textarea, input[type=password] {
+    width:100%; font-family:inherit; font-size:13px; padding:8px 10px; border-radius:9px;
+    border:1px solid var(--border2); background:var(--bg); color:var(--text); outline:none; }
+  input:focus, textarea:focus { border-color:var(--pink); }
+  textarea { resize:vertical; line-height:1.5; }
+  textarea.mono, input.mono { font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px; }
+  table { width:100%; border-collapse:collapse; }
+  th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); padding:4px 6px 8px; font-weight:800; }
+  td { padding:3px 4px; vertical-align:top; }
+  td input, td textarea { padding:6px 8px; }
+  .trait { border:1px solid var(--border); border-radius:12px; margin-bottom:10px; overflow:hidden; }
+  .trait > summary { cursor:pointer; padding:10px 14px; font-weight:800; background:var(--bg3); list-style:none; display:flex; align-items:center; gap:8px; }
+  .trait > summary::-webkit-details-marker { display:none; }
+  .trait > summary::before { content:"▸"; color:var(--pink); font-size:11px; }
+  .trait[open] > summary::before { content:"▾"; }
+  .trait > summary .key { font-weight:500; color:var(--muted); font-size:12px; }
+  .trait .body { padding:12px 14px; }
+  .rowbtns { display:flex; gap:6px; margin-top:8px; }
+  .rowbtns button { padding:5px 10px; font-size:12px; }
+  .changed { color:var(--pink); font-weight:800; }
+  #gate { position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; z-index:100; }
+  #gate .box { background:var(--bg2); border:1px solid var(--border); border-radius:16px; padding:24px; width:280px; text-align:center; }
+  #gate input { text-align:center; letter-spacing:.5em; font-size:20px; margin:14px 0 10px; }
+  .gate-err { color:var(--err); font-size:12px; height:16px; }
+  .banner { border-radius:12px; padding:10px 14px; margin-bottom:14px; font-size:13px; font-weight:600; }
+  .banner.warn { background:#fff6e6; border:1px solid #f0d9a8; color:#8a6216; }
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="box">
+    <div style="font-weight:800;">Settings</div>
+    <input type="password" id="pin" maxlength="4" placeholder="····" />
+    <div class="gate-err" id="pinErr"></div>
+    <button class="primary" style="width:100%;" onclick="checkPin()">Unlock</button>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <h1>Site Settings</h1>
+    <span id="status"></span>
+    <span class="spacer"></span>
+    <button onclick="exportJson()">Export</button>
+    <button onclick="document.getElementById('importFile').click()">Import</button>
+    <input type="file" id="importFile" accept="application/json" hidden onchange="importJson(event)" />
+    <button class="danger" onclick="resetAll()">Reset all</button>
+    <button class="primary" id="saveBtn" onclick="save()">Save</button>
+  </header>
+
+  <nav id="tabs"></nav>
+  <main id="panels"></main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const CORRECT_PIN = "1555";
+  const UNLOCK_KEY = "personachat_unlocked";
+  const { DEFAULTS, clone, deepMerge, loadOverrides, saveOverrides } = window.SiteConfig;
+
+  // Working copy: the full merged config. Edits mutate this; only the parts
+  // that differ from DEFAULTS are written back, so a default improved later
+  // still reaches the app everywhere it was not deliberately overridden.
+  let config = clone(DEFAULTS);
+
+  // ── Gate ───────────────────────────────────────────────────────────────────
+  window.checkPin = function () {
+    if (document.getElementById("pin").value === CORRECT_PIN) {
+      localStorage.setItem(UNLOCK_KEY, "true");
+      unlock();
+    } else {
+      document.getElementById("pinErr").textContent = "Incorrect code.";
+      document.getElementById("pin").value = "";
+    }
+  };
+  document.getElementById("pin").addEventListener("keydown", e => { if (e.key === "Enter") window.checkPin(); });
+
+  function unlock() {
+    document.getElementById("gate").remove();
+    document.getElementById("app").hidden = false;
+    boot();
+  }
+
+  // ── Status line ────────────────────────────────────────────────────────────
+  function status(text, kind) {
+    const el = document.getElementById("status");
+    el.textContent = text;
+    el.className = kind || "";
+  }
+
+  // ── Diff: keep only what differs from the defaults ─────────────────────────
+  const isObj = v => v !== null && typeof v === "object" && !Array.isArray(v);
+
+  function diff(base, current) {
+    const out = {};
+    for (const key of Object.keys(current)) {
+      const b = base[key], c = current[key];
+      if (isObj(b) && isObj(c)) {
+        const sub = diff(b, c);
+        if (Object.keys(sub).length > 0) out[key] = sub;
+      } else if (JSON.stringify(b) !== JSON.stringify(c)) {
+        out[key] = c;
+      }
+    }
+    return out;
+  }
+
+  const isChanged = (path) => {
+    const get = (obj) => path.split(".").reduce((o, k) => (o == null ? o : o[k]), obj);
+    return JSON.stringify(get(DEFAULTS)) !== JSON.stringify(get(config));
+  };
+
+  // ── Small DOM helpers ──────────────────────────────────────────────────────
+  function el(tag, props, children) {
+    const node = document.createElement(tag);
+    Object.assign(node, props || {});
+    (children || []).forEach(c => node.appendChild(typeof c === "string" ? document.createTextNode(c) : c));
+    return node;
+  }
+
+  const at = (path) => path.split(".").reduce((o, k) => o[k], config);
+  function setAt(path, value) {
+    const keys = path.split(".");
+    const last = keys.pop();
+    keys.reduce((o, k) => o[k], config)[last] = value;
+    markDirty();
+  }
+
+  let dirty = false;
+  function markDirty() {
+    dirty = true;
+    status("Unsaved changes", "busy");
+  }
+  window.addEventListener("beforeunload", e => { if (dirty) e.preventDefault(); });
+
+  // A labelled input bound to a config path. `kind` is "text", "area" or
+  // "number"; areas grow with their content since most of them hold prompts.
+  function field(labelText, path, kind, hint) {
+    const value = at(path);
+    const input = kind === "area"
+      ? el("textarea", { value: String(value ?? ""), rows: Math.min(12, Math.max(2, String(value ?? "").split("\n").length + 1)) })
+      : el("input", { type: kind === "number" ? "number" : "text", value: value ?? "" });
+    if (kind === "area") input.className = "mono";
+    input.addEventListener("input", () => {
+      setAt(path, kind === "number" ? Number(input.value) : input.value);
+      span.className = isChanged(path) ? "changed" : "";
+    });
+    const span = el("span", { className: isChanged(path) ? "changed" : "" }, [labelText]);
+    const label = el("label", { className: "field" }, [span, input]);
+    if (hint) label.appendChild(el("div", { className: "hint", style: "color:var(--muted);font-size:11px;margin-top:3px;" }, [hint]));
+    return label;
+  }
+
+  // Anything without a purpose-built editor (option lists, model lists, face
+  // pools) is edited as JSON — still editable, and it keeps this page from
+  // needing a bespoke widget per shape.
+  function jsonField(labelText, path, hint) {
+    const text = el("textarea", { className: "mono", value: JSON.stringify(at(path), null, 2), rows: 10 });
+    const span = el("span", { className: isChanged(path) ? "changed" : "" }, [labelText]);
+    const err = el("div", { style: "color:var(--err);font-size:11px;min-height:14px;margin-top:3px;" });
+    text.addEventListener("input", () => {
+      try {
+        setAt(path, JSON.parse(text.value));
+        err.textContent = "";
+        span.className = isChanged(path) ? "changed" : "";
+      } catch (e) {
+        err.textContent = "Invalid JSON — not saved: " + e.message;
+      }
+    });
+    const label = el("label", { className: "field" }, [span, text, err]);
+    if (hint) label.insertBefore(el("div", { style: "color:var(--muted);font-size:11px;margin:-2px 0 4px;" }, [hint]), text);
+    return label;
+  }
+
+  function card(title, hint, children) {
+    return el("div", { className: "card" }, [
+      el("h2", null, [title]),
+      ...(hint ? [el("p", { className: "hint" }, [hint])] : []),
+      ...children,
+    ]);
+  }
+
+  // ── Tier editor ────────────────────────────────────────────────────────────
+  // A tier list is the whole behaviour of one trait: the upper bound of each
+  // band, the short label shown under the slider, and the sentence the band
+  // puts into the system prompt.
+  function tierEditor(path, opts) {
+    const options = opts || {};
+    const wrap = el("div");
+
+    function render() {
+      wrap.textContent = "";
+      const tiers = at(path);
+      const table = el("table");
+      const head = el("tr", null, [el("th", { style: "width:70px" }, ["Up to"])]);
+      if (options.preview !== false) head.appendChild(el("th", { style: "width:26%" }, ["Slider label"]));
+      head.appendChild(el("th", null, [options.textLabel || "Prompt sentence"]));
+      head.appendChild(el("th", { style: "width:34px" }, [""]));
+      table.appendChild(head);
+
+      tiers.forEach((tier, i) => {
+        const row = el("tr");
+        const max = el("input", { type: "number", min: 0, max: 100, value: tier.max });
+        max.addEventListener("input", () => { tier.max = Number(max.value); markDirty(); });
+        row.appendChild(el("td", null, [max]));
+
+        if (options.preview !== false) {
+          const prev = el("input", { type: "text", value: tier.preview || "" });
+          prev.addEventListener("input", () => { tier.preview = prev.value; markDirty(); });
+          row.appendChild(el("td", null, [prev]));
+        }
+
+        const key = options.textKey || "prompt";
+        const body = el("textarea", { value: tier[key] || "", rows: 2 });
+        body.addEventListener("input", () => { tier[key] = body.value; markDirty(); });
+        row.appendChild(el("td", null, [body]));
+
+        const del = el("button", { type: "button", title: "Remove tier" }, ["×"]);
+        del.addEventListener("click", () => { tiers.splice(i, 1); markDirty(); render(); });
+        row.appendChild(el("td", null, [del]));
+        table.appendChild(row);
+      });
+      wrap.appendChild(table);
+
+      const add = el("button", { type: "button" }, ["+ Tier"]);
+      add.addEventListener("click", () => {
+        const blank = { max: 100 };
+        if (options.preview !== false) blank.preview = "";
+        blank[options.textKey || "prompt"] = "";
+        tiers.push(blank);
+        markDirty();
+        render();
+      });
+      const reset = el("button", { type: "button" }, ["Reset to default"]);
+      reset.addEventListener("click", () => {
+        setAt(path, clone(path.split(".").reduce((o, k) => o[k], DEFAULTS)));
+        render();
+      });
+      wrap.appendChild(el("div", { className: "rowbtns" }, [add, reset]));
+      wrap.appendChild(el("div", { style: "color:var(--muted);font-size:11px;margin-top:6px;" }, [
+        "Tiers are read in order — the first one the slider value falls at or below wins, so keep them ascending and end at 100.",
+      ]));
+    }
+
+    render();
+    return wrap;
+  }
+
+  // ── Slider table ───────────────────────────────────────────────────────────
+  function sliderTable() {
+    const wrap = el("div");
+
+    function render() {
+      wrap.textContent = "";
+      const table = el("table");
+      table.appendChild(el("tr", null, [
+        el("th", null, ["Key"]), el("th", null, ["Label"]), el("th", null, ["Left"]),
+        el("th", null, ["Right"]), el("th", null, ["Section"]),
+        el("th", { style: "width:70px" }, ["Default"]),
+        el("th", { style: "width:60px" }, ["Drift"]),
+        el("th", { style: "width:60px" }, ["Reactive"]),
+      ]));
+
+      config.sliderDefs.forEach(def => {
+        const bind = (prop, width) => {
+          const input = el("input", { type: "text", value: def[prop] || "" });
+          if (width) input.style.width = width;
+          input.addEventListener("input", () => { def[prop] = input.value; markDirty(); });
+          return el("td", null, [input]);
+        };
+        const keyCell = el("td", null, [el("code", { style: "font-size:11px;color:var(--muted)" }, [def.key])]);
+
+        const dflt = el("input", { type: "number", min: 0, max: 100, value: config.sliderDefaults[def.key] ?? 50 });
+        dflt.addEventListener("input", () => { config.sliderDefaults[def.key] = Number(dflt.value); markDirty(); });
+
+        const drift = el("input", { type: "number", min: 0, max: 100, value: config.reactiveMaxDrift[def.key] ?? "" });
+        drift.addEventListener("input", () => {
+          if (drift.value === "") delete config.reactiveMaxDrift[def.key];
+          else config.reactiveMaxDrift[def.key] = Number(drift.value);
+          markDirty();
+        });
+
+        const reactive = el("input", { type: "checkbox", checked: config.reactiveSliderKeys.includes(def.key) });
+        reactive.addEventListener("change", () => {
+          const keys = config.reactiveSliderKeys;
+          const i = keys.indexOf(def.key);
+          if (reactive.checked && i === -1) keys.push(def.key);
+          if (!reactive.checked && i !== -1) keys.splice(i, 1);
+          markDirty();
+        });
+
+        table.appendChild(el("tr", null, [
+          keyCell, bind("label"), bind("left"), bind("right"), bind("section"),
+          el("td", null, [dflt]), el("td", null, [drift]),
+          el("td", { style: "text-align:center" }, [reactive]),
+        ]));
+      });
+      wrap.appendChild(table);
+      wrap.appendChild(el("div", { style: "color:var(--muted);font-size:11px;margin-top:8px;" }, [
+        "Drift is the most a slider can move in one turn when the reactivity pass runs; blank means it never drifts. " +
+        "Adding or removing a slider is a structural change — do that in the Advanced tab's JSON so the trait tiers stay in step.",
+      ]));
+    }
+
+    render();
+    return wrap;
+  }
+
+  // ── Panels ─────────────────────────────────────────────────────────────────
+  const TABS = [
+    ["sliders", "Sliders", buildSliders],
+    ["traits", "Trait prompts", buildTraits],
+    ["appearance", "Appearance", buildAppearance],
+    ["prompts", "Prompt text", buildPrompts],
+    ["image", "Image prompts", buildImage],
+    ["models", "Models & options", buildModels],
+    ["advanced", "Advanced", buildAdvanced],
+  ];
+
+  function buildSliders() {
+    return [card(
+      "Sliders",
+      "Label and endpoint text is what shows in the app; the default is where a new character starts.",
+      [sliderTable()],
+    )];
+  }
+
+  function buildTraits() {
+    const cards = [];
+    const byKey = {};
+    config.sliderDefs.forEach(d => { byKey[d.key] = d; });
+
+    const traitCards = Object.keys(config.traitTiers).map(key => {
+      const def = byKey[key];
+      return el("details", { className: "trait" }, [
+        el("summary", null, [
+          def ? def.label : key,
+          el("span", { className: "key" }, ["(" + key + ")"]),
+        ]),
+        el("div", { className: "body" }, [tierEditor("traitTiers." + key)]),
+      ]);
+    });
+
+    cards.push(card(
+      "Trait tiers",
+      "Each slider is banded into tiers. The slider label and the sentence sent to the model share a tier, so they can never say different things.",
+      traitCards,
+    ));
+
+    cards.push(card(
+      "Arousal modulation",
+      "Sent in addition to the horniness tier above. It is what lets arousal pull amorousness, forwardness, coyness, dirty talk and pet names away from their own slider settings.",
+      [tierEditor("horninessModulation", { preview: false })],
+    ));
+    return cards;
+  }
+
+  function buildAppearance() {
+    const a = "appearance.";
+    return [
+      card("Height", "The slider stores 0-100; these centimetres are what it maps onto, and the phrase is what the image model actually reads.", [
+        field("Minimum height (cm)", a + "heightCmMin", "number"),
+        field("Maximum height (cm)", a + "heightCmMax", "number"),
+        field("Measurement phrase", a + "heightMeasurementTemplate", "text", "{cm} is replaced with the height."),
+        tierEditor(a + "heightTiers", { preview: false, textKey: "phrase", textLabel: "Phrase" }),
+      ]),
+      card("Build", null, [tierEditor(a + "buildTiers", { preview: false, textKey: "phrase", textLabel: "Phrase" })]),
+      card("Chest", "Buckets are spread evenly across the slider range.", [
+        jsonField("Cup sizes", a + "chestCups"),
+        field("Phrase", a + "chestTemplate", "text", "{cup} is replaced with the bucket."),
+      ]),
+      card("Waist", null, [tierEditor(a + "waistTiers", { preview: false, textKey: "phrase", textLabel: "Phrase" })]),
+      card("Hips", null, [tierEditor(a + "hipsTiers", { preview: false, textKey: "phrase", textLabel: "Phrase" })]),
+      card("Combined phrases",
+        "Used instead of two separate phrases when both sliders sit at the same extreme — stacking them reads as more extreme than either was meant to be.", [
+        field("Short + slim", a + "combinedShortSlim", "text"),
+        field("Narrow waist + narrow hips", a + "combinedSlenderWaistline", "text"),
+        field("Full waist + wide hips", a + "combinedCurvyWaistline", "text"),
+      ]),
+      card("Face variation",
+        "One trait is taken from each of a random handful of these pools per image. Without them the model returns the same face nearly every time; taking every pool at once over-specifies it and does the same thing again.", [
+        field("Pools used per image", a + "faceVariationPoolCount", "number"),
+        jsonField("Pools", a + "faceVariationPools"),
+      ]),
+    ];
+  }
+
+  function buildPrompts() {
+    const p = "prompts.";
+    return [card(
+      "System prompt fragments",
+      "Text in braces is substituted in. \\n is a line break.",
+      [
+        field("Personality section header", p + "personalityHeader", "area"),
+        field("Gender line", p + "genderLine", "area", "{gender}"),
+        field("Age line", p + "ageLine", "area", "{age}"),
+        field("Marital status line", p + "maritalLine", "area", "{status}"),
+        field("Relationship line", p + "relationshipLine", "area", "{relationship}"),
+        field("Appearance note", p + "appearanceNote", "area", "{description}"),
+        field("About the user", p + "userPersonaNote", "area", "{details}"),
+        field("User name fragment", p + "userPersonaName", "area", "{name}"),
+        field("User gender fragment", p + "userPersonaGender", "area", "{gender}"),
+      ],
+    )];
+  }
+
+  function buildImage() {
+    const i = "image.";
+    return [
+      card("Point of view", "Appended to every in-chat image. One of the limb clauses is picked per shot depending on what the scene and the tracked poses say.", [
+        field("Base POV clause", i + "povBase", "area"),
+        field("Viewer is touching something", i + "povArmsModifier", "area"),
+        field("Scene already names the viewer's limbs", i + "povArmsOwnedModifier", "area"),
+        field("Viewer is touching nothing", i + "povNoLimbs", "area"),
+        field("Intimate scene", i + "povIntimateModifier", "area"),
+      ]),
+      card("Guardrails", "Wiro has no negative prompt, so this goes into the positive one.", [
+        field("Proportion guard", i + "proportionGuard", "area"),
+      ]),
+      card("Scene extraction", "Sent to the extractor model to turn the last few messages into an image prompt.", [
+        field("Instruction", i + "scenePromptInstruction", "area",
+          "{name}, {charDesc}, {recent}, {actNote} and {ownBodyRule} are substituted in."),
+      ]),
+    ];
+  }
+
+  function buildModels() {
+    return [
+      card("Models", "Ids must match what the proxy accepts. The first text and image model is what a new install defaults to.", [
+        jsonField("Text models", "models.text"),
+        jsonField("Image models", "models.image"),
+        jsonField("Image model parameters", "models.imageParams"),
+        field("Vision model (reads uploaded reference images)", "models.vision", "text"),
+        field("Reactivity model (drifts the sliders between turns)", "models.reactivity", "text"),
+      ]),
+      card("Option lists", "The dropdowns in the character form.", [
+        jsonField("Genders", "options.genders"),
+        jsonField("Marital statuses", "options.maritalStatuses"),
+        jsonField("Hair colours", "options.hairColours"),
+        jsonField("Eye colours", "options.eyeColours"),
+        jsonField("Skin tones", "options.skinTones"),
+      ]),
+    ];
+  }
+
+  function buildAdvanced() {
+    const text = el("textarea", { className: "mono", rows: 26, value: JSON.stringify(config, null, 2) });
+    const err = el("div", { style: "color:var(--err);font-size:12px;min-height:16px;margin-top:4px;" });
+    const apply = el("button", { type: "button", className: "primary" }, ["Apply to form"]);
+    apply.addEventListener("click", () => {
+      try {
+        const parsed = JSON.parse(text.value);
+        config = deepMerge(clone(DEFAULTS), parsed);
+        err.textContent = "";
+        markDirty();
+        renderTab(activeTab);
+        status("Applied — not saved yet", "busy");
+      } catch (e) {
+        err.textContent = "Invalid JSON: " + e.message;
+      }
+    });
+    return [
+      card("Whole config as JSON",
+        "The full merged config. Editing here is the way to add or remove a slider — a new entry needs a sliderDefs row, a sliderDefaults value and a traitTiers list under the same key.",
+        [text, err, el("div", { className: "rowbtns" }, [apply])]),
+      card("Stored overrides",
+        "Only what differs from the built-in defaults is stored, so defaults improved later still reach the app anywhere you have not deliberately changed them. This is exactly what Save writes.",
+        [el("textarea", { className: "mono", rows: 14, readOnly: true, value: JSON.stringify(diff(DEFAULTS, config), null, 2) })]),
+    ];
+  }
+
+  // ── Tab plumbing ───────────────────────────────────────────────────────────
+  let activeTab = "sliders";
+
+  function renderTab(id) {
+    activeTab = id;
+    const panels = document.getElementById("panels");
+    panels.textContent = "";
+    const section = el("section", { className: "active" });
+    if (window.__configError) {
+      section.appendChild(el("div", { className: "banner warn" }, [
+        "Could not reach the data proxy (" + window.__configError + "). You are editing the built-in defaults — saving will retry.",
+      ]));
+    }
+    TABS.find(t => t[0] === id)[2]().forEach(c => section.appendChild(c));
+    panels.appendChild(section);
+    [...document.getElementById("tabs").children].forEach(b => {
+      b.className = b.dataset.tab === id ? "active" : "";
+    });
+  }
+
+  function renderTabs() {
+    const nav = document.getElementById("tabs");
+    nav.textContent = "";
+    TABS.forEach(([id, label]) => {
+      const b = el("button", { type: "button" }, [label]);
+      b.dataset.tab = id;
+      b.addEventListener("click", () => renderTab(id));
+      nav.appendChild(b);
+    });
+  }
+
+  // ── Load / save ────────────────────────────────────────────────────────────
+  async function boot() {
+    renderTabs();
+    status("Loading…", "busy");
+    try {
+      const overrides = await loadOverrides();
+      config = deepMerge(clone(DEFAULTS), overrides);
+      window.__configError = null;
+      status("Loaded", "ok");
+    } catch (e) {
+      window.__configError = e.message;
+      status("Load failed", "err");
+    }
+    dirty = false;
+    renderTab(activeTab);
+  }
+
+  window.save = async function () {
+    const btn = document.getElementById("saveBtn");
+    btn.disabled = true;
+    status("Saving…", "busy");
+    try {
+      await saveOverrides(diff(DEFAULTS, config));
+      dirty = false;
+      status("Saved — reload the app to pick it up", "ok");
+    } catch (e) {
+      status("Save failed: " + e.message, "err");
+    }
+    btn.disabled = false;
+  };
+
+  window.resetAll = function () {
+    if (!confirm("Discard every override and go back to the built-in defaults? This is not saved until you press Save.")) return;
+    config = clone(DEFAULTS);
+    markDirty();
+    renderTab(activeTab);
+  };
+
+  window.exportJson = function () {
+    const blob = new Blob([JSON.stringify(diff(DEFAULTS, config), null, 2)], { type: "application/json" });
+    const a = el("a", { href: URL.createObjectURL(blob), download: "site-config-overrides.json" });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  window.importJson = function (event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        config = deepMerge(clone(DEFAULTS), JSON.parse(reader.result));
+        markDirty();
+        renderTab(activeTab);
+        status("Imported — not saved yet", "busy");
+      } catch (e) {
+        status("Import failed: " + e.message, "err");
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = "";
+  };
+
+  if (localStorage.getItem(UNLOCK_KEY) === "true") unlock();
+  else document.getElementById("pin").focus();
+})();
+</script>
+</body>
+</html>

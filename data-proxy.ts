@@ -18,6 +18,8 @@
 //   save_gallery           { characterId, gallery: [...] } -> { ok: true }
 //   delete_gallery         { characterId } -> { ok: true }
 //   delete_character       { characterId } -> { ok: true } (also deletes chat + gallery)
+//   get_site_config        -> { config: {...} }
+//   save_site_config       { config: {...} } -> { ok: true }
 // ═══════════════════════════════════════════════════
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -28,6 +30,8 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, apikey',
 };
+
+const SITE_CONFIG_ID = '__site_config__';
 
 function toRows(characters: any[]) {
   const updated_at = new Date().toISOString();
@@ -113,6 +117,32 @@ Deno.serve(async (req: Request) => {
         if (error) return json({ error: error.message }, 500);
         await supabase.from('chats').delete().eq('character_id', characterId);
         await supabase.from('galleries').delete().eq('character_id', characterId);
+        return json({ ok: true });
+      }
+
+      // Site config — the editable prompts, slider definitions and tier
+      // phrases that settings.html writes and index.html reads at boot. It is
+      // a single document, so it rides in the chats table under a reserved
+      // character_id rather than needing a table of its own; the id is
+      // prefixed so it can never collide with a real character.
+      case 'get_site_config': {
+        const { data, error } = await supabase.from('chats').select('data').eq('character_id', SITE_CONFIG_ID).maybeSingle();
+        if (error) return json({ error: error.message }, 500);
+        const config = data?.data;
+        return json({ config: (config && !Array.isArray(config) && typeof config === 'object') ? config : {} });
+      }
+
+      case 'save_site_config': {
+        const { config } = body;
+        if (!config || typeof config !== 'object' || Array.isArray(config)) {
+          return json({ error: 'config must be an object' }, 400);
+        }
+        const { error } = await supabase.from('chats').upsert({
+          character_id: SITE_CONFIG_ID,
+          data: config,
+          updated_at: new Date().toISOString(),
+        });
+        if (error) return json({ error: error.message }, 500);
         return json({ ok: true });
       }
 

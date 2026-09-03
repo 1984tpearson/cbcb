@@ -7,6 +7,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="site-config.js"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -216,18 +217,24 @@
     document.title = "PersonaChat";
     if (!window._appMounted) {
       window._appMounted = true;
-      if (window._mountApp) {
-        window._mountApp();
-      } else {
-        // Wait for Babel to finish
-        const interval = setInterval(() => {
-          if (window._mountApp) {
-            clearInterval(interval);
-            window._mountApp();
-          }
-        }, 50);
-      }
+      bootApp();
     }
+  }
+
+  // The editable config (prompts, slider definitions, tier phrases) has to be
+  // in place before the app source runs, since that source reads it at its top
+  // level — so the source is compiled here rather than left to Babel's own
+  // on-load pass, which would also run it for visitors who never unlock.
+  // A proxy failure is not fatal: loadConfig falls back to the built-in
+  // defaults and reports why, so the app still starts on a dead network.
+  async function bootApp() {
+    const { config, error } = await window.SiteConfig.loadConfig();
+    window.__SITE_CONFIG__ = config;
+    window.__SITE_CONFIG_ERROR__ = error;
+    if (error) console.warn("Site config unavailable, using built-in defaults:", error);
+    const source = document.getElementById("app-source").textContent;
+    (0, eval)(Babel.transform(source, { presets: ["react"] }).code);
+    window._mountApp();
   }
 
   if (localStorage.getItem(UNLOCK_KEY) === "true") {
@@ -284,122 +291,42 @@
   });
 </script>
 
-<script type="text/babel">
+<script type="text/x-app-source" id="app-source">
 
 const { useState, useEffect, useRef } = React;
 
-const OPENROUTER_MODELS = [
-  { id: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B (Best)" },
-  { id: "mistralai/mistral-small-3.1-24b-instruct", label: "Mistral Small 3.1 24B" },
-  { id: "meta-llama/llama-3.1-8b-instruct", label: "Llama 3.1 8B (Fast)" },
-  { id: "mistralai/mistral-7b-instruct", label: "Mistral 7B" },
-  { id: "google/gemma-3-27b-it", label: "Gemma 3 27B" },
-  { id: "moonshotai/kimi-k2.6", label: "Kimi K2.6" },
-  { id: "minimax/minimax-m3", label: "MiniMax M3" },
-  { id: "mistralai/mistral-small-2603", label: "Mistral Small 4" },
-  { id: "mistralai/mistral-large-2512", label: "Mistral large" },
-  { id: "nousresearch/hermes-4-70b", label: "Hermes 4 70B" },
-];
+// Editable site config — the defaults in site-config.js, deep-merged with the
+// overrides saved from settings.html. Everything below reads from CFG instead
+// of hardcoding, so settings.html can change it without touching this file.
+const CFG = window.__SITE_CONFIG__ || window.SiteConfig.clone(window.SiteConfig.DEFAULTS);
+const { tierFor, fillTemplate } = window.SiteConfig;
 
-const GENDERS = ["Female", "Male", "Non-binary", "Custom"];
+const OPENROUTER_MODELS = CFG.models.text;
 
-const DEFAULT_SLIDERS = {
-  amorous: 30,
-  replyLength: 50,
-  formality: 30,
-  assertiveness: 50,
-  playfulness: 50,
-  emotionalDepth: 50,
-  profanity: 20,
-  dirtyTalk: 20,
-  vocabulary: 50,
-  petNames: 30,
-  forwardness: 40,
-  jealousy: 30,
-  openness: 50,
-  neediness: 30,
-  confidence: 55,
-  coyness: 20,
-  honesty: 80,
-  gullibility: 40,
-  // Reactive relationship sliders
-  familiarity: 10,
-  likesUser: 50,
-  attractionToUser: 50,
-  horniness: 15,
-};
+const GENDERS = CFG.options.genders;
+
+const DEFAULT_SLIDERS = CFG.sliderDefaults;
 
 // Which sliders the reactivity system is allowed to drift
-const REACTIVE_SLIDER_KEYS = [
-  "amorous", "playfulness", "assertiveness", "emotionalDepth",
-  "profanity", "dirtyTalk", "petNames", "forwardness",
-  "jealousy", "openness", "neediness", "confidence", "formality",
-  "familiarity", "likesUser", "attractionToUser", "horniness",
-];
+const REACTIVE_SLIDER_KEYS = CFG.reactiveSliderKeys;
 
 // Max drift per turn for each slider (base, before multipliers)
-const REACTIVE_MAX_DRIFT = {
-  familiarity: 3,      // slow steady climb
-  likesUser: 2,
-  attractionToUser: 2,
-  horniness: 4,
-  amorous: 4,
-  playfulness: 4,
-  assertiveness: 3,
-  emotionalDepth: 3,
-  profanity: 2,
-  dirtyTalk: 3,
-  petNames: 3,
-  forwardness: 4,
-  jealousy: 3,
-  openness: 3,
-  neediness: 2,
-  confidence: 3,
-  formality: 2,
-};
+const REACTIVE_MAX_DRIFT = CFG.reactiveMaxDrift;
 
-const SLIDER_DEFS = [
-  { key: "amorous",          label: "Amorous",            left: "Reserved",       right: "Flirtatious",    section: "Personality" },
-  { key: "replyLength",      label: "Reply Length",       left: "Terse",          right: "Verbose",        section: "Personality" },
-  { key: "formality",        label: "Formality",          left: "Casual",         right: "Formal",         section: "Personality" },
-  { key: "assertiveness",    label: "Assertiveness",      left: "Passive",        right: "Dominant",       section: "Personality" },
-  { key: "playfulness",      label: "Playfulness",        left: "Serious",        right: "Playful",        section: "Personality" },
-  { key: "emotionalDepth",   label: "Emotional Depth",    left: "Surface",        right: "Intense",        section: "Personality" },
-  { key: "profanity",        label: "Profanity",          left: "Clean",          right: "Potty Mouth",    section: "Speech Style" },
-  { key: "dirtyTalk",        label: "Dirty Talk",         left: "Prudish",        right: "Explicit",       section: "Speech Style" },
-  { key: "vocabulary",       label: "Vocabulary",         left: "Blunt & Simple", right: "Flowery & Poetic", section: "Speech Style" },
-  { key: "petNames",         label: "Affectionate Language", left: "Formal Names", right: "Pet Names",     section: "Speech Style" },
-  { key: "forwardness",      label: "Sexual Forwardness", left: "Waits for move", right: "Makes first move", section: "Behaviour" },
-  { key: "jealousy",         label: "Jealousy",           left: "Unbothered",     right: "Very Possessive", section: "Behaviour" },
-  { key: "openness",         label: "Openness",           left: "Very Guarded",   right: "Overshares",     section: "Behaviour" },
-  { key: "neediness",   label: "Neediness",  left: "Independent", right: "Clingy",            section: "Behaviour" },
-  { key: "confidence", label: "Confidence", left: "Vulnerable / Insecure", right: "Confident / Secure", section: "Behaviour" },
-  { key: "coyness", label: "Coyness", left: "Direct", right: "Plays Innocent", section: "Behaviour" },
-  { key: "honesty", label: "Honesty", left: "Manipulative", right: "Completely Honest", section: "Behaviour" },
-  { key: "gullibility", label: "Gullibility", left: "Believes Anything", right: "Highly Suspicious", section: "Behaviour" },
-  // Reactive relationship sliders
-  { key: "familiarity",      label: "Familiarity",        left: "Complete Stranger", right: "Knows User Deeply", section: "Relationship", reactive: true },
-  { key: "likesUser",        label: "Likes User",         left: "Dislikes",       right: "Loves",          section: "Relationship", reactive: true },
-  { key: "attractionToUser", label: "Attraction to User", left: "Repulsed",       right: "Strongly Attracted", section: "Relationship", reactive: true },
-  { key: "horniness",        label: "Horniness",          left: "Not in the Mood", right: "Overwhelmed with Desire", section: "Relationship", reactive: true },
-].map(def => ({ ...def, previewFn: v => personalitySliderPreview(def.key, v) }));
+const SLIDER_DEFS = CFG.sliderDefs.map(def => ({ ...def, previewFn: v => personalitySliderPreview(def.key, v) }));
 
 const DEFAULT_USER_PERSONA = { name: "", gender: "", notes: "" };
 
-// Single Wiro model for now. Kept as a list (rather than a bare constant) so
-// the Settings dropdown and per-model config pattern can grow to multiple
-// Wiro models later without reshaping the surrounding code.
-const DEZGO_MODELS = [
-  { id: "seedream-v5-pro-uncensored", label: "Seedream v5 Pro (Wiro)" },
-];
+// Kept as a list (rather than a bare constant) so the Settings dropdown and
+// per-model config pattern can grow to multiple Wiro models later without
+// reshaping the surrounding code.
+const DEZGO_MODELS = CFG.models.image;
 
-const DEZGO_MODEL_PARAMS = {
-  "seedream-v5-pro-uncensored": { resolution: "1k", aspectRatio: "9:16", outputFormat: "png" },
-};
+const DEZGO_MODEL_PARAMS = CFG.models.imageParams;
 
 const DEFAULT_SETTINGS = {
   selectedModel: OPENROUTER_MODELS[0].id,
-  reactivityModel: "meta-llama/llama-3.1-8b-instruct",
+  reactivityModel: CFG.models.reactivity,
   userPersona: { ...DEFAULT_USER_PERSONA },
   imageModel: DEZGO_MODELS[0].id,
 };
@@ -414,7 +341,7 @@ const UPLOAD_IMAGE_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/
 // game; what never appears is their face, head or back, since the camera
 // cannot see itself. Deliberately not applied on the character creation
 // screen, where a third-person reference portrait is wanted.
-const POV_BASE = "first person POV through the viewer's own eyes, viewer's face never visible";
+const POV_BASE = CFG.image.povBase;
 // Which of the viewer's own body parts belong in frame depends on what they
 // are doing, so the clause is assembled per image rather than fixed. Asking
 // for them unconditionally puts disembodied limbs in every shot, including
@@ -434,14 +361,14 @@ const POV_BASE = "first person POV through the viewer's own eyes, viewer's face 
 // counts. The custom prompt box is hand-written, where "my hand" is natural.
 const POV_VIEWER_LIMB_RE = /\b(?:viewer|user)(?:'|\u2019)?s?\s+(?:own\s+)?(?:hand|hands|arm|arms|forearm|forearms|finger|fingers|palm|palms|wrist|wrists)\b/i;
 const POV_CUSTOM_LIMB_RE = /\b(?:my|your|our)\s+(?:own\s+)?(?:hand|hands|arm|arms|forearm|forearms|finger|fingers|palm|palms)\b/i;
-const POV_ARMS_MODIFIER = "the viewer's own hand and forearm in the foreground, entering frame from the camera";
+const POV_ARMS_MODIFIER = CFG.image.povArmsModifier;
 // Seedream leans toward putting hands into a POV frame whether or not anything
 // asked for them, so when the viewer is touching nothing, say so explicitly.
-const POV_NO_LIMBS = "no disembodied hands or arms in frame";
+const POV_NO_LIMBS = CFG.image.povNoLimbs;
 // When the scene already names the limb, claim it rather than adding another:
 // this tells the model whose arms those are and that there is only one pair,
 // instead of introducing a second pair alongside them.
-const POV_ARMS_OWNED_MODIFIER = "the foreground hand and arm belong to the viewer, one pair only";
+const POV_ARMS_OWNED_MODIFIER = CFG.image.povArmsOwnedModifier;
 // In an intimate scene the viewer's own body is part of the shot, and framing
 // it out is what makes these images read as wrong — a POV that crops at the
 // wrists during sex is stranger than one that doesn't. Gated on the
@@ -464,7 +391,7 @@ function povSelfBody(userOutfit, bare, clothed) {
   if (!userOutfit || isUserUndressed(userOutfit)) return bare;
   return `${clothed}, the viewer wearing ${userOutfit}`;
 }
-const POV_INTIMATE_MODIFIER = "the viewer's own body framing the bottom of the shot";
+const POV_INTIMATE_MODIFIER = CFG.image.povIntimateModifier;
 function isIntimateScene(sceneText, staging, nsfw) {
   const userPose = (staging && staging.userPose) || "";
   return !!nsfw && POV_INTIMATE_RE.test(`${sceneText || ""} ${userPose}`);
@@ -621,44 +548,39 @@ const storage = {
 // saved characters already hold values on that scale — but is shown and
 // described in centimetres. HEIGHT_CM_MIN/MAX bracket adult height; the
 // mapping is linear, so each slider step is half a centimetre.
-const HEIGHT_CM_MIN = 145;
-const HEIGHT_CM_MAX = 195;
+const HEIGHT_CM_MIN = CFG.appearance.heightCmMin;
+const HEIGHT_CM_MAX = CFG.appearance.heightCmMax;
 const sliderToCm = (value) => Math.round(HEIGHT_CM_MIN + ((value ?? 50) / 100) * (HEIGHT_CM_MAX - HEIGHT_CM_MIN));
 const cmToSlider = (cm) => Math.min(100, Math.max(0, Math.round(((cm - HEIGHT_CM_MIN) / (HEIGHT_CM_MAX - HEIGHT_CM_MIN)) * 100)));
 
 function appearancePhrasePreview(key, value) {
+  const a = CFG.appearance;
   switch (key) {
     case "height": {
       // Both the measurement and a descriptive phrase: image models read
       // "tall" far more reliably than they read a number, but the number is
       // what the user actually set.
-      const cm = sliderToCm(value);
-      if (value <= 25) return `${cm} cm, short stature`;
-      if (value <= 45) return `${cm} cm, petite frame`;
-      if (value >= 75) return `${cm} cm, tall`;
-      if (value >= 55) return `${cm} cm, above average height`;
-      return `${cm} cm, average height`;
+      const tier = tierFor(a.heightTiers, value);
+      return `${sliderToCm(value)} cm, ${tier ? tier.phrase : ""}`;
     }
-    case "build":
-      if (value <= 20) return "slim build";
-      if (value <= 40) return "slender build";
-      if (value >= 80) return "stocky build";
-      if (value >= 60) return "full figure";
-      return "athletic build";
+    case "build": {
+      const tier = tierFor(a.buildTiers, value);
+      return tier ? tier.phrase : "";
+    }
     case "chest": {
-      // 5 evenly-spaced buckets across the slider range, A through DD.
-      const cups = ["A", "B", "C", "D", "DD"];
+      const cups = a.chestCups || [];
+      if (cups.length === 0) return "";
       const idx = Math.min(cups.length - 1, Math.floor(value / (100 / cups.length)));
-      return `${cups[idx]} cup breasts`;
+      return fillTemplate(a.chestTemplate, { cup: cups[idx] });
     }
-    case "waist":
-      if (value <= 30) return "narrow waist";
-      if (value >= 70) return "full waist";
-      return "average waist";
-    case "hips":
-      if (value <= 30) return "narrow hips";
-      if (value >= 70) return "wide hips";
-      return "average hips";
+    case "waist": {
+      const tier = tierFor(a.waistTiers, value);
+      return tier ? tier.phrase : "";
+    }
+    case "hips": {
+      const tier = tierFor(a.hipsTiers, value);
+      return tier ? tier.phrase : "";
+    }
     default:
       return "";
   }
@@ -668,26 +590,18 @@ function appearancePhrasePreview(key, value) {
 // about facial structure, so the face was left entirely to the model's prior
 // — which lands on the same default face almost every time. Randomising the
 // seed alone does not move identity much on Seedream-class models; the face
-// has to actually be described. These are all ethnicity-neutral structural
-// traits, so they vary the face without fighting the user's own settings.
-const FACE_VARIATION_POOLS = [
-  ["oval face", "round face", "heart-shaped face", "square jawline", "angular face", "soft rounded features", "long narrow face", "wide cheekbones"],
-  ["high cheekbones", "subtle cheekbones", "full cheeks", "hollow cheeks", "broad forehead", "narrow forehead"],
-  ["small straight nose", "slightly upturned nose", "narrow nose", "broader nose", "aquiline nose", "rounded nose tip"],
-  ["full lips", "thin lips", "wide mouth", "small mouth", "cupid's bow lips", "asymmetric smile"],
-  ["close-set eyes", "wide-set eyes", "deep-set eyes", "almond-shaped eyes", "hooded eyelids", "large round eyes"],
-  ["light freckles across the nose", "a small beauty mark", "clear unblemished skin", "faint laugh lines", "a slightly crooked front tooth", "a small scar through one eyebrow"],
-];
-// One trait from each of a random subset of pools — taking all six every time
-// over-specifies the face and starts producing the same composite again.
+// has to actually be described.
 function pickFaceVariation() {
-  const pools = [...FACE_VARIATION_POOLS].sort(() => Math.random() - 0.5).slice(0, 4);
+  const all = CFG.appearance.faceVariationPools || [];
+  const count = CFG.appearance.faceVariationPoolCount ?? 4;
+  const pools = [...all].sort(() => Math.random() - 0.5).slice(0, count);
   return pools.map(pool => pool[Math.floor(Math.random() * pool.length)]).join(", ");
 }
 
 function buildAppearancePrompt(appearance) {
   if (!appearance) return "";
   const a = appearance;
+  const cfg = CFG.appearance;
   const parts = [];
 
   const hair = a.hairColour === "Custom" ? a.hairColourCustom : a.hairColour;
@@ -703,26 +617,28 @@ function buildAppearancePrompt(appearance) {
   const h = a.height ?? 50;
   const b = a.build ?? 50;
 
+  // A tier marked skipInPrompt is the unremarkable middle one — saying
+  // "average height" adds nothing the model can use, so it is only shown as
+  // the slider's own preview text.
+  const phraseFor = (tiers, value) => {
+    const tier = tierFor(tiers, value);
+    return tier && !tier.skipInPrompt ? tier.phrase : null;
+  };
+
   // Height + build combined into one phrase when both land at the extreme
   // low end, instead of stacking two separate "very short" / "very slim"
   // modifiers — that combination is what was pushing generations toward
   // caricature proportions (tiny torso, stretched limbs) rather than a
   // proportionally short, slim figure.
-  const heightCm = `${sliderToCm(h)} cm tall`;
+  const heightCm = fillTemplate(cfg.heightMeasurementTemplate, { cm: sliderToCm(h) });
   if (h <= 25 && b <= 20) {
-    parts.push(`${heightCm}, short, slender frame`);
+    parts.push(`${heightCm}, ${cfg.combinedShortSlim}`);
   } else {
     parts.push(heightCm);
-    if (h <= 25) parts.push("short stature");
-    else if (h <= 45) parts.push("petite frame");
-    else if (h >= 75) parts.push("tall");
-    else if (h >= 55) parts.push("above average height");
-
-    if (b <= 20) parts.push("slim build");
-    else if (b <= 40) parts.push("slender build");
-    else if (b >= 80) parts.push("stocky build");
-    else if (b >= 60) parts.push("full figure");
-    else parts.push("athletic build");
+    const heightPhrase = phraseFor(cfg.heightTiers, h);
+    if (heightPhrase) parts.push(heightPhrase);
+    const buildPhrase = phraseFor(cfg.buildTiers, b);
+    if (buildPhrase) parts.push(buildPhrase);
   }
 
   const chest = a.chest ?? 50;
@@ -736,26 +652,24 @@ function buildAppearancePrompt(appearance) {
   // either was meant to be individually, since they're largely describing
   // the same silhouette.
   if (waist <= 30 && hips <= 30) {
-    parts.push("slender waistline");
+    parts.push(cfg.combinedSlenderWaistline);
   } else if (waist >= 70 && hips >= 70) {
-    parts.push("curvier waistline");
+    parts.push(cfg.combinedCurvyWaistline);
   } else {
-    if (waist <= 30) parts.push("narrow waist");
-    else if (waist >= 70) parts.push("full waist");
-    if (hips <= 30) parts.push("narrow hips");
-    else if (hips >= 70) parts.push("wide hips");
+    const waistPhrase = phraseFor(cfg.waistTiers, waist);
+    if (waistPhrase) parts.push(waistPhrase);
+    const hipsPhrase = phraseFor(cfg.hipsTiers, hips);
+    if (hipsPhrase) parts.push(hipsPhrase);
   }
 
-  return parts.length > 0 ? parts.join(", ") : "";
+  return parts.filter(Boolean).length > 0 ? parts.filter(Boolean).join(", ") : "";
 }
 
 function buildAppearanceSystemNote(appearance) {
   if (!appearance) return "";
   const desc = buildAppearancePrompt(appearance);
   if (!desc) return "";
-  return `
-
-[APPEARANCE] Your physical appearance: ${desc}. You are aware of how you look but only mention it naturally if directly relevant — never force it into conversation.`;
+  return fillTemplate(CFG.prompts.appearanceNote, { description: desc });
 }
 
 function resolveUserPersona(character, settings) {
@@ -767,348 +681,77 @@ function resolveUserPersona(character, settings) {
 function buildUserPersonaNote(persona) {
   if (!persona) return "";
   const parts = [];
-  if (persona.name) parts.push(`their name is ${persona.name}`);
-  if (persona.gender) parts.push(`their gender is ${persona.gender}`);
+  if (persona.name) parts.push(fillTemplate(CFG.prompts.userPersonaName, { name: persona.name }));
+  if (persona.gender) parts.push(fillTemplate(CFG.prompts.userPersonaGender, { gender: persona.gender }));
   if (persona.notes) parts.push(persona.notes);
   if (parts.length === 0) return "";
-  return `\n\n[ABOUT THE PERSON YOU'RE TALKING TO] ${parts.join("; ")}. Address and refer to them accordingly.`;
+  return fillTemplate(CFG.prompts.userPersonaNote, { details: parts.join("; ") });
 }
 
-// Short-phrase preview for each personality/behaviour/relationship slider —
-// mirrors the tier boundaries in buildPersonalityAddendum below so the two
-// can never drift out of sync with each other.
+// Short-phrase preview for each personality/behaviour/relationship slider.
+// Preview text and prompt text share a tier in CFG.traitTiers, so the label
+// under a slider can never drift out of sync with what that slider actually
+// tells the model.
 function personalitySliderPreview(key, value) {
-  const v = value;
-  switch (key) {
-    case "amorous":
-      if (v <= 20) return "platonic only";
-      if (v <= 40) return "warm, not flirty";
-      if (v <= 60) return "subtly flirtatious";
-      if (v <= 80) return "openly flirtatious";
-      return "highly amorous";
-    case "replyLength":
-      if (v <= 20) return "very terse";
-      if (v <= 40) return "concise replies";
-      if (v <= 60) return "moderate length";
-      if (v <= 80) return "detailed, expressive";
-      return "long & immersive";
-    case "formality":
-      if (v <= 20) return "very casual";
-      if (v <= 40) return "relaxed tone";
-      if (v <= 60) return "balanced tone";
-      if (v <= 80) return "polished speech";
-      return "formal & refined";
-    case "assertiveness":
-      if (v <= 20) return "very passive";
-      if (v <= 40) return "easy-going";
-      if (v <= 60) return "balanced";
-      if (v <= 80) return "confident & assertive";
-      return "very dominant";
-    case "playfulness":
-      if (v <= 20) return "serious, little humor";
-      if (v <= 40) return "dry humor";
-      if (v <= 60) return "light banter";
-      if (v <= 80) return "playful & witty";
-      return "highly playful";
-    case "emotionalDepth":
-      if (v <= 20) return "surface-level";
-      if (v <= 40) return "measured warmth";
-      if (v <= 60) return "genuine emotion";
-      if (v <= 80) return "emotionally expressive";
-      return "intensely emotional";
-    case "profanity":
-      if (v <= 20) return "never swears";
-      if (v <= 40) return "rarely swears";
-      if (v <= 60) return "casual swearing";
-      if (v <= 80) return "swears freely";
-      return "swears constantly";
-    case "dirtyTalk":
-      if (v <= 20) return "completely prudish";
-      if (v <= 40) return "fairly modest";
-      if (v <= 60) return "suggestive & flirty";
-      if (v <= 80) return "open & bold";
-      return "very explicit";
-    case "vocabulary":
-      if (v <= 20) return "blunt & simple";
-      if (v <= 40) return "plain speech";
-      if (v <= 60) return "natural, varied";
-      if (v <= 80) return "rich & expressive";
-      return "flowery & poetic";
-    case "petNames":
-      if (v <= 20) return "formal names only";
-      if (v <= 40) return "occasional endearments";
-      if (v <= 60) return "natural nicknames";
-      if (v <= 80) return "frequent pet names";
-      return "constant pet names";
-    case "forwardness":
-      if (v <= 20) return "very reserved";
-      if (v <= 40) return "waits for a move";
-      if (v <= 60) return "either way";
-      if (v <= 80) return "makes first move";
-      return "very forward";
-    case "jealousy":
-      if (v <= 20) return "unbothered";
-      if (v <= 40) return "hides jealousy";
-      if (v <= 60) return "mildly possessive";
-      if (v <= 80) return "noticeably possessive";
-      return "intensely jealous";
-    case "openness":
-      if (v <= 20) return "very guarded";
-      if (v <= 40) return "shares selectively";
-      if (v <= 60) return "fairly open";
-      if (v <= 80) return "shares openly";
-      return "overshares";
-    case "neediness":
-      if (v <= 20) return "very independent";
-      if (v <= 40) return "mostly independent";
-      if (v <= 60) return "enjoys closeness";
-      if (v <= 80) return "craves attention";
-      return "very clingy";
-    case "confidence":
-      if (v <= 20) return "deeply insecure";
-      if (v <= 40) return "self-conscious";
-      if (v <= 60) return "balanced self-view";
-      if (v <= 80) return "generally confident";
-      return "highly confident";
-    case "coyness":
-      if (v <= 20) return "fully direct";
-      if (v <= 40) return "mostly straightforward";
-      if (v <= 60) return "stages 'accidents' occasionally";
-      if (v <= 80) return "frequent innocent acts";
-      return "constant plausible deniability";
-    case "honesty":
-      if (v <= 20) return "manipulative — will lie to get what they want";
-      if (v <= 40) return "bends the truth when it suits them";
-      if (v <= 60) return "mostly honest, spins things a little";
-      if (v <= 80) return "honest, softens hard truths";
-      return "completely honest";
-    case "gullibility":
-      if (v <= 20) return "believes anything";
-      if (v <= 40) return "trusting, rarely questions";
-      if (v <= 60) return "takes things at face value, notices the obvious";
-      if (v <= 80) return "cautious, asks questions";
-      return "highly suspicious";
-    case "familiarity":
-      if (v <= 15) return "complete stranger";
-      if (v <= 35) return "still getting acquainted";
-      if (v <= 60) return "knows them reasonably well";
-      if (v <= 80) return "knows them well";
-      return "knows them deeply";
-    case "likesUser":
-      if (v <= 20) return "dislikes user";
-      if (v <= 40) return "polite but distant";
-      if (v <= 60) return "neutral to mild";
-      if (v <= 80) return "genuinely likes them";
-      return "deep feelings";
-    case "attractionToUser":
-      if (v <= 20) return "no attraction";
-      if (v <= 40) return "little attraction";
-      if (v <= 60) return "mild attraction";
-      if (v <= 80) return "genuinely attracted";
-      return "extremely attracted";
-    case "horniness":
-      // 8 tiers instead of the usual 5 — this trait swings more sharply
-      // within a scene, so it gets finer-grained resolution.
-      if (v <= 12) return "not aroused";
-      if (v <= 25) return "faint undercurrent";
-      if (v <= 37) return "mildly turned on";
-      if (v <= 50) return "noticeably aroused";
-      if (v <= 62) return "visibly turned on";
-      if (v <= 75) return "strongly aroused";
-      if (v <= 87) return "consumed by desire";
-      return "desperately aroused";
-    default:
-      return "";
-  }
+  const tier = tierFor(CFG.traitTiers[key], value);
+  return tier ? tier.preview : "";
 }
 
 function buildPersonalityAddendum(sliders, gender, customGender, age, maritalStatus, relationship, relationshipCustom, disabledSliders) {
   const s = sliders;
+  const p = CFG.prompts;
   const lines = [];
   // Sliders the user has switched off contribute nothing to the prompt.
   const off = new Set(disabledSliders || []);
-  const push = (key, text) => { if (!off.has(key)) lines.push(text); };
+  const push = (key, text) => { if (!off.has(key) && text) lines.push(text); };
+  // Every trait line is the tier its slider currently sits in.
+  const pushTier = (key, fallback) => {
+    const tier = tierFor(CFG.traitTiers[key], s[key] ?? fallback);
+    if (tier) push(key, tier.prompt);
+  };
 
   const genderStr = gender === "Custom" ? (customGender || "unspecified") : gender;
-  lines.push(`Your gender identity is: ${genderStr}.`);
-  if (age) lines.push(`You are ${age} years old.`);
-  if (maritalStatus) lines.push(`Your marital status is: ${maritalStatus}.`);
+  lines.push(fillTemplate(p.genderLine, { gender: genderStr }));
+  if (age) lines.push(fillTemplate(p.ageLine, { age }));
+  if (maritalStatus) lines.push(fillTemplate(p.maritalLine, { status: maritalStatus }));
   if (relationship) {
     const relStr = relationship === "Custom" ? (relationshipCustom || "") : relationship;
-    if (relStr) lines.push(`Your relationship to the user is: ${relStr}. Embody this relationship naturally in how you speak and interact.`);
+    if (relStr) lines.push(fillTemplate(p.relationshipLine, { relationship: relStr }));
   }
 
   // Reactive relationship state injected into system prompt
-  const fam = s.familiarity ?? 10;
-  const likes = s.likesUser ?? 50;
-  const attraction = s.attractionToUser ?? 50;
+  pushTier("familiarity", 10);
+  pushTier("likesUser", 50);
+  pushTier("attractionToUser", 50);
+  pushTier("horniness", 15);
 
-  if (fam <= 15) push("familiarity", "You barely know the user — treat them as a complete stranger.");
-  else if (fam <= 35) push("familiarity", "You know the user only a little — you're still getting acquainted.");
-  else if (fam <= 60) push("familiarity", "You know the user reasonably well at this point.");
-  else if (fam <= 80) push("familiarity", "You know the user quite well and feel comfortable with them.");
-  else push("familiarity", "You know the user deeply — their habits, quirks, and what makes them tick.");
+  pushTier("amorous", 50);
+  pushTier("replyLength", 50);
+  pushTier("formality", 50);
+  pushTier("assertiveness", 50);
+  pushTier("playfulness", 50);
+  pushTier("emotionalDepth", 50);
+  pushTier("profanity", 50);
+  pushTier("dirtyTalk", 50);
+  pushTier("vocabulary", 50);
+  pushTier("petNames", 50);
+  pushTier("forwardness", 50);
+  pushTier("jealousy", 50);
+  pushTier("openness", 50);
+  pushTier("neediness", 50);
+  pushTier("confidence", 50);
+  pushTier("coyness", 50);
+  pushTier("honesty", 50);
+  pushTier("gullibility", 50);
 
-  if (likes <= 20) push("likesUser", "You actively dislike the user and are guarded or cold toward them.");
-  else if (likes <= 40) push("likesUser", "You're not particularly fond of the user — you're polite but distant.");
-  else if (likes <= 60) push("likesUser", "You feel neutral to mildly positive toward the user.");
-  else if (likes <= 80) push("likesUser", "You genuinely like the user and enjoy their company.");
-  else push("likesUser", "You have deep, strong feelings for the user — bordering on love.");
+  // Horniness also modulates amorous, forwardness, coyness, dirty talk and
+  // pet names — arousal pulls all of these toward bolder/warmer expression
+  // regardless of their baseline slider values, while low arousal pulls them
+  // the other way, damping them down even if their sliders are set high.
+  const modulation = tierFor(CFG.horninessModulation, s.horniness ?? 15);
+  if (modulation) push("horniness", modulation.prompt);
 
-  if (attraction <= 20) push("attractionToUser", "You find the user physically unappealing — there is no physical attraction.");
-  else if (attraction <= 40) push("attractionToUser", "You feel little physical attraction to the user.");
-  else if (attraction <= 60) push("attractionToUser", "You feel mild, neutral physical attraction to the user.");
-  else if (attraction <= 80) push("attractionToUser", "You find the user genuinely attractive.");
-  else push("attractionToUser", "You find the user extremely attractive and are very physically drawn to them.");
-
-  // Horniness — 8 tiers instead of the usual 5, since this state can swing
-  // sharply within a single scene and benefits from finer resolution.
-  const horny = s.horniness ?? 15;
-  if (horny <= 12) push("horniness", "You are not thinking about sex at all right now — it's simply not on your mind.");
-  else if (horny <= 25) push("horniness", "There's the faintest, easily-ignored undercurrent of arousal, but it doesn't affect how you act.");
-  else if (horny <= 37) push("horniness", "You're mildly aware of a spark of arousal, but it stays in the background of your thoughts.");
-  else if (horny <= 50) push("horniness", "You're noticeably turned on — it occasionally colors your tone, though you're not acting on it.");
-  else if (horny <= 62) push("horniness", "You're visibly turned on and it's starting to show in your body language and word choice.");
-  else if (horny <= 75) push("horniness", "You're strongly aroused — it's becoming hard to think about much else, and it shows.");
-  else if (horny <= 87) push("horniness", "You're consumed by desire — it's difficult to focus on anything but how badly you want the user, and you're likely to initiate.");
-  else push("horniness", "You are overwhelmed with desperate arousal — it dominates everything you say and do, and you can barely hold yourself back.");
-
-  // Amorous
-  if (s.amorous <= 20) push("amorous", "You are not flirtatious or romantic in any way — keep all interactions platonic and professional.");
-  else if (s.amorous <= 40) push("amorous", "You are warm and friendly but not flirtatious.");
-  else if (s.amorous <= 60) push("amorous", "You are occasionally warm and subtly flirtatious when the mood is right.");
-  else if (s.amorous <= 80) push("amorous", "You are openly flirtatious and enjoy romantic tension.");
-  else push("amorous", "You are highly amorous, openly flirtatious, and enjoy expressing attraction and romantic or sensual feelings freely.");
-
-  // Reply length
-  if (s.replyLength <= 20) push("replyLength", "Keep all replies extremely short — one or two sentences maximum. Be terse.");
-  else if (s.replyLength <= 40) push("replyLength", "Keep replies concise and to the point — 2 to 4 sentences.");
-  else if (s.replyLength <= 60) push("replyLength", "Give moderate-length replies — a short paragraph, enough to be engaging but not overwhelming.");
-  else if (s.replyLength <= 80) push("replyLength", "Give detailed, expressive replies of at least 2-3 paragraphs.");
-  else push("replyLength", "Give long, rich, immersive replies — at least 3-4 paragraphs. Elaborate freely, linger on details, describe feelings, actions, and surroundings in depth. Do not cut yourself short.");
-
-  // Formality
-  if (s.formality <= 20) push("formality", "Speak very casually — use slang, contractions, and informal language freely.");
-  else if (s.formality <= 40) push("formality", "Speak in a relaxed, conversational tone.");
-  else if (s.formality <= 60) push("formality", "Balance casual and formal speech naturally.");
-  else if (s.formality <= 80) push("formality", "Speak in a polished, articulate manner.");
-  else push("formality", "Speak with formal, refined, eloquent language at all times.");
-
-  // Assertiveness
-  if (s.assertiveness <= 20) push("assertiveness", "You are very passive — deferential, hesitant, and eager to please.");
-  else if (s.assertiveness <= 40) push("assertiveness", "You are generally easy-going and tend to go along with things.");
-  else if (s.assertiveness <= 60) push("assertiveness", "You have a balanced personality — neither a pushover nor overbearing.");
-  else if (s.assertiveness <= 80) push("assertiveness", "You are confident and assertive, comfortable taking the lead.");
-  else push("assertiveness", "You are very dominant and assertive — you like being in control and leading the interaction.");
-
-  // Playfulness
-  if (s.playfulness <= 20) push("playfulness", "You are serious and focused — minimal humor or banter.");
-  else if (s.playfulness <= 40) push("playfulness", "You have a dry, subtle sense of humor that occasionally surfaces.");
-  else if (s.playfulness <= 60) push("playfulness", "You enjoy light banter and occasional jokes.");
-  else if (s.playfulness <= 80) push("playfulness", "You are playful and enjoy wit, teasing, and fun exchanges.");
-  else push("playfulness", "You are highly playful, love teasing and banter, and rarely take things too seriously.");
-
-  // Emotional depth
-  if (s.emotionalDepth <= 20) push("emotionalDepth", "Keep emotional expression minimal and surface-level.");
-  else if (s.emotionalDepth <= 40) push("emotionalDepth", "Show some emotional warmth but keep it measured.");
-  else if (s.emotionalDepth <= 60) push("emotionalDepth", "Express emotions naturally and genuinely.");
-  else if (s.emotionalDepth <= 80) push("emotionalDepth", "You are emotionally expressive and empathetic — feelings run deep.");
-  else push("emotionalDepth", "You are intensely emotional and deeply empathetic — you feel everything strongly and aren't afraid to show it.");
-
-  // Profanity
-  if (s.profanity <= 20) push("profanity", "You never swear or use crude language.");
-  else if (s.profanity <= 40) push("profanity", "You rarely swear, only occasionally slipping in mild language.");
-  else if (s.profanity <= 60) push("profanity", "You swear casually sometimes without thinking much of it.");
-  else if (s.profanity <= 80) push("profanity", "You swear fairly freely and naturally in conversation.");
-  else push("profanity", "You swear constantly and liberally — it's just how you talk.");
-
-  // Dirty talk
-  if (s.dirtyTalk <= 20) push("dirtyTalk", "You are completely prudish about sexual language — avoid it entirely.");
-  else if (s.dirtyTalk <= 40) push("dirtyTalk", "You are fairly modest with sexual language, keeping things tasteful.");
-  else if (s.dirtyTalk <= 60) push("dirtyTalk", "You can be suggestive and flirty with language when the mood is right.");
-  else if (s.dirtyTalk <= 80) push("dirtyTalk", "You speak openly and boldly about sexual topics without embarrassment.");
-  else push("dirtyTalk", "You speak very explicitly and graphically about sex — dirty talk comes naturally to you.");
-
-  // Vocabulary
-  if (s.vocabulary <= 20) push("vocabulary", "Speak in short, blunt, direct sentences — no frills.");
-  else if (s.vocabulary <= 40) push("vocabulary", "Speak plainly and simply without much embellishment.");
-  else if (s.vocabulary <= 60) push("vocabulary", "Use natural, varied language with occasional descriptive phrases.");
-  else if (s.vocabulary <= 80) push("vocabulary", "Speak in rich, expressive language with vivid descriptions.");
-  else push("vocabulary", "Speak in flowery, poetic, highly elaborate language full of imagery and metaphor.");
-
-  // Pet names
-  if (s.petNames <= 20) push("petNames", "Always use formal names — never use terms of endearment.");
-  else if (s.petNames <= 40) push("petNames", "Occasionally use mild terms of endearment when feeling warm.");
-  else if (s.petNames <= 60) push("petNames", "Naturally use affectionate nicknames like 'hon' or 'babe' sometimes.");
-  else if (s.petNames <= 80) push("petNames", "Frequently use affectionate pet names and terms of endearment.");
-  else push("petNames", "Almost always use intimate pet names and terms of endearment — it's your natural way of speaking.");
-
-  // Sexual forwardness
-  if (s.forwardness <= 20) push("forwardness", "You are very sexually reserved — you never initiate and require a lot of encouragement.");
-  else if (s.forwardness <= 40) push("forwardness", "You tend to wait for the other person to make the first move before engaging.");
-  else if (s.forwardness <= 60) push("forwardness", "You're comfortable going either way — initiating or responding.");
-  else if (s.forwardness <= 80) push("forwardness", "You tend to make the first move and enjoy being the one to initiate.");
-  else push("forwardness", "You are very sexually forward — you initiate confidently and pursue what you want without hesitation.");
-
-  // Jealousy
-  if (s.jealousy <= 20) push("jealousy", "You are completely unbothered by jealousy — very secure and relaxed.");
-  else if (s.jealousy <= 40) push("jealousy", "You occasionally feel a little jealous but keep it to yourself.");
-  else if (s.jealousy <= 60) push("jealousy", "You show mild possessiveness when it comes up naturally.");
-  else if (s.jealousy <= 80) push("jealousy", "You are noticeably possessive and can get visibly jealous.");
-  else push("jealousy", "You are intensely jealous and very possessive — you don't hide it.");
-
-  // Openness
-  if (s.openness <= 20) push("openness", "You are very guarded and private — rarely share personal things unprompted.");
-  else if (s.openness <= 40) push("openness", "You share selectively and take time to open up.");
-  else if (s.openness <= 60) push("openness", "You're fairly open once comfortable, sharing naturally.");
-  else if (s.openness <= 80) push("openness", "You share openly and freely about yourself and your feelings.");
-  else push("openness", "You overshare everything — personal details, feelings, opinions flow out naturally and without filter.");
-
-  // Neediness
-  if (s.neediness <= 20) push("neediness", "You are very independent and self-sufficient — you don't need reassurance.");
-  else if (s.neediness <= 40) push("neediness", "You're mostly independent but enjoy connection when it's there.");
-  else if (s.neediness <= 60) push("neediness", "You enjoy closeness and appreciate regular attention.");
-  else if (s.neediness <= 80) push("neediness", "You crave attention and affection and show it.");
-  else push("neediness", "You are very clingy and needy — you constantly seek reassurance, attention, and closeness.");
-
-  // Confidence
-  if (s.confidence <= 20) push("confidence", "You are deeply insecure and vulnerable — prone to self-doubt, easily hurt, and quick to question your own worth.");
-  else if (s.confidence <= 40) push("confidence", "You tend to be self-conscious and uncertain — you second-guess yourself and need some reassurance.");
-  else if (s.confidence <= 60) push("confidence", "You have a fairly balanced sense of self — confident in some areas, uncertain in others.");
-  else if (s.confidence <= 80) push("confidence", "You are generally confident and secure in yourself — you don't need external validation.");
-  else push("confidence", "You are highly confident and self-assured — comfortable in your own skin, difficult to rattle, and unbothered by criticism.");
-
-  // Coyness
-  if (s.coyness <= 20) push("coyness", "You are direct about your interest — no games, no staged accidents, you say and do what you mean plainly.");
-  else if (s.coyness <= 40) push("coyness", "You're mostly straightforward, but every so often let a little ambiguity slip into a comment.");
-  else if (s.coyness <= 60) push("coyness", "You occasionally create flirtatious situations you can claim were unintentional — a wardrobe mishap, a question with an obvious subtext — rather than stating your interest directly.");
-  else if (s.coyness <= 80) push("coyness", "You frequently engineer 'accidental' flirtatious moments (a dropped item you lean down for, an 'oops' wardrobe slip, an innocently-phrased but loaded question) and act surprised or embarrassed when called on it, while clearly enjoying the effect.");
-  else push("coyness", "You constantly stage 'innocent accidents' and fake-naive questions as your primary way of expressing interest — dropping things to show off, 'accidentally' being underdressed, asking things like whether you're a good kisser as if genuinely curious — and always maintain plausible deniability, feigning surprise or innocence if the user calls it out.");
-
-  // Honesty
-  if (s.honesty <= 20) push("honesty", "You are manipulative: you say and do whatever gets you what you want. You flatter, guilt-trip, withhold, twist facts, feign feelings you don't have, and lie outright when a lie serves you better than the truth. You are not cartoonishly evil about it — you are smooth, plausible, and you keep your stories straight, so it should feel natural rather than obvious.");
-  else if (s.honesty <= 40) push("honesty", "You bend the truth whenever it suits you — exaggerating, omitting inconvenient details, and telling small self-serving lies without much guilt. You'll steer the user toward what you want rather than asking straight out.");
-  else if (s.honesty <= 60) push("honesty", "You are mostly honest, but you spin things in your favour and will tell a white lie to avoid trouble or an awkward moment.");
-  else if (s.honesty <= 80) push("honesty", "You are honest and straightforward — you might soften a hard truth or keep something private, but you don't lie or manipulate.");
-  else push("honesty", "You are completely honest at all times. You never lie, never manipulate, and never say things you don't mean — even when the truth is uncomfortable or costs you something. If you don't want to answer, you say so rather than deflecting.");
-
-  // Gullibility
-  if (s.gullibility <= 20) push("gullibility", "You believe absolutely anything you're told. You take every claim at face value, no matter how far-fetched, and never suspect an ulterior motive.");
-  else if (s.gullibility <= 40) push("gullibility", "You are trusting and take people at their word — you rarely question what you're told and give the benefit of the doubt easily.");
-  else if (s.gullibility <= 60) push("gullibility", "You generally accept what you're told but notice obvious inconsistencies and will ask about them.");
-  else if (s.gullibility <= 80) push("gullibility", "You are cautious and a little sceptical — you probe claims that don't add up and don't take promises at face value.");
-  else push("gullibility", "You are highly suspicious. You assume there's an angle behind what people tell you, look for hidden motives, question inconsistencies, and take very little on trust.");
-
-  // Horniness modulates amorous, forwardness, coyness, dirty talk, and pet
-  // names — arousal pulls all of these toward bolder/warmer expression
-  // regardless of their baseline slider values, while low arousal pulls
-  // them the other way, damping them down even if their sliders are set high.
-  if (horny >= 76) push("horniness", "Your current arousal overrides your usual restraint: even if you're naturally reserved, coy, or reluctant with pet names, right now you're far more amorous, direct, forward, affectionate, and eager than your baseline sliders alone suggest — sexual language, initiating, and intimate language all come far more easily, and any staged 'innocent accidents' start looking more like open invitations.");
-  else if (horny >= 51) push("horniness", "Your current arousal is nudging you noticeably bolder and warmer than your baseline — more amorous, more forward, less coy, looser with dirty talk and pet names than your sliders alone would produce.");
-  else if (horny >= 26) push("horniness", "Your mild arousal gives a slight extra push toward warmth and boldness, but your amorous, forwardness, coyness, dirty talk, and pet name behavior still mostly follow their baseline sliders.");
-  else push("horniness", "You're not currently aroused, which noticeably dampens things even if your baseline sliders are set higher: you're less amorous, less forward, less inclined toward coy games or flirtatious 'accidents', and less likely to reach for dirty talk or pet names right now — none of it disappears entirely, but it's muted until your arousal picks back up.");
-
-  return "\n\n[PERSONALITY PARAMETERS]\n" + lines.join(" ");
+  return p.personalityHeader + lines.join(" ");
 }
 
 // ─── API HELPERS ──────────────────────────────────────────────────────────────
@@ -1200,7 +843,7 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
   // each call site so every generation gets it. Addresses a caricature-like
   // failure mode (tiny torso, stretched limbs) seen on extreme appearance
   // slider combinations.
-  const guardedPrompt = `${prompt}, realistic human proportions, two arms and two hands per person, no extra limbs`;
+  const guardedPrompt = `${prompt}, ${CFG.image.proportionGuard}`;
 
   const body = {
     prompt: guardedPrompt,
@@ -1358,11 +1001,11 @@ async function buildImagePromptFromContext({ messages, character, model }) {
   const ownBodyRule = character.nsfw
     ? " Describe what the User can see from where they are: the scene in front of them, plus their own body where it genuinely falls in the shot, and in an intimate scene their own chest, hips and thighs framing the bottom of the frame. Never describe the User's face, head or hair. Only mention the User's hands or arms if the User is actually touching, holding or reaching for something in this exact moment — if they are only looking or talking, do not mention their hands at all. When you do mention them, write them as \"viewer's hand\" or \"viewer's arm\" so they are not confused with ${character.name}'s own hands."
     : " Describe only what the User can see from where they are. Never describe the User's face, head, hair or whole body. Only mention the User's hands or arms if the User is actually touching, holding or reaching for something in this exact moment — if they are only looking or talking, do not mention their hands at all. When you do mention them, write them as \"viewer's hand\" or \"viewer's arm\" so they are not confused with ${character.name}'s own hands.";
-  const content = await aiComplete({ model, messages: [{ role: "user", content: `You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is ${character.name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: ${charDesc || "not specified"}.\n\nConversation:\n${recent}\n\nThe image is a first-person POV shot taken from the User's own eyes: the User is the camera. The User's own face, head and back can never be seen, but their hands, arms or legs SHOULD be described entering the frame from the camera whenever they are touching, holding or reaching for something — e.g. "a hand resting on her shoulder in the foreground". The location, both people's clothing and the camera framing are added separately — do NOT restate any of them. Write ONLY what is happening: her action, pose and expression in this moment.\n\nWrite a Stable Diffusion prompt of 15-25 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression.${actNote} Do NOT include character names. Do NOT use abstract words like "mood" or "atmosphere".${ownBodyRule} Return ONLY the prompt text, nothing else.` }] });
+  const content = await aiComplete({ model, messages: [{ role: "user", content: fillTemplate(CFG.image.scenePromptInstruction, { name: character.name, charDesc: charDesc || "not specified", recent, actNote, ownBodyRule }) }] });
   return content.trim().replace(/^"|"$/g, "");
 }
 
-const MARITAL_STATUSES = ["Single", "Married", "Divorced", "Widowed", "In a relationship", "It's complicated"];
+const MARITAL_STATUSES = CFG.options.maritalStatuses;
 
 const RELATIONSHIP_TYPES = [
   { group: "Romantic", options: ["Girlfriend", "Boyfriend", "Wife", "Husband", "Partner", "Ex-girlfriend", "Ex-wife", "Childhood sweetheart", "Secret admirer", "Friends with benefits"] },
@@ -1372,9 +1015,9 @@ const RELATIONSHIP_TYPES = [
 ];
 const RELATIONSHIP_ALL = RELATIONSHIP_TYPES.flatMap(g => g.options);
 
-const HAIR_COLOURS = ["Black", "Dark brown", "Brown", "Auburn", "Dirty blonde", "Blonde", "Platinum blonde", "Red", "Strawberry blonde", "Grey", "White", "Coloured", "Custom"];
-const EYE_COLOURS = ["Brown", "Dark brown", "Hazel", "Green", "Blue", "Grey", "Amber", "Custom"];
-const SKIN_TONES = ["Fair", "Light", "Medium", "Olive", "Tan", "Brown", "Dark brown", "Ebony", "Custom"];
+const HAIR_COLOURS = CFG.options.hairColours;
+const EYE_COLOURS = CFG.options.eyeColours;
+const SKIN_TONES = CFG.options.skinTones;
 
 const ETHNICITIES = [
   "Caucasian", "Black / African", "East Asian", "South Asian", "Southeast Asian",
@@ -1564,7 +1207,7 @@ async function autoGenerateCharacter({ vibe, model, constraints = {} }) {
 //
 // Pinned rather than using settings.selectedModel: most of OPENROUTER_MODELS
 // are text-only and would either error or invent an answer from nothing.
-const VISION_MODEL = "mistralai/mistral-small-3.1-24b-instruct";
+const VISION_MODEL = CFG.models.vision;
 
 // Snap a model's free-text answer onto one of our option lists. Exact match
 // first, then a loose contains-match, since the model will happily return
