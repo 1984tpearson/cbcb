@@ -743,6 +743,24 @@ function buildIntentionsNote(character) {
   return cfg.header + lines.join("\n") + (cfg.pacing || "");
 }
 
+// Rolls intentions back to a snapshot taken before a reply that has since been
+// discarded. Deliberately not a wholesale replace: the panel may have added or
+// edited an intention since the snapshot, and a blunt restore would silently
+// throw that away. So progress and status are restored per id, goals the
+// character invented off the discarded reply are dropped, and anything added
+// by hand is left alone.
+function mergeIntentionSnapshot(current, snapshot) {
+  if (!Array.isArray(snapshot)) return current || [];
+  const before = new Map(snapshot.map(i => [i.id, i]));
+  return (current || []).filter(intent => {
+    if (before.has(intent.id)) return true;
+    return intent.source !== "auto";   // hand-added since the snapshot: keep
+  }).map(intent => {
+    const was = before.get(intent.id);
+    return was ? { ...intent, progress: was.progress, status: was.status } : intent;
+  });
+}
+
 // Ties vocabulary to the character's age. The pet-names slider controls how
 // often they reach for an endearment but never which ones, so every character
 // landed on the same "hun"/"darling" register whether they were 19 or 80.
@@ -2704,6 +2722,9 @@ No other text.` }]
     charOutfit: char.charOutfit ?? null,
     userOutfit: char.userOutfit ?? null,
     staging: char.staging ?? null,
+    // Only the moving parts — the goal text is never changed by a reply, so
+    // storing it would just be a way to overwrite an edit made since.
+    intentions: (char.intentions || []).map(i => ({ id: i.id, progress: i.progress ?? 0, status: i.status || "active" })),
   });
   const restoreScene = (snap) => {
     if (!snap) return characterRef.current;
@@ -2712,6 +2733,9 @@ No other text.` }]
       charOutfit: snap.charOutfit ?? null,
       userOutfit: snap.userOutfit ?? null,
       staging: snap.staging ?? null,
+      // Older messages predate intention snapshots; leave theirs untouched
+      // rather than wiping progress on a chat that started before this existed.
+      intentions: snap.intentions ? mergeIntentionSnapshot(prev.intentions, snap.intentions) : prev.intentions,
     }));
   };
 
@@ -3005,6 +3029,10 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // the pre-reply state until the next message. Run them on the new reply.
       applyWardrobe(withReply, restoredChar);
       applyStaging(withReply, restoredChar);
+      // Progress was rolled back with the discarded reply, so the replacement
+      // has to be judged on its own — otherwise a regenerated turn never counts
+      // toward anything.
+      applyIntentions(withReply, restoredChar);
     } catch (e) { setError(e.message); }
     setRegenLoading(false);
   };
