@@ -749,7 +749,18 @@ function buildIntentionsNote(character) {
     return `- ${goal}${stage ? ` ${stage.note}` : ""}`;
   });
 
-  return cfg.header + lines.join("\n") + (cfg.pacing || "");
+  // How they will go about it, from the honesty slider. Sits with the goals
+  // rather than relying on the personality block far above to be connected to
+  // them. Skipped when honesty has been switched off, like any other trait.
+  let methods = "";
+  const honestyOff = new Set(character.disabledSliders || []).has("honesty");
+  if (!honestyOff && Array.isArray(cfg.methodTiers)) {
+    const honesty = sliders.honesty ?? CFG.sliderDefaults.honesty ?? 80;
+    const tier = tierFor(cfg.methodTiers, honesty);
+    if (tier && tier.note) methods = `\n${tier.note}`;
+  }
+
+  return cfg.header + lines.join("\n") + methods + (cfg.pacing || "");
 }
 
 // Rolls intentions back to a snapshot taken before a reply that has since been

@@ -557,6 +557,8 @@
           field("Block heading", i + "header", "area"),
           field("Pacing rules", i + "pacing", "area",
             "Sent every turn alongside the goals. This is the part doing the real work."),
+          jsonField("How they pursue a goal, by honesty", i + "methodTiers",
+            "Keyed off the honesty slider \u2014 whether a character will lie, flatter and engineer situations to get what they want, or pursue it openly or not at all. Sent alongside the goals. Skipped entirely if the honesty slider is switched off for that character."),
           jsonField("Progress wording", i + "stages",
             "Said instead of a number \u2014 a model handed \u201cprogress 25/70\u201d narrates the figure rather than acting on it. \u201cmax\u201d is the fraction of the way to the gate."),
         ]),
