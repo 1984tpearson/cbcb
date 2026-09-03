@@ -324,6 +324,15 @@ const DEZGO_MODELS = CFG.models.image;
 
 const DEZGO_MODEL_PARAMS = CFG.models.imageParams;
 
+// A saved imageModel outlives the list it came from: settings still held the
+// Dezgo-era "dreamshaperxl_lightning_1024px" long after the switch to Wiro,
+// and it was sent as-is until the proxy rejected it. Anything not in the
+// current list falls back to the first entry rather than failing every
+// generation until someone notices the dropdown.
+function resolveImageModel(id) {
+  return DEZGO_MODELS.some(m => m.id === id) ? id : DEZGO_MODELS[0].id;
+}
+
 const DEFAULT_SETTINGS = {
   selectedModel: OPENROUTER_MODELS[0].id,
   reactivityModel: CFG.models.reactivity,
@@ -974,7 +983,7 @@ function sanitizeReply(text) {
 }
 
 async function generateImageWiro({ prompt, model, initImage, resolution, aspectRatio, outputFormat, seed }) {
-  const modelId = model || DEZGO_MODELS[0].id;
+  const modelId = resolveImageModel(model);
   const params = DEZGO_MODEL_PARAMS[modelId] || DEZGO_MODEL_PARAMS[DEZGO_MODELS[0].id];
 
   // Wiro/Seedream has no negative_prompt parameter, so proportion guidance
@@ -1706,7 +1715,7 @@ function SettingsPanel({ settings, onSave, onClose }) {
           <p style={{ fontSize:11, color:"var(--text4)", marginTop:3 }}>Cheaper/faster model used for personality drift analysis after each message. Llama 3.1 8B recommended.</p>
 
           <label style={S.label}>Image Model</label>
-          <select style={S.select} value={form.imageModel || DEZGO_MODELS[0].id} onChange={e => setForm(f => ({...f, imageModel: e.target.value}))}>
+          <select style={S.select} value={resolveImageModel(form.imageModel)} onChange={e => setForm(f => ({...f, imageModel: e.target.value}))}>
             {DEZGO_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
           </select>
 
