@@ -930,6 +930,32 @@ function buildAgeVoiceNote(age, sliders, disabledSliders) {
   });
 }
 
+// Marital statuses that mean there is a current partner somewhere, and the
+// relationships that mean that partner is the user. Anything else — neighbour,
+// colleague, best friend's wife — means the partner is a third party, which is
+// the case the model kept collapsing into "married to the user".
+const ATTACHED_STATUSES = ["Married", "In a relationship"];
+const USER_IS_PARTNER = ["Wife", "Husband", "Girlfriend", "Boyfriend", "Partner"];
+
+// One extra identity line spelling out who the partner is. Returns "" when the
+// question does not arise (single, divorced, no relationship set, or a custom
+// relationship we cannot classify).
+function buildPartnerClarifier(maritalStatus, relStr) {
+  const p = CFG.prompts;
+  if (!ATTACHED_STATUSES.includes(maritalStatus) || !relStr) return "";
+  const married = maritalStatus === "Married";
+  const partnerWord = married ? p.partnerWordMarried : p.partnerWordRelationship;
+  const statusPhrase = married ? p.statusPhraseMarried : p.statusPhraseRelationship;
+  if (USER_IS_PARTNER.includes(relStr)) {
+    return fillTemplate(p.partnerIsUserLine, { partnerWord, statusPhrase });
+  }
+  // Custom relationship text is free-form; it may well name the user as the
+  // spouse, so stay out of it rather than contradict the owner.
+  if (!RELATIONSHIP_ALL.includes(relStr)) return "";
+  const label = relStr.charAt(0).toLowerCase() + relStr.slice(1);
+  return fillTemplate(p.partnerElsewhereLine, { partnerWord, statusPhrase, relationship: label });
+}
+
 function buildPersonalityAddendum(sliders, gender, customGender, age, maritalStatus, relationship, relationshipCustom, disabledSliders) {
   const s = sliders;
   const p = CFG.prompts;
@@ -946,7 +972,11 @@ function buildPersonalityAddendum(sliders, gender, customGender, age, maritalSta
   if (maritalStatus) identity.push(fillTemplate(p.maritalLine, { status: maritalStatus }));
   if (relationship) {
     const relStr = relationship === "Custom" ? (relationshipCustom || "") : relationship;
-    if (relStr) identity.push(fillTemplate(p.relationshipLine, { relationship: relStr }));
+    if (relStr) {
+      identity.push(fillTemplate(p.relationshipLine, { relationship: relStr }));
+      const clarifier = buildPartnerClarifier(maritalStatus, relStr);
+      if (clarifier) identity.push(clarifier);
+    }
   }
 
   const neutralFor = (key) =>
@@ -1452,6 +1482,13 @@ async function autoGenerateCharacter({ vibe, model, constraints = {} }) {
   if (constraints.relationship) constraintLines.push(`Relationship to user: ${constraints.relationship === "Custom" ? (constraints.relationshipCustom || "") : constraints.relationship} (reflect this in the persona)`);
   if (constraints.persona) constraintLines.push(`Personality/system prompt already set: "${constraints.persona}" — build on this, do not contradict it`);
 
+  // Same confusion as in the chat prompt: without this the generated persona
+  // comes back describing a married woman as married to the user when she is
+  // meant to be married to someone else and merely the user's neighbour.
+  const relForClarifier = constraints.relationship === "Custom"
+    ? (constraints.relationshipCustom || "")
+    : (constraints.relationship || "");
+
   const constraintBlock = constraintLines.length > 0
     ? `\n\nIMPORTANT — the following fields are pre-filled by the user and must be respected:\n${constraintLines.map(l => `- ${l}`).join("\n")}`
     : "";
@@ -1464,8 +1501,10 @@ async function autoGenerateCharacter({ vibe, model, constraints = {} }) {
   // pickCharacterTraits. The model only writes the name and persona, and is
   // told what it is writing for.
   const traits = pickCharacterTraits();
+  const partnerClarifier = buildPartnerClarifier(constraints.maritalStatus || traits.maritalStatus, relForClarifier);
+  const partnerNote = partnerClarifier ? `\n\nIMPORTANT — write the persona from this: ${partnerClarifier}` : "";
   const seed = Math.floor(Math.random() * 1000000);
-  const raw = (await aiComplete({ model, messages: [{ role: "user", content: `[seed:${seed}] Create a fictional chat companion character based on this vibe: "${vibe}".${constraintBlock}\n\nThis character has already been cast. Write them as:\n- Ethnicity: ${traits.ethnicity}\n- Age: ${traits.age}\n- Marital status: ${traits.maritalStatus}\n- Hair: ${traits.hairColour}, eyes: ${traits.eyeColour}, skin: ${traits.skinTone}\n\nThe name must fit that ethnicity and read like a real person alive today. Pick a surname that is plausible but NOT the single most obvious one for that background — reach for a less predictable choice. Avoid old-fashioned names.\nWrite the persona as a grounded, natural description of a real person — not a fictional archetype. Avoid flowery language, obscure references, or stacking quirks.\nReturn ONLY valid JSON with these exact fields:\n{\n  "name": "<first and last name>",\n  "persona": "<2-3 sentence personality description, how they speak, backstory and quirks — must reflect the age, marital status, gender and relationship above>"\n}\nNo extra text, no markdown, just the JSON object.` }] })).trim();
+  const raw = (await aiComplete({ model, messages: [{ role: "user", content: `[seed:${seed}] Create a fictional chat companion character based on this vibe: "${vibe}".${constraintBlock}\n\nThis character has already been cast. Write them as:\n- Ethnicity: ${traits.ethnicity}\n- Age: ${traits.age}\n- Marital status: ${traits.maritalStatus}\n- Hair: ${traits.hairColour}, eyes: ${traits.eyeColour}, skin: ${traits.skinTone}${partnerNote}\n\nThe name must fit that ethnicity and read like a real person alive today. Pick a surname that is plausible but NOT the single most obvious one for that background — reach for a less predictable choice. Avoid old-fashioned names.\nWrite the persona as a grounded, natural description of a real person — not a fictional archetype. Avoid flowery language, obscure references, or stacking quirks.\nReturn ONLY valid JSON with these exact fields:\n{\n  "name": "<first and last name>",\n  "persona": "<2-3 sentence personality description, how they speak, backstory and quirks — must reflect the age, marital status, gender and relationship above>"\n}\nNo extra text, no markdown, just the JSON object.` }] })).trim();
 
   const applyConstraints = (parsed) => ({
     name: constraints.name || parsed.name || "",
