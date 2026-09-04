@@ -559,11 +559,6 @@
       // are unreliable at negation in a positive prompt — the tokens summon
       // the thing as often as they suppress it. Describing an empty
       // foreground gives the model something to draw instead.
-      // Used INSTEAD of the POV clauses when nobody is touching. Suppressing
-      // the viewer's limbs inside a first-person frame never fully worked:
-      // POV framing itself invites an arm at the edge of shot, so the reliable
-      // answer is not to ask for POV at all unless there is contact.
-      thirdPersonFraming: "candid third-person photograph taken from a natural camera distance, observing the scene, the viewer is not in the shot and no part of them is in frame",
       povNoLimbs: "empty foreground, clear unobstructed view of the scene, the viewer's arms down at their sides below the frame",
       povIntimateModifier: "the viewer's own body framing the bottom of the shot",
       // Wiro/Seedream has no negative_prompt parameter, so proportion guidance
