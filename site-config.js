@@ -566,6 +566,14 @@
       thirdPersonFraming: "candid third-person photograph taken from a natural camera distance, observing the scene, the viewer is not in the shot and no part of them is in frame",
       povNoLimbs: "empty foreground, clear unobstructed view of the scene, the viewer's arms down at their sides below the frame",
       povIntimateModifier: "the viewer's own body framing the bottom of the shot",
+      // Seedream v4/v5 read natural language, not keyword lists — ByteDance's
+      // own example prompts for these models are full paragraphs of prose.
+      // The old approach concatenated fragments from six sources with commas,
+      // in the SD 1.5 / SDXL tag style, which left actions with no subject and
+      // clothing floating free of the person wearing it. That is why outfits
+      // and actions came out attached to the wrong person or dropped.
+      styleNote: "Photorealistic, shot on a 50mm lens with natural light and shallow depth of field.",
+      composeInstruction: "You are writing a prompt for a photorealistic image generator that reads natural language, not keyword lists.\n\nWrite ONE paragraph of 70 to 110 words describing a single photograph of this moment.\n\nWHO: {charDesc}\nSHE IS WEARING: {charOutfit}\nWHERE: {location}\nHER POSITION: {charPose}\nTHE OTHER PERSON: {userPose}{userOutfitClause}\nDISTANCE BETWEEN THEM: {proximity}\nCAMERA: {framing}\n{extra}\nRecent conversation, for what is happening at this exact moment:\n{recent}\n\nRules:\n- Flowing prose in full sentences. No comma-separated keyword lists.\n- Every action needs a subject. Never write a detached phrase like \"hand on shoulder\" — say whose hand and whose shoulder.\n- Her clothing is exactly as given above. Do not substitute, upgrade or invent garments. If it says she is wearing nothing, say she is naked.\n- Follow the CAMERA line exactly: it decides whether this is a first-person shot and whether any part of the viewer is in frame.\n- Describe this instant only — one pose, one expression, one action. No before or after.\n- Do not use her name; call her \"a woman\" or \"she\".\n- No mood words, no \"atmosphere\", no camera brand names.\n- Finish with one short sentence of photographic style: {styleNote}\n\nReturn ONLY the paragraph, nothing else.",
       // Wiro/Seedream has no negative_prompt parameter, so proportion guidance
       // goes into the positive prompt instead.
       proportionGuard: "realistic human proportions, two arms and two hands per person, no extra limbs",

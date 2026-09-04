@@ -1347,6 +1347,36 @@ function buildStagingImageDesc(staging) {
   return parts.filter(Boolean).join(", ");
 }
 
+// Writes the whole image prompt as one paragraph of prose, from the tracked
+// state, instead of gluing fragments together with commas. Every fact arrives
+// attached to the person it belongs to, which is what stops clothing and
+// actions landing on the wrong one.
+async function composeImagePrompt({ messages, character, model, framing, extra }) {
+  const recent = (messages || []).slice(-6).filter(m => m.role !== "image")
+    .map(m => `${m.role === "user" ? "The other person" : "She"}: ${m.content}`).join("\n");
+  const appearanceDesc = buildAppearancePrompt(character.appearance);
+  const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
+  const ageDesc = character.age ? `${character.age} year old` : "";
+  const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ") || "a woman";
+  const st = character.staging || {};
+  const undressed = isUserUndressed(character.charOutfit);
+  const content = fillTemplate(CFG.image.composeInstruction, {
+    charDesc,
+    charOutfit: undressed ? "nothing — she is naked" : (character.charOutfit || "unstated; dress her plausibly for the setting"),
+    location: st.location || "unstated; infer it from the conversation",
+    charPose: st.charPose || "unstated; infer it from the conversation",
+    userPose: st.userPose || "unstated",
+    userOutfitClause: character.userOutfit ? `, wearing ${character.userOutfit}` : "",
+    proximity: st.proximity || "unstated",
+    framing: framing || "",
+    extra: extra ? `${extra}\n` : "",
+    recent: recent || "(no conversation yet)",
+    styleNote: CFG.image.styleNote || "",
+  });
+  const paragraph = await aiComplete({ model, messages: [{ role: "user", content }] });
+  return paragraph.trim().replace(/^"|"$/g, "");
+}
+
 async function buildImagePromptFromContext({ messages, character, model }) {
   const recent = messages.slice(-10).filter(m => m.role !== "image").map(m => `${m.role === "user" ? "User" : character.name}: ${m.content}`).join("\n");
   const appearanceDesc = buildAppearancePrompt(character.appearance);
@@ -3344,25 +3374,18 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     if (!customImgPrompt.trim()) return;
     setImgLoading(true); setShowCustomImgInput(false);
     try {
-      const appearanceDesc = buildAppearancePrompt(character.appearance);
-      const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
-      const ageDesc = character.age ? `${character.age} year old` : "";
-      const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-      const styleModifiers = "photorealistic, natural lighting, 50mm, sharp focus";
-      // Ground the outfit in the tracked wardrobe state rather than leaving
-      // it to the model's default — a specific custom prompt (e.g. "wearing
-      // a red dress") will still tend to win out since it's more specific
-      // and closer to the end of the prompt.
-      const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
-      const stagingDesc = buildStagingImageDesc(character.staging);
-      // Author-supplied wording for explicit scenes, used verbatim. Only
-      // reaches the model when NSFW is on and the scene reads as intimate.
-      const explicitDesc = isIntimateScene(customImgPrompt, character.staging, character.nsfw)
-        ? (character.explicitDetail || "") : "";
-      // A hand-typed prompt is left alone — if they wrote a hand into it, they
-      // meant it. Only the contact flag decides the POV clause.
+      // Appearance, wardrobe and style all reach the prompt through the
+      // composer now, from the same tracked state the chat uses.
+      // A hand-typed request is passed through as the subject of the shot;
+      // whatever they wrote wins over what the conversation implies.
       const contact = detectPhysicalContact(messages, character.name, character.staging);
-      const fullPrompt = joinPromptParts([buildPovModifiers(customImgPrompt, character.staging, character.nsfw, character.userOutfit, contact), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, explicitDesc, styleModifiers]);
+      const framing = buildPovModifiers(customImgPrompt, character.staging, character.nsfw, character.userOutfit, contact);
+      const explicitDesc = character.nsfw && isIntimateScene(customImgPrompt, character.staging, true)
+        ? (character.explicitDetail || "") : "";
+      const fullPrompt = await composeImagePrompt({
+        messages, character, model: settings.selectedModel, framing,
+        extra: `THE SHOT MUST SHOW, above all else: ${customImgPrompt}${explicitDesc ? `\nALSO INCLUDE: ${explicitDesc}` : ""}`,
+      });
       const url = await generateImageWiro({
         prompt: fullPrompt,
         model: settings.imageModel,
@@ -3399,29 +3422,14 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // Timed separately: this is a full LLM call that runs before the image is
       // even submitted, so it is part of the wait, and it is ours to fix.
       const promptStartedAt = Date.now();
-      const prompt = messages.length > 0
-        ? await buildImagePromptFromContext({ messages, character, model: settings.selectedModel })
-        : `${character.name}, looking at the viewer, character art`;
-      console.info(`[image] scene prompt built in ${((Date.now() - promptStartedAt) / 1000).toFixed(1)}s`);
-      const appearanceDesc = buildAppearancePrompt(character.appearance);
-      const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
-      const ageDesc = character.age ? `${character.age} year old` : "";
-      const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-      const styleModifiers = "photorealistic, natural lighting, 50mm, sharp focus";
-      // Ground the outfit in the tracked wardrobe state — the scene prompt
-      // from buildImagePromptFromContext only sees raw conversation text and
-      // has no guaranteed reference to what's actually being worn, so this
-      // is the more reliable source. Appearance + wardrobe go FIRST so SD
-      // weights them highest, scene context after.
-      const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
-      const stagingDesc = buildStagingImageDesc(character.staging);
-      const explicitDesc = isIntimateScene(prompt, character.staging, character.nsfw)
-        ? (character.explicitDetail || "") : "";
       const contact = detectPhysicalContact(messages, character.name, character.staging);
-      // The extractor writes this text, so it is the one place a stray hand
-      // can still get in. Cut those clauses when nobody is touching.
-      const scenePrompt = contact ? prompt : stripViewerLimbs(prompt);
-      const fullImgPrompt = joinPromptParts([buildPovModifiers(scenePrompt, character.staging, character.nsfw, character.userOutfit, contact), charDesc, wardrobeDesc, stagingDesc, scenePrompt, explicitDesc, styleModifiers]);
+      const framing = buildPovModifiers("", character.staging, character.nsfw, character.userOutfit, contact);
+      const explicitDesc = character.nsfw && contact ? (character.explicitDetail || "") : "";
+      const fullImgPrompt = await composeImagePrompt({
+        messages, character, model: settings.selectedModel, framing,
+        extra: explicitDesc ? `ALSO INCLUDE: ${explicitDesc}` : "",
+      });
+      console.info(`[image] scene prompt built in ${((Date.now() - promptStartedAt) / 1000).toFixed(1)}s`);
       const url = await generateImageWiro({
         prompt: fullImgPrompt,
         model: settings.imageModel,
