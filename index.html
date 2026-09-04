@@ -1355,7 +1355,7 @@ function buildStagingImageDesc(staging) {
 // too — which is fine, neither belongs in a caption.
 const FIRST_SECOND_PERSON_RE = /\b(I|I'm|I've|me|my|mine|we|we're|us|our|you|you're|your|yours)\b/i;
 
-async function composeImagePrompt({ messages, character, model, framing, extra }) {
+async function composeImagePrompt({ messages, character, model, framing, extra, pov }) {
   const recent = (messages || []).slice(-6).filter(m => m.role !== "image")
     .map(m => `${m.role === "user" ? "THE MAN" : "THE WOMAN"}: ${m.content}`).join("\n");
   const appearanceDesc = buildAppearancePrompt(character.appearance);
@@ -1370,7 +1370,10 @@ async function composeImagePrompt({ messages, character, model, framing, extra }
     location: st.location || "unstated; infer it from the conversation",
     charPose: st.charPose || "unstated; infer it from the conversation",
     userPose: st.userPose || "unstated",
-    userOutfitClause: character.userOutfit ? `, wearing ${character.userOutfit}` : "",
+    // Which cast description applies. Either way the woman is the only person
+    // drawn — in a POV shot he is the camera, in a third-person shot he is
+    // simply not there. Naming him as a figure is what produced three people.
+    people: (pov ? CFG.image.peoplePov : CFG.image.peopleThirdPerson) || "",
     proximity: st.proximity || "unstated",
     framing: framing || "",
     extra: extra ? `${extra}\n` : "",
@@ -3404,7 +3407,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const explicitDesc = character.nsfw && isIntimateScene(customImgPrompt, character.staging, true)
         ? (character.explicitDetail || "") : "";
       const fullPrompt = await composeImagePrompt({
-        messages, character, model: settings.selectedModel, framing,
+        messages, character, model: settings.selectedModel, framing, pov: contact,
         extra: `THE SHOT MUST SHOW, above all else: ${customImgPrompt}${explicitDesc ? `\nALSO INCLUDE: ${explicitDesc}` : ""}`,
       });
       const url = await generateImageWiro({
@@ -3447,7 +3450,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const framing = buildPovModifiers("", character.staging, character.nsfw, character.userOutfit, contact);
       const explicitDesc = character.nsfw && contact ? (character.explicitDetail || "") : "";
       const fullImgPrompt = await composeImagePrompt({
-        messages, character, model: settings.selectedModel, framing,
+        messages, character, model: settings.selectedModel, framing, pov: contact,
         extra: explicitDesc ? `ALSO INCLUDE: ${explicitDesc}` : "",
       });
       console.info(`[image] scene prompt built in ${((Date.now() - promptStartedAt) / 1000).toFixed(1)}s`);

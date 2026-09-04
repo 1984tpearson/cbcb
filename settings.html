@@ -650,6 +650,10 @@
         [
           field("Composer instruction", i + "composeInstruction", "area",
             "{charDesc}, {charOutfit}, {location}, {charPose}, {userPose}, {userOutfitClause}, {proximity}, {framing}, {extra}, {recent} and {styleNote} are substituted in."),
+          field("Who is visible \u2014 POV shot", i + "peoplePov", "area",
+            "Used when they are touching. The man is the camera, so only the woman is drawn."),
+          field("Who is visible \u2014 third-person shot", i + "peopleThirdPerson", "area",
+            "Used when they are not touching. Naming him as a figure in the scene is what produced captions with three people in them."),
           field("Photographic style", i + "styleNote", "area",
             "One sentence, used to close the description."),
           field("Old tag-style extractor (unused)", i + "scenePromptInstruction", "area",
