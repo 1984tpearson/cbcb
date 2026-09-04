@@ -2788,8 +2788,11 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       const wantIntentions = currentChar.intentionsEnabled !== false
         && activeIntentions(currentChar).length === 0
         && (intentCfg.maxActive || 0) > 0;
+      // The same note the mid-conversation generator uses, so a goal seeded
+      // from the opening and one formed six turns later are steered alike.
+      const intentionTone = currentChar.nsfw ? (intentCfg.nsfwNote || "") : (intentCfg.sfwNote || "");
       const intentionAsk = wantIntentions
-        ? `\n- intentions: up to ${intentCfg.maxActive} things ${currentChar.name} privately wants out of THIS situation and would work toward without saying so. Concrete and achievable in a conversation, not moods. Each needs a goal (second person, under 15 words) and nerve 0-100 for how much courage it takes her. An empty array is fine if the scenario sets nothing up.`
+        ? `\n- intentions: up to ${intentCfg.maxActive} things ${currentChar.name} privately wants out of THIS situation and would work toward without saying so. Concrete and achievable in a conversation, not moods. Each needs a goal (second person, under 15 words) and nerve 0-100 for how much courage it takes her. An empty array is fine if the scenario sets nothing up.${intentionTone ? ` ${intentionTone}` : ""}`
         : "";
       const intentionField = wantIntentions ? `, "intentions": [{"goal": "...", "nerve": 40}]` : "";
       const raw = await aiComplete({
