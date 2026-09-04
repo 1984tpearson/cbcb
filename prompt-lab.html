@@ -42,8 +42,11 @@
   .flags{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
   .flag{font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;border:1px solid var(--border2);color:var(--muted);background:var(--bg3)}
   .flag.on{background:var(--pink-bg);border-color:var(--pink-border);color:var(--pink)}
-  pre.prompt{white-space:pre-wrap;word-break:break-word;background:var(--bg3);border:1px solid var(--border);
-    border-radius:10px;padding:12px;margin:0 0 10px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.6}
+  textarea.prompt{width:100%;white-space:pre-wrap;background:var(--bg3);border:1px solid var(--border);
+    border-radius:10px;padding:12px;margin:0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.6;
+    color:var(--text);outline:none;resize:vertical}
+  textarea.prompt:focus{border-color:var(--pink)}
+  textarea.prompt.edited{background:#fffdf5;border-color:#e0c98a}
   table{width:100%;border-collapse:collapse;font-size:12.5px}
   th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--border);vertical-align:top}
   th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
@@ -163,9 +166,12 @@ Elena: *she leans into it*"></textarea></label>
       <div class="card">
         <h2>Finished prompt</h2>
         <div class="flags" id="flags"></div>
-        <pre class="prompt" id="fullPrompt"></pre>
-        <div class="row" style="justify-content:flex-end">
+        <textarea class="prompt" id="fullPrompt" rows="9" oninput="promptEdited()"></textarea>
+        <p class="note" id="editNote" hidden>Edited by hand — the fields no longer rewrite it, and Generate
+          sends exactly what is in the box. Revert to pick the assembled prompt back up.</p>
+        <div class="row" style="justify-content:flex-end;margin-top:8px">
           <button class="mini" style="flex:0" onclick="copyPrompt()">Copy</button>
+          <button class="mini" style="flex:0" id="revertBtn" onclick="revertPrompt()" hidden>Revert to assembled</button>
         </div>
       </div>
 
@@ -199,6 +205,7 @@ Elena: *she leans into it*"></textarea></label>
   const ACCESS_TOKEN = "pc_8f3a9d2e7b1c4f6a0d5e9c3b7a2f1e8d";
   const STYLE_MODIFIERS = "photorealistic, natural lighting, 50mm, sharp focus";
   const STORE_KEY = "prompt_lab_state";
+  const EDITED_KEY = "prompt_lab_edited_prompt";
 
   let CFG = window.SiteConfig.clone(window.SiteConfig.DEFAULTS);
   let IMG = window.ImagePrompt.create(CFG);
@@ -304,22 +311,44 @@ Elena: *she leans into it*"></textarea></label>
     staging: "Staging", scene: "Scene", explicit: "Explicit", style: "Style",
   };
 
+  // Once the prompt has been edited by hand it stops tracking the fields.
+  // Overwriting someone's rewrite because they then adjusted a checkbox would
+  // lose the very thing they came here to try.
+  let promptDirty = false;
+  window.promptEdited = function () {
+    promptDirty = true;
+    $("fullPrompt").classList.add("edited");
+    $("editNote").hidden = false;
+    $("revertBtn").hidden = false;
+    localStorage.setItem(EDITED_KEY, $("fullPrompt").value);
+  };
+  window.revertPrompt = function () {
+    promptDirty = false;
+    $("fullPrompt").classList.remove("edited");
+    $("editNote").hidden = true;
+    $("revertBtn").hidden = true;
+    localStorage.removeItem(EDITED_KEY);
+    render();
+  };
+
   function render() {
     const out = currentAssembly();
     // The proportion guard is appended inside generateImageWiro, after
     // assembly, so it has to be shown here too or the lab would be a clause
     // short of what Wiro actually receives.
     const sent = `${out.prompt}, ${CFG.image.proportionGuard}`;
-    $("fullPrompt").textContent = sent;
+    if (!promptDirty) $("fullPrompt").value = sent;
 
     const flags = [
       ["contact", out.contact, "touching"],
       ["intimate", out.intimate, "intimate scene"],
       ["stripped", out.strippedLimbs, "viewer limbs stripped"],
     ];
+    const shown = $("fullPrompt").value;
     $("flags").innerHTML = flags.map(([k, on, label]) =>
       `<span class="flag ${on ? "on" : ""}">${on ? "&#10003;" : "&#8213;"} ${label}</span>`).join("")
-      + `<span class="flag">${sent.split(/\s+/).length} words</span>`;
+      + `<span class="flag">${shown.trim().split(/\s+/).filter(Boolean).length} words</span>`
+      + (promptDirty ? `<span class="flag on">hand-edited</span>` : "");
 
     $("partsBody").innerHTML = Object.keys(SOURCE_LABELS).map(k => {
       const v = out.parts[k];
@@ -335,7 +364,7 @@ Elena: *she leans into it*"></textarea></label>
   }
 
   window.copyPrompt = function () {
-    navigator.clipboard.writeText($("fullPrompt").textContent).catch(() => {});
+    navigator.clipboard.writeText($("fullPrompt").value).catch(() => {});
   };
 
   // ── Extractor ─────────────────────────────────────────────────────────────
@@ -387,7 +416,9 @@ Elena: *she leans into it*"></textarea></label>
         aiComplete,
       });
       writeState({ scenePrompt: out.scene, touching: out.touching, viewerBody: out.viewerBody });
-      render();
+      // An extraction is an explicit ask for a fresh prompt, so it takes the
+      // box back from a hand edit rather than being silently ignored.
+      revertPrompt();
       status.className = "status ok";
       status.textContent = `Extracted in ${((Date.now() - started) / 1000).toFixed(1)}s — touching: ${out.touching}` +
         (out.viewerBody ? "" : " (no viewer body)");
@@ -400,6 +431,11 @@ Elena: *she leans into it*"></textarea></label>
 
   window.resetFields = function () {
     localStorage.removeItem(STORE_KEY);
+    localStorage.removeItem(EDITED_KEY);
+    promptDirty = false;
+    $("fullPrompt").classList.remove("edited");
+    $("editNote").hidden = true;
+    $("revertBtn").hidden = true;
     writeState(SEED_STATE);
     if (!val("model")) $("model").value = "seedream-v4-5-uncensored";
     render();
@@ -448,7 +484,8 @@ Elena: *she leans into it*"></textarea></label>
 
   window.generate = async function (mode) {
     const status = $("genStatus");
-    const prompt = $("fullPrompt").textContent;
+    // Whatever is in the box, edited or assembled — the point of the box.
+    const prompt = $("fullPrompt").value.trim();
     const model = val("model");
     const ref = val("refImage");
     // One seed for both panels: with the seed held fixed the only difference
@@ -552,6 +589,7 @@ Elena: *she leans into it*"></textarea></label>
 
     let saved = null;
     try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch {}
+    const savedEdit = localStorage.getItem(EDITED_KEY);
     writeState({ ...SEED_STATE, ...(saved || {}) });
     if (!val("model")) sel.value = "seedream-v4-5-uncensored";
 
@@ -562,6 +600,11 @@ Elena: *she leans into it*"></textarea></label>
     $("charSelect").addEventListener("change", e => applyCharacter(characters[Number(e.target.value)]));
 
     render();
+    if (savedEdit) {
+      $("fullPrompt").value = savedEdit;
+      promptEdited();
+      render();
+    }
     loadCharacters();
   }
 
