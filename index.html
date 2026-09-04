@@ -2683,6 +2683,11 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   const [openingScenarios, setOpeningScenarios] = useState(null);
   const [openingLoading, setOpeningLoading] = useState(false);
   const [seenScenarioLabels, setSeenScenarioLabels] = useState([]);
+  // Which generated scene is open for editing, if any. A generated opening is
+  // often nearly right — the wrong room, a detail that contradicts the
+  // character — and until now the only options were accept it as written,
+  // re-roll the whole set, or rewrite it from scratch as a custom scene.
+  const [editingScenario, setEditingScenario] = useState(null);
   const bottomRef = useRef();
 
   const sessionId = character.currentSessionId || character.id;
@@ -2776,8 +2781,21 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   const inferScenarioSetup = async (scenario, currentChar) => {
     try {
       const appearanceDesc = buildAppearancePrompt(currentChar.appearance);
+      // Intentions are seeded here too, but only when the character is allowed
+      // to form her own — the toggle is "let {name} form intentions", and this
+      // is exactly that, just at the start rather than six turns in.
+      const intentCfg = CFG.intentions || {};
+      const wantIntentions = currentChar.intentionsEnabled !== false
+        && activeIntentions(currentChar).length === 0
+        && (intentCfg.maxActive || 0) > 0;
+      const intentionAsk = wantIntentions
+        ? `\n- intentions: up to ${intentCfg.maxActive} things ${currentChar.name} privately wants out of THIS situation and would work toward without saying so. Concrete and achievable in a conversation, not moods. Each needs a goal (second person, under 15 words) and nerve 0-100 for how much courage it takes her. An empty array is fine if the scenario sets nothing up.`
+        : "";
+      const intentionField = wantIntentions ? `, "intentions": [{"goal": "...", "nerve": 40}]` : "";
       const raw = await aiComplete({
-        model: settings.reactivityModel || "meta-llama/llama-3.1-8b-instruct",
+        // The conversation model: reading a scene and inferring what it implies
+        // is the task the small model kept failing at for wardrobe and staging.
+        model: settings.selectedModel,
         messages: [{ role: "user", content:
 `Given this opening scenario, infer the starting state of the scene. Base everything on the setting and context — be specific, realistic and concrete.
 
@@ -2794,10 +2812,10 @@ Infer:
 - location: where the scene takes place, e.g. "a small kitchen at night"
 - charPose: ${currentChar.name}'s body position as a phrase completing "she is ...", e.g. "standing at the stove with her back turned"
 - userPose: the User's body position, same phrasing, e.g. "standing in the doorway"
-- proximity: physical distance between them, e.g. "across the room", "an arm's length apart"
+- proximity: physical distance between them, e.g. "across the room", "an arm's length apart"${intentionAsk}
 
 Keep each value under 15 words. Use null for anything the scenario genuinely does not support.
-Return ONLY valid JSON: {"charOutfit": "...", "userOutfit": "...", "location": "...", "charPose": "...", "userPose": "...", "proximity": "..."}
+Return ONLY valid JSON: {"charOutfit": "...", "userOutfit": "...", "location": "...", "charPose": "...", "userPose": "...", "proximity": "..."${intentionField}}
 No other text.` }]
       });
       const parsed = parseJsonReply(raw);
@@ -2816,6 +2834,22 @@ No other text.` }]
           if (value) { staging[key] = value; stagingChanged = true; }
         }
         if (stagingChanged) { next.staging = staging; changed = true; }
+        // Only seeded into an empty list, so a hand-written goal is never
+        // displaced by one the scenario suggested.
+        if (wantIntentions && Array.isArray(parsed.intentions) && activeIntentions(prev).length === 0) {
+          const seeded = parsed.intentions
+            .filter(it => it && typeof it.goal === "string" && it.goal.trim())
+            .slice(0, intentCfg.maxActive || 2)
+            .map(it => ({
+              id: `int_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+              goal: it.goal.trim(),
+              nerve: Math.max(0, Math.min(100, Number(it.nerve) || 40)),
+              progress: 0,
+              status: "active",
+              source: "scenario",
+            }));
+          if (seeded.length) { next.intentions = [...(prev.intentions || []), ...seeded]; changed = true; }
+        }
         return changed ? next : prev;
       });
     } catch (e) {
@@ -3422,14 +3456,49 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                 ? (
                   <div style={S.scenarioGrid}>
                     <p style={S.scenarioHeading}>Choose how to start with {character.name}:</p>
-                    {openingScenarios.map((sc, i) => (
-                      <button key={i} style={S.scenarioCard}
-                        onClick={() => { setMessages([{ role: "assistant", content: sc.message }]); setOpeningScenarios(null); inferScenarioSetup(sc, character); }}>
-                        <span style={S.scenarioLabel}>{sc.label}</span>
-                        {sc.setting && <span style={S.scenarioSetting}>{sc.setting}</span>}
-                        <span style={S.scenarioMessage}>"{sc.message}"</span>
-                      </button>
-                    ))}
+                    {openingScenarios.map((sc, i) => {
+                      // The edited text is what starts the scene and what the
+                      // setup inference reads, so a corrected location or
+                      // outfit carries into the wardrobe and staging too.
+                      const startScene = () => {
+                        setMessages([{ role: "assistant", content: sc.message }]);
+                        setOpeningScenarios(null);
+                        setEditingScenario(null);
+                        inferScenarioSetup(sc, character);
+                      };
+                      const update = (patch) => setOpeningScenarios(list =>
+                        list.map((x, j) => j === i ? { ...x, ...patch } : x));
+                      if (editingScenario === i) {
+                        return (
+                          <div key={i} style={{ ...S.scenarioCard, cursor: "default" }}>
+                            <input style={S.input} value={sc.label || ""} placeholder="short scene name"
+                              onChange={e => update({ label: e.target.value })} />
+                            <textarea style={{ ...S.input, height: 48, resize: "vertical" }} placeholder="the setting"
+                              value={sc.setting || ""} onChange={e => update({ setting: e.target.value })} />
+                            <textarea style={{ ...S.input, height: 96, resize: "vertical" }} placeholder="her opening message"
+                              value={sc.message || ""} onChange={e => update({ message: e.target.value })} />
+                            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                              <button style={{ ...S.btnPrimary, flex: 1 }} onClick={startScene}
+                                disabled={!(sc.message || "").trim()}>Start this scene</button>
+                              <button style={{ ...S.btnSecondary, flex: 1 }}
+                                onClick={() => setEditingScenario(null)}>Done</button>
+                            </div>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div key={i} style={{ position: "relative" }}>
+                          <button style={S.scenarioCard} onClick={startScene}>
+                            <span style={S.scenarioLabel}>{sc.label}</span>
+                            {sc.setting && <span style={S.scenarioSetting}>{sc.setting}</span>}
+                            <span style={S.scenarioMessage}>"{sc.message}"</span>
+                          </button>
+                          <button
+                            style={{ position:"absolute", top:8, right:8, background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:8, fontSize:11, padding:"3px 8px", color:"var(--text3)", cursor:"pointer" }}
+                            onClick={e => { e.stopPropagation(); setEditingScenario(i); }}>✎ edit</button>
+                        </div>
+                      );
+                    })}
                     <button style={{ ...S.scenarioCard, border:"2px dashed var(--pink-border)", background:"var(--pink-bg)" }}
                       onClick={() => setShowCustomScenario(true)}>
                       <span style={S.scenarioLabel}>✏️ Custom Scene</span>
