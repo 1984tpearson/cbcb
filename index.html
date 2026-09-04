@@ -841,9 +841,16 @@ function buildIntentionsNote(character) {
   // brake is for goals still being worked up to; once one has reached the
   // acting stage, telling her to take "one small step" and drop it if not
   // taken up is what kept a fully set-up intention from ever happening.
-  const anyReady = active.some(intent => ratioFor(intent) >= 1);
-  const pacing = (anyReady ? cfg.pacingReady : cfg.pacing) || cfg.pacing || "";
-  return cfg.header + body + (shared ? `\n${shared}` : "") + pacing;
+  const ready = active.filter(intent => ratioFor(intent) >= 1);
+  const pacing = (ready.length ? cfg.pacingReady : cfg.pacing) || cfg.pacing || "";
+  // The named directive goes last of all — after the pacing, after every other
+  // clause in the system prompt. If more than one goal is ready the nearer of
+  // them is named, since two directives in one turn is how "act" becomes
+  // "gesture at both".
+  const directive = ready.length && cfg.readyDirective
+    ? fillTemplate(cfg.readyDirective, { goal: ready[0].goal.trim().replace(/[.!?]$/, "") })
+    : "";
+  return cfg.header + body + (shared ? `\n${shared}` : "") + pacing + directive;
 }
 
 // Rolls intentions back to a snapshot taken before a reply that has since been

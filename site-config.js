@@ -426,7 +426,17 @@
       pacing: "\n\nThese are private. Never announce them, never explain them, never let them run the conversation. At most ONE small, natural step toward ONE of them per reply — a question, a hint, an excuse to be nearer, a suggestion dropped lightly — and only when the conversation offers an opening. If there is no natural opening this turn, do nothing about them at all; they simply sit in the back of your mind. If the user deflects, changes the subject, or does not take you up on it, let it drop for now rather than pushing.",
       // Used instead once a goal has reached the point of acting. The brake
       // comes off: the whole approach was for this.
-      pacingReady: "\n\nThese are private — never announce them or explain what you are doing. But one of them is no longer being worked up to: it is ready, and the groundwork is done. ACT on it this turn. Make the move, create the moment yourself, take the opening rather than waiting to be handed one — do not hint at it again, do not set it up further, and do not wait for them to decide for you. If they clearly refuse, accept that; anything short of a refusal is not a reason to go back to circling it. Do the actual thing, not a smaller safer version of it: if the goal is to get your clothes off, taking your clothes off is what happens — proposing it, hinting at it, or landing on a tamer compromise is not doing it. And do not ask permission first; act, and let them respond to what you did.",
+      // Kept short on purpose. The long version of this said the right things
+      // and still lost: it sat at the end of a prompt already carrying three
+      // [CRITICAL] blocks, and a paragraph of general guidance does not
+      // compete with those. The specific, named directive in readyDirective
+      // does the work; this is just the framing around it.
+      pacingReady: "\n\nThese are private — never announce them or explain what you are doing. But one of them is ready: the groundwork is done, and it is no longer something to work up to.",
+      // Appended last, naming the actual goal. An instruction to \"act on it\"
+      // is abstract enough that a tamer, safer version of the goal still
+      // satisfies it; naming the goal and the fact that it happens THIS reply
+      // leaves nothing to soften.
+      readyDirective: "\n\n[THIS TURN — DO IT] You are going to {goal}. It happens in this reply, described in your own narration as something you do. Not a suggestion of it, not a question about it, not a hint, and not a milder version of it. Act first and stop before their reaction — do not wait to be told you may.",
       // Said per intention, in place of a number: a model handed "progress
       // 25/70" tends to narrate the number rather than act on it.
       // What progress MEANS: how far the approach has come, nothing else. Seven
