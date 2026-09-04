@@ -1,0 +1,261 @@
+// PersonaChat — IMAGE PROMPT ASSEMBLY
+// Framework-free, like site-config.js, so both the app and prompt-lab.html can
+// load it as a plain script. Everything here is pure: state in, prompt string
+// out, no React, no network, no DOM.
+//
+// It lives outside index.html because the whole file used to be inline in the
+// app source, which meant the only way to see what a change did to a prompt
+// was to play the game and generate an image. Every prompt regression this
+// project has had came from tuning blind that way. Now prompt-lab.html loads
+// this same code and shows the finished prompt for any scene state instantly,
+// so a change can be diffed across cases before it costs a generation.
+//
+// create(CFG) rather than top-level consts: the config is fetched at runtime,
+// so nothing here can read CFG until the caller hands it over.
+window.ImagePrompt = {
+  create(CFG) {
+
+    const ACTION_TEXT_RE = /\*{1,2}([^*]+)\*{1,2}/g;
+    function extractActionText(messages, characterName) {
+      return messages.filter(m => m.role !== "image").slice(-4).map(m => {
+        const who = m.role === "user" ? "User" : characterName;
+        const beats = [...String(m.content || "").matchAll(ACTION_TEXT_RE)]
+          .map(match => match[1].trim()).filter(Boolean);
+        return beats.length ? `${who}: ${beats.join(" / ")}` : "";
+      }).filter(Boolean).join("\n");
+    }
+
+    const EMPTY_STAGING = { location: null, charPose: null, userPose: null, proximity: null };
+    const STAGING_KEYS = ["location", "charPose", "userPose", "proximity"];
+    function hasStaging(staging) {
+      return !!staging && STAGING_KEYS.some(k => staging[k]);
+    }
+    // Phrases for the image prompt, ordered the way the shot reads: where we are,
+    // what the camera (the user) is doing, how far away she is, what she is doing.
+    function buildStagingImageDesc(staging) {
+      if (!hasStaging(staging)) return "";
+      const parts = [];
+      if (staging.location) parts.push(staging.location);
+      if (staging.userPose) parts.push(`camera positioned as someone ${staging.userPose}`);
+      if (staging.proximity) parts.push(staging.proximity);
+      // The pose goes in bare — SD reads "sitting on the edge of the bed" as a
+      // pose directive, while a "she is ..." sentence just adds noise tokens.
+      if (staging.charPose) parts.push(staging.charPose);
+      return parts.filter(Boolean).join(", ");
+    }
+
+    // Images generated during a chat are shot from the user's own eyes - the user
+    // is the camera. Their own hands, arms and legs still belong in frame when they
+    // are touching or reaching for something, the way they do in a first-person
+    // game; what never appears is their face, head or back, since the camera
+    // cannot see itself. Deliberately not applied on the character creation
+    // screen, where a third-person reference portrait is wanted.
+    const POV_BASE = CFG.image.povBase;
+    // Which of the viewer's own body parts belong in frame depends on what they
+    // are doing, so the clause is assembled per image rather than fixed. Asking
+    // for them unconditionally puts disembodied limbs in every shot, including
+    // ones where the user is just standing and watching.
+    //
+    // Arms come from the scene text, since reaching and touching is what the
+    // action beats describe. Legs and torso come from the *user's own pose*
+    // instead: limb words in the scene text are ambiguous about whose limb it is
+    // ("her legs crossed" must not put the viewer's legs in the foreground),
+    // while the staging tracker knows who is sitting or lying down.
+    // Matching bare limb words does not work: "her hands clasped in front of her"
+    // describes HER hands, and matching a contact verb catches her actions too
+    // ("holding a glass of wine"). Both were putting the viewer's arms into shots
+    // where the user was touching nothing, reaching in from the sides of frame.
+    // Ownership has to be explicit, so the scene extractor is instructed to write
+    // the user's own limbs as "viewer's hand" / "viewer's arm", and only that
+    // counts. The custom prompt box is hand-written, where "my hand" is natural.
+    const POV_VIEWER_LIMB_RE = /\b(?:viewer|user)(?:'|\u2019)?s?\s+(?:own\s+)?(?:hand|hands|arm|arms|forearm|forearms|finger|fingers|palm|palms|wrist|wrists)\b/i;
+    const POV_CUSTOM_LIMB_RE = /\b(?:my|your|our)\s+(?:own\s+)?(?:hand|hands|arm|arms|forearm|forearms|finger|fingers|palm|palms)\b/i;
+    const POV_ARMS_MODIFIER = CFG.image.povArmsModifier;
+    // Seedream leans toward putting hands into a POV frame whether or not anything
+    // asked for them, so when the viewer is touching nothing, say so explicitly.
+    const POV_NO_LIMBS = CFG.image.povNoLimbs;
+    // When the scene already names the limb, claim it rather than adding another:
+    // this tells the model whose arms those are and that there is only one pair,
+    // instead of introducing a second pair alongside them.
+    const POV_ARMS_OWNED_MODIFIER = CFG.image.povArmsOwnedModifier;
+    // In an intimate scene the viewer's own body is part of the shot, and framing
+    // it out is what makes these images read as wrong — a POV that crops at the
+    // wrists during sex is stranger than one that doesn't. Gated on the
+    // character's NSFW toggle, same as every other explicit path in the app, so
+    // an SFW character never gets this clause regardless of scene wording.
+    const POV_INTIMATE_RE = /\b(sex|sexual|fucking|fucks|thrust|thrusting|riding|rides|straddling|straddles|grinding|penetrat\w*|oral|blowjob|going down on|cock|dick|pussy|clit|nipples?|breasts?|tits|cum|climax|orgasm|moaning|naked|nude|undressed|topless|bare[- ]?chested)\b/i;
+    // Whether the VIEWER is dressed is decided by the tracked userOutfit, never by
+    // the scene text: "naked" and "undressed" in a scene prompt are almost always
+    // describing the character, and reading them as the viewer's state stripped
+    // the user in shots where they were fully clothed.
+    const UNDRESSED_VALUES = ["nothing", "nude", "naked", "undressed", "none", "no clothes", "topless"];
+    function isUserUndressed(userOutfit) {
+      if (!userOutfit) return false; // unknown is not the same as naked
+      return UNDRESSED_VALUES.includes(String(userOutfit).trim().toLowerCase());
+    }
+    // Says what the viewer's own body looks like from inside the frame. Clothing
+    // wins whenever it is known — a POV shot that crops to a bare chest when the
+    // user is in a shirt and jeans is the same error as the spare arms.
+    function povSelfBody(userOutfit, bare, clothed) {
+      if (!userOutfit || isUserUndressed(userOutfit)) return bare;
+      return `${clothed}, the viewer wearing ${userOutfit}`;
+    }
+    const POV_INTIMATE_MODIFIER = CFG.image.povIntimateModifier;
+    function isIntimateScene(sceneText, staging, nsfw) {
+      const userPose = (staging && staging.userPose) || "";
+      return !!nsfw && POV_INTIMATE_RE.test(`${sceneText || ""} ${userPose}`);
+    }
+    // Whether the two of them are ACTUALLY touching, read from the action beats
+    // rather than from the image prompt. Naked, moaning and intimate are states,
+    // not contact, and treating them as contact is what kept putting the viewer's
+    // body into shots where nobody had laid a hand on anyone. A beat counts only
+    // when a contact verb and a reference to the other person appear together, so
+    // "I pour myself a drink" does not qualify and "I rest my hand on her knee"
+    // does.
+    const CONTACT_VERB_RE = /\b(touch\w*|hold\w*|held|grab\w*|grasp\w*|grip\w*|takes?|taking|took|reach\w*|stroke\w*|caress\w*|kiss\w*|hug\w*|embrac\w*|cuddl\w*|pull\w*|push\w*|press\w*|squeez\w*|cup\w*|brush\w*|rest\w*|place[sd]?|placing|slid\w*|slip\w*|lean\w*|straddl\w*|climb\w*|wrap\w*|tug\w*|guid\w*|lift\w*|carr\w*|thrust\w*|rid(?:e|es|ing)|grind\w*|fuck\w*|undress\w*|unbutton\w*|unzip\w*)\b/i;
+    // The object has to be the OTHER person. Accepting "my" and "me" made almost
+    // every beat count — "I lean back in my chair", "I take a sip of my drink",
+    // "I rest my head against the wall" are all a contact verb next to a
+    // possessive, and none of them involve touching anybody. So which pronouns
+    // qualify depends on who is speaking: the character reaches for "you", the
+    // user reaches for "her".
+    const CONTACT_TARGET_BY_CHARACTER = /\b(you|your|yours)\b/i;
+    const CONTACT_TARGET_BY_USER = /\b(her|hers|him|his|she|he|them|their)\b/i;
+    const MUTUAL_RE = /\b(each other|one another|together|our hands|between us)\b/i;
+    function beatShowsContact(beat, speakerIsUser, characterName) {
+      if (!CONTACT_VERB_RE.test(beat)) return false;
+      if (MUTUAL_RE.test(beat)) return true;
+      if (speakerIsUser) {
+        const namePattern = characterName
+          ? new RegExp(`\\b${characterName.split(/\s+/)[0].replace(/[^\w]/g, "")}\\b`, "i")
+          : null;
+        return CONTACT_TARGET_BY_USER.test(beat) || (!!namePattern && namePattern.test(beat));
+      }
+      return CONTACT_TARGET_BY_CHARACTER.test(beat);
+    }
+    // Last line of defence. The scene extractor is a language model told not to
+    // mention the viewer's limbs unless they are touching something, and it does
+    // not always comply — so when there is no contact, any clause naming the
+    // viewer's hands or arms is cut from its output before the prompt is built.
+    // A rule the code enforces beats a rule the model is asked to follow.
+    const VIEWER_LIMB_CLAUSE_RE = /\b(?:viewer|user|my|your|his|her|the)?\s*(?:own\s+)?(?:hand|hands|arm|arms|forearm|forearms|finger|fingers|palm|palms|wrist|wrists)\b[^,]*\b(?:foreground|frame|camera|reaching|entering|extends?|extending|visible)\b|\b(?:foreground|frame|camera)\b[^,]*\b(?:hand|hands|arm|arms|forearm|fingers)\b/i;
+    function stripViewerLimbs(sceneText) {
+      if (!sceneText) return sceneText;
+      const kept = String(sceneText)
+        .split(",")
+        .filter(clause => !VIEWER_LIMB_CLAUSE_RE.test(clause))
+        .map(c => c.trim())
+        .filter(Boolean);
+      return kept.join(", ");
+    }
+
+    function detectPhysicalContact(messages, characterName) {
+      // Only the latest exchange: contact three turns ago is over.
+      const beats = extractActionText((messages || []).slice(-2), characterName);
+      if (!beats) return false;
+      return beats.split("\n").some(line => {
+        // extractActionText labels each line with who acted, which is what makes
+        // the pronoun test possible at all.
+        const speakerIsUser = /^User:/i.test(line);
+        return beatShowsContact(line.replace(/^[^:]*:\s*/, ""), speakerIsUser, characterName);
+      });
+    }
+
+    // contact is the only gate on the viewer's body appearing. Nothing about the
+    // scene's wording or the character's state opens it on its own — she can be
+    // undressed, or the scene explicit, and the viewer still is not in frame
+    // unless an action beat shows the two of them touching.
+    function buildPovModifiers(sceneText, staging, nsfw, userOutfit, contact) {
+      const scene = sceneText || "";
+      const parts = [POV_BASE];
+      if (!contact) {
+        // Hand-typed prompts are the one exception: someone who wrote "my hand on
+        // her waist" is asking for it explicitly.
+        parts.push(POV_CUSTOM_LIMB_RE.test(scene) ? POV_ARMS_MODIFIER : POV_NO_LIMBS);
+        return parts.join(", ");
+      }
+      if (isIntimateScene(scene, staging, nsfw)) {
+        parts.push(povSelfBody(
+          userOutfit,
+          `${POV_INTIMATE_MODIFIER}, bare chest and hips`,
+          `${POV_INTIMATE_MODIFIER}, still dressed`,
+        ));
+      } else {
+        parts.push(POV_ARMS_OWNED_MODIFIER);
+      }
+      return parts.join(", ");
+    }
+
+    // The prompt is assembled from sources that each describe the scene in their
+    // own words, so the same fact arrived two or three times — the tracked outfit
+    // beside the scene's mention of it, the staging location beside the
+    // extractor's. Dropping repeated phrases keeps the prompt short enough that
+    // the parts that matter still carry weight.
+    function joinPromptParts(parts) {
+      const seen = new Set();
+      const kept = [];
+      for (const part of parts) {
+        if (!part) continue;
+        for (const phrase of String(part).split(",")) {
+          const trimmed = phrase.trim();
+          if (!trimmed) continue;
+          const key = trimmed.toLowerCase().replace(/[^a-z0-9 ]/g, "");
+          if (key.length > 3 && seen.has(key)) continue;
+          seen.add(key);
+          kept.push(trimmed);
+        }
+      }
+      return kept.join(", ");
+    }
+
+    // Everything the app assembles a chat image prompt from, in one place, so
+    // the lab and the app can never drift into building it differently.
+    // charDesc is passed in already built (it comes from the appearance
+    // sliders, which are not part of prompt assembly).
+    function assembleImagePrompt({
+      scenePrompt, charDesc, charOutfit, userOutfit, staging, nsfw,
+      explicitDetail, messages, characterName, styleModifiers,
+      contact: contactOverride, name, keepSceneVerbatim,
+    }) {
+      const contact = contactOverride !== undefined
+        ? contactOverride
+        : detectPhysicalContact(messages || [], characterName);
+      // The extractor writes the scene text, so it is the one place a stray
+      // hand can still get in. Cut those clauses when nobody is touching.
+      // keepSceneVerbatim is the hand-typed prompt box: if someone wrote a
+      // hand into it they meant it, so only the POV clause reacts to contact.
+      const scene = (contact || keepSceneVerbatim)
+        ? scenePrompt
+        : stripViewerLimbs(scenePrompt);
+      const parts = {
+        pov: buildPovModifiers(scene, staging, nsfw, userOutfit, contact),
+        name: name || "",
+        charDesc: charDesc || "",
+        wardrobe: charOutfit ? `wearing ${charOutfit}` : "",
+        staging: buildStagingImageDesc(staging),
+        scene: scene || "",
+        explicit: isIntimateScene(scene, staging, nsfw) ? (explicitDetail || "") : "",
+        style: styleModifiers || "photorealistic, natural lighting, 50mm, sharp focus",
+      };
+      const order = ["pov", "name", "charDesc", "wardrobe", "staging", "scene", "explicit", "style"];
+      // parts is returned alongside the finished string so the lab can show
+      // which source each clause came from — the thing that was impossible to
+      // see when this was a single joinPromptParts call inline in the app.
+      return {
+        prompt: joinPromptParts(order.map(k => parts[k])),
+        parts,
+        contact,
+        intimate: isIntimateScene(scene, staging, nsfw),
+        strippedLimbs: scene !== scenePrompt,
+      };
+    }
+
+    return {
+      ACTION_TEXT_RE, extractActionText,
+      EMPTY_STAGING, STAGING_KEYS, hasStaging, buildStagingImageDesc,
+      isUserUndressed, povSelfBody, isIntimateScene,
+      beatShowsContact, detectPhysicalContact, stripViewerLimbs,
+      buildPovModifiers, joinPromptParts, assembleImagePrompt,
+    };
+  },
+};
