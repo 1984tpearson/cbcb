@@ -788,6 +788,25 @@ function intentionThreshold(intention, sliders) {
 const activeIntentions = (character) =>
   (character.intentions || []).filter(i => i && i.goal && (i.status || "active") === "active");
 
+// A ready intention's directive, delivered as a turn-level message rather than
+// buried in the system prompt. Regenerating with a typed instruction reliably
+// produces the action, and the only difference was position: that instruction
+// lands as the final message before generation, while the same words sitting
+// thousands of tokens earlier in the system prompt lost to everything after
+// them. Same text, same convention as the regeneration instruction.
+function readyIntentionDirective(character) {
+  const cfg = CFG.intentions;
+  if (!cfg || !cfg.readyDirective) return "";
+  if (character.intentionsEnabled === false) return "";
+  const sliders = character.sliders || DEFAULT_SLIDERS;
+  const ready = activeIntentions(character).find(intent => {
+    const threshold = intentionThreshold(intent, sliders);
+    return (Number(intent.progress) || 0) / threshold >= 1;
+  });
+  if (!ready) return "";
+  return fillTemplate(cfg.readyDirective, { goal: ready.goal.trim().replace(/[.!?]$/, "") });
+}
+
 // The block the character sees. Progress is described, never numbered — handed
 // "progress 25/70" a model narrates the number instead of acting on it.
 function buildIntentionsNote(character) {
@@ -847,10 +866,9 @@ function buildIntentionsNote(character) {
   // clause in the system prompt. If more than one goal is ready the nearer of
   // them is named, since two directives in one turn is how "act" becomes
   // "gesture at both".
-  const directive = ready.length && cfg.readyDirective
-    ? fillTemplate(cfg.readyDirective, { goal: ready[0].goal.trim().replace(/[.!?]$/, "") })
-    : "";
-  return cfg.header + body + (shared ? `\n${shared}` : "") + pacing + directive;
+  // The directive itself is delivered as a turn-level message by sendChat, so
+  // it is deliberately not repeated here.
+  return cfg.header + body + (shared ? `\n${shared}` : "") + pacing;
 }
 
 // Rolls intentions back to a snapshot taken before a reply that has since been
@@ -1059,9 +1077,16 @@ async function sendChat({ messages, character, model, settings }) {
 
   const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + voiceNote + personaNote + nsfwClause + actionClause + agencyClause + plainClause + wardrobeClause + stagingClause + memoryClause + intentionsNote;
 
+  // Appended to the request only — never stored in the conversation — exactly
+  // as the regeneration instruction is.
+  const turnDirective = readyIntentionDirective(character);
+  const outbound = turnDirective
+    ? [...messages, { role: "user", content: turnDirective.trim() }]
+    : messages;
+
   const reply = await aiComplete({
     model,
-    messages: [{ role: "system", content: sysContent }, ...messages],
+    messages: [{ role: "system", content: sysContent }, ...outbound],
     // Without these the model occasionally locks into a degenerate loop and
     // emits one token — usually "!" — dozens of times in a row. Kept modest:
     // roleplay prose legitimately repeats names, pet names and phrasings, and
