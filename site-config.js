@@ -567,7 +567,20 @@
       // Instruction sent to the extractor model that turns the recent
       // conversation into a Stable Diffusion prompt. {name}, {charDesc},
       // {recent}, {actNote} and {ownBodyRule} are substituted in.
-      scenePromptInstruction: "You are generating a Stable Diffusion image prompt based on a roleplay conversation. Extract the specific scene happening RIGHT NOW at the end of the conversation — what is {name} doing, wearing, where are they, what is their pose/expression/action? Be concrete and literal, not abstract or atmospheric.\n\nCharacter description: {charDesc}.\n\nConversation:\n{recent}\n\nThe image is a first-person POV shot taken from the User's own eyes: the User is the camera, and their own face, head and back can never be seen. The location, both people's clothing, the camera framing and whether the User's own limbs are in shot are all added separately — do NOT restate or decide any of them. Write ONLY what is happening: her action, pose and expression in this moment.\n\nWrite a Stable Diffusion prompt of 15-25 words. Put the most important scene action or pose FIRST. Include specific clothing if mentioned, location/setting, body language, and facial expression.{actNote} Do NOT include character names. Do NOT use abstract words like \"mood\" or \"atmosphere\".{ownBodyRule} Return ONLY the prompt text, nothing else.",
+      // The extractor returns JSON rather than a bare prompt string, because
+      // whether the two of them are touching cannot be decided by matching
+      // words. It was a regular expression over a verb list, which said no to
+      // "she nibbles his earlobe" and yes to "I pour a drink and watch her
+      // undress" - wrong in both directions on ordinary phrasing, and every
+      // fix was one more word on the list. The model already reads the scene
+      // in order to write the prompt; it can answer the question in the same
+      // call, and it understands English.
+      //
+      // viewerBody is the other half. Told only "the viewer's own body frames
+      // the bottom of the shot", the image model filled that space with
+      // whatever limb it liked - repeatedly a foot. Naming the part and the
+      // frame edge it enters from leaves nothing to invent.
+      scenePromptInstruction: "You are describing one moment from a roleplay conversation so that an image can be generated of it. The image is a first-person POV shot taken through the User's own eyes: the User is the camera.\n\nCharacter description: {charDesc}.\n\nConversation:\n{recent}\n\nDescribe the moment at the very END of the conversation - what is {name} doing RIGHT NOW.\n\nReturn ONLY a JSON object, with no other text and no code fences:\n{\"scene\": \"...\", \"touching\": true or false, \"viewerBody\": \"...\"}\n\nscene - 15 to 25 words: {name}'s action, pose and expression in this moment. Put the most important action or pose FIRST. Be concrete and literal. Do NOT include names. Do NOT use abstract words like \"mood\" or \"atmosphere\". The location, both people's clothing and the camera framing are all added separately, so do NOT restate or decide any of them here.\n\ntouching - true if {name} and the User are in physical contact at this moment, false if they are not. Judge it from what the text actually describes, however slight the contact is and however it is worded. Being undressed, or nearby, or talking, is not contact; any part of one of them against the other is.\n\nviewerBody - when touching is true, which of the User's OWN body parts are in the shot and where they enter the frame, as a short phrase: for example \"the viewer's hand in her hair, entering from the top of the frame\". Name the part and the frame edge it comes in from, so it is not drawn floating. When touching is false, use an empty string.\n\nThe User is the camera. Never describe the User's face, head, hair or back - the camera cannot see itself. Never refer to the User in the third person: not \"him\", \"his\", \"the man\", nor by any name - always \"the viewer\". {name}'s own body belongs in scene; only the User's body belongs in viewerBody.{actNote}",
     },
 
     // ── Models & defaults ────────────────────────────────────────────────────

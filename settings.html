@@ -639,9 +639,9 @@
       card("Guardrails", "Wiro has no negative prompt, so this goes into the positive one.", [
         field("Proportion guard", i + "proportionGuard", "area"),
       ]),
-      card("Scene extraction", "Sent to the extractor model to turn the last few messages into an image prompt.", [
+      card("Scene extraction", "Sent to the extractor model to turn the last few messages into an image prompt. It must return JSON with scene, touching and viewerBody — touching decides whether the shot is POV with the user's body in it, and viewerBody says which part and which frame edge it enters from.", [
         field("Instruction", i + "scenePromptInstruction", "area",
-          "{name}, {charDesc}, {recent}, {actNote} and {ownBodyRule} are substituted in."),
+          "{name}, {charDesc}, {recent} and {actNote} are substituted in."),
       ]),
     ];
   }

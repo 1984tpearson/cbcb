@@ -1033,29 +1033,57 @@ function cleanOutfitUpdate(value) {
 // gate — without it the tracker never even looked.
 const MOVEMENT_RE = /\b(walk|walks|walked|walking|go|goes|went|going|come|comes|came|coming|move|moves|moved|moving|head|heads|headed|heading|enter|enters|entered|entering|leave|leaves|left|leaving|step|steps|stepped|stepping|sit|sits|sat|sitting|stand|stands|stood|standing|lie|lies|lay|lying|follow|follows|followed|following|inside|outside|upstairs|downstairs|bedroom|kitchen|bathroom|living room|hallway|garden|car|couch|sofa|bed|table)\b/i;
 
+// Returns { scene, touching, viewerBody } rather than a prompt string. Whether
+// the two of them are touching used to be decided here by regular expression,
+// which is not something a verb list can do: it missed "she nibbles his
+// earlobe" and accepted "I pour a drink and watch her undress". The model is
+// already reading the conversation to write the scene, so it answers that at
+// the same time, and says which of the viewer's own parts are in the shot.
 async function buildImagePromptFromContext({ messages, character, model }) {
   const recent = messages.slice(-10).filter(m => m.role !== "image").map(m => `${m.role === "user" ? "User" : character.name}: ${m.content}`).join("\n");
   const appearanceDesc = buildAppearancePrompt(character.appearance);
   const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
   const ageDesc = character.age ? `${character.age} year old` : "";
   const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-  // What of the User's own body may be described depends on the character's
-  // NSFW setting: cropping a POV shot at the wrists during an intimate scene
-  // is what makes these images read as wrong, but an SFW character should
-  // never have the User's body brought into frame.
-  // The extractor's field list had no slot for what the two of them are
-  // physically doing, so on an explicit scene it would reliably return pose
-  // and mood and drop the act itself. This tells it to report the action
-  // rather than substitute atmosphere for it, matching how the opening
-  // scenario generator is already instructed.
+  // On an explicit scene the extractor would reliably return pose and mood and
+  // drop the act itself, so it is told to report what is happening. Gated on
+  // the character's NSFW toggle like every other explicit path in the app.
   const actNote = character.nsfw
-    ? " State plainly what the two of them are physically doing to each other, including sexual acts where that is what is happening — do not soften it into mood, atmosphere or euphemism, and do not substitute a pose for the act."
+    ? " State plainly what the two of them are physically doing to each other, including sexual acts where that is what is happening — do not soften it into mood, atmosphere or euphemism, and do not substitute a pose for the act. In an intimate scene viewerBody must name the viewer's own anatomy that is actually involved, and the frame edge it enters from."
     : "";
-  const ownBodyRule = character.nsfw
-    ? " Describe what the User can see from where they are: the scene in front of them, plus their own body where it genuinely falls in the shot, and in an intimate scene their own chest, hips and thighs framing the bottom of the frame. Never describe the User's face, head or hair. Only mention the User's hands or arms if the User is actually touching, holding or reaching for something in this exact moment — if they are only looking or talking, do not mention their hands at all. When you do mention them, write them as \"viewer's hand\" or \"viewer's arm\" so they are not confused with ${character.name}'s own hands."
-    : " Describe only what the User can see from where they are. Never describe the User's face, head, hair or whole body. Only mention the User's hands or arms if the User is actually touching, holding or reaching for something in this exact moment — if they are only looking or talking, do not mention their hands at all. When you do mention them, write them as \"viewer's hand\" or \"viewer's arm\" so they are not confused with ${character.name}'s own hands.";
-  const content = await aiComplete({ model, messages: [{ role: "user", content: fillTemplate(CFG.image.scenePromptInstruction, { name: character.name, charDesc: charDesc || "not specified", recent, actNote, ownBodyRule }) }] });
-  return content.trim().replace(/^"|"$/g, "");
+  const content = await aiComplete({ model, messages: [{ role: "user", content: fillTemplate(CFG.image.scenePromptInstruction, { name: character.name, charDesc: charDesc || "not specified", recent, actNote }) }] });
+  return parseSceneExtraction(content, messages, character.name);
+}
+
+// The extractor is a language model asked for JSON, so it sometimes wraps it in
+// a code fence or adds a sentence around it. Pull the object out rather than
+// failing the whole generation over punctuation.
+function parseSceneExtraction(content, messages, characterName) {
+  const text = String(content || "").trim();
+  const match = text.match(/\{[\s\S]*\}/);
+  if (match) {
+    try {
+      const parsed = JSON.parse(match[0]);
+      const scene = String(parsed.scene || "").trim();
+      if (scene) {
+        return {
+          scene: scene.replace(/^"|"$/g, ""),
+          // Models emit the boolean as a JSON string often enough that
+          // requiring a real true silently reported touching scenes as not.
+          touching: parsed.touching === true || /^(true|yes)$/i.test(String(parsed.touching)),
+          viewerBody: String(parsed.viewerBody || "").trim(),
+        };
+      }
+    } catch {} // fall through to the plain-text reading below
+  }
+  // No usable JSON. Treat the whole reply as the scene and fall back to the
+  // old keyword detector for contact — it is wrong often enough that it was
+  // replaced, but it beats defaulting a touching scene to "nobody is touching".
+  return {
+    scene: text.replace(/^```(?:json)?|```$/g, "").trim().replace(/^"|"$/g, ""),
+    touching: detectPhysicalContact(messages, characterName),
+    viewerBody: "",
+  };
 }
 
 const MARITAL_STATUSES = CFG.options.maritalStatuses;
@@ -3092,10 +3120,12 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // Timed separately: this is a full LLM call that runs before the image is
       // even submitted, so it is part of the wait, and it is ours to fix.
       const promptStartedAt = Date.now();
-      const prompt = messages.length > 0
+      const extracted = messages.length > 0
         ? await buildImagePromptFromContext({ messages, character, model: settings.selectedModel })
-        : `${character.name}, looking at the viewer, character art`;
-      console.info(`[image] scene prompt built in ${((Date.now() - promptStartedAt) / 1000).toFixed(1)}s`);
+        : { scene: `${character.name}, looking at the viewer, character art`, touching: false, viewerBody: "" };
+      const prompt = extracted.scene;
+      console.info(`[image] scene prompt built in ${((Date.now() - promptStartedAt) / 1000).toFixed(1)}s` +
+        ` (touching: ${extracted.touching}${extracted.viewerBody ? `, viewer: ${extracted.viewerBody}` : ""})`);
       const appearanceDesc = buildAppearancePrompt(character.appearance);
       const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
       const ageDesc = character.age ? `${character.age} year old` : "";
@@ -3120,6 +3150,8 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         messages,
         characterName: character.name,
         styleModifiers,
+        contact: extracted.touching,
+        viewerBody: extracted.viewerBody,
       });
       const url = await generateImageWiro({
         prompt: fullImgPrompt,

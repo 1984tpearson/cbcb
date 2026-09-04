@@ -112,15 +112,21 @@
         <label class="field"><span>Explicit detail (used only when NSFW and the scene reads as intimate)</span>
           <input type="text" id="explicitDetail" /></label>
 
-        <label class="field"><span>Recent action beats — contact is detected from these</span>
-          <textarea id="beats" rows="4" placeholder="User: *I rest my hand on her knee*
+        <label class="field"><span>Viewer's body in frame (extractor's viewerBody)</span>
+          <input type="text" id="viewerBody" placeholder="the viewer's hand in her hair, entering from the top of the frame" /></label>
+
+        <label class="field"><span>Recent action beats — only used by the old keyword fallback</span>
+          <textarea id="beats" rows="3" placeholder="User: *I rest my hand on her knee*
 Elena: *she leans into it*"></textarea></label>
 
         <div class="toggles">
           <label><input type="checkbox" id="nsfw" /> NSFW</label>
           <label><input type="checkbox" id="verbatim" /> Hand-typed prompt (leave scene alone)</label>
-          <label><input type="checkbox" id="forceContact" /> Force contact on</label>
+          <label><input type="checkbox" id="touching" /> Touching (extractor's answer)</label>
         </div>
+        <p class="note">Touching and the viewer's body now come from the extractor model, which reads the
+          scene and answers in the same call. The beats box only drives the old keyword detector, which
+          survives as a fallback for when the model returns something unparseable.</p>
       </div>
 
       <div class="card">
@@ -204,8 +210,8 @@ Elena: *she leans into it*"></textarea></label>
 
   // ── Fields ────────────────────────────────────────────────────────────────
   const FIELDS = ["scenePrompt","charName","charDesc","charOutfit","userOutfit","location","proximity",
-                  "charPose","userPose","explicitDetail","beats","refImage","model"];
-  const CHECKS = ["nsfw","verbatim","forceContact"];
+                  "charPose","userPose","explicitDetail","beats","viewerBody","refImage","model"];
+  const CHECKS = ["nsfw","verbatim","touching"];
   const $ = id => document.getElementById(id);
   const val = id => $(id).value.trim();
 
@@ -224,8 +230,9 @@ Elena: *she leans into it*"></textarea></label>
     userPose: "standing",
     explicitDetail: "",
     beats: "User: *I run my fingers into her hair*\nElena: *she leans into my hand*",
+    viewerBody: "the viewer's hand in her hair, entering from the top of the frame",
     refImage: "",
-    nsfw: true, verbatim: false, forceContact: false,
+    nsfw: true, verbatim: false, touching: true,
   };
 
   function readState() {
@@ -272,7 +279,8 @@ Elena: *she leans into it*"></textarea></label>
       characterName: val("charName"),
       styleModifiers: STYLE_MODIFIERS,
       keepSceneVerbatim: $("verbatim").checked,
-      contact: $("forceContact").checked ? true : undefined,
+      contact: $("touching").checked,
+      viewerBody: val("viewerBody"),
     });
   }
 

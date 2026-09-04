@@ -166,9 +166,33 @@ window.ImagePrompt = {
     // scene's wording or the character's state opens it on its own — she can be
     // undressed, or the scene explicit, and the viewer still is not in frame
     // unless an action beat shows the two of them touching.
-    function buildPovModifiers(sceneText, staging, nsfw, userOutfit, contact) {
+    // viewerBody comes from the extractor: the viewer's own parts that are in
+    // the shot, and the frame edge they enter from. When it is present it
+    // replaces the generic clauses entirely — "the viewer's own body framing
+    // the bottom of the shot" is what the image model kept resolving into a
+    // stray limb, because nothing said which part or where it attached.
+    function buildPovModifiers(sceneText, staging, nsfw, userOutfit, contact, viewerBody) {
       const scene = sceneText || "";
       const parts = [POV_BASE];
+      if (contact && viewerBody) {
+        parts.push(viewerBody);
+        // Claim the limbs only when the extractor actually put limbs in the
+        // shot. Appending it unconditionally added "the foreground hand and
+        // arm belong to the viewer" to a shot whose viewerBody was a mouth or
+        // an ear — putting hand and arm tokens into a frame that has neither,
+        // which is the same mistake as the clause that produced the foot.
+        if (POV_VIEWER_LIMB_RE.test(viewerBody) || POV_CUSTOM_LIMB_RE.test(viewerBody)) {
+          parts.push(POV_ARMS_OWNED_MODIFIER);
+        }
+        // What the viewer is wearing is decided by the tracked outfit, never
+        // by the scene text: "naked" in a scene prompt is almost always
+        // describing her, and reading it as the viewer's state stripped the
+        // user in shots where they were fully dressed.
+        if (userOutfit && !isUserUndressed(userOutfit)) {
+          parts.push(`the viewer wearing ${userOutfit}`);
+        }
+        return parts.filter(Boolean).join(", ");
+      }
       if (!contact) {
         // Hand-typed prompts are the one exception: someone who wrote "my hand on
         // her waist" is asking for it explicitly.
@@ -333,7 +357,7 @@ window.ImagePrompt = {
     function assembleImagePrompt({
       scenePrompt, charDesc, charOutfit, userOutfit, staging, nsfw,
       explicitDetail, messages, characterName, styleModifiers,
-      contact: contactOverride, name, keepSceneVerbatim,
+      contact: contactOverride, name, keepSceneVerbatim, viewerBody,
     }) {
       const contact = contactOverride !== undefined
         ? contactOverride
@@ -346,7 +370,7 @@ window.ImagePrompt = {
         ? scenePrompt
         : stripViewerLimbs(scenePrompt);
       const parts = {
-        pov: buildPovModifiers(scene, staging, nsfw, userOutfit, contact),
+        pov: buildPovModifiers(scene, staging, nsfw, userOutfit, contact, viewerBody),
         name: name || "",
         charDesc: charDesc || "",
         wardrobe: charOutfit ? `wearing ${charOutfit}` : "",
@@ -364,6 +388,7 @@ window.ImagePrompt = {
         parts,
         contact,
         intimate: isIntimateScene(scene, staging, nsfw),
+        viewerBody: (contact && viewerBody) ? viewerBody : "",
         strippedLimbs: scene !== scenePrompt,
       };
     }
