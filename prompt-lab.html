@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Prompt Lab</title>
+<script src="site-config.js"></script>
+<script src="image-prompt.js"></script>
+<style>
+  :root {
+    --pink:#d4547a; --pink-bg:#fdf1f4; --pink-border:#f0c4d1;
+    --bg:#fdf6f8; --bg2:#fff; --bg3:#f7eef1;
+    --text:#3a2b30; --muted:#8b7379; --border:#ecd9df; --border2:#dcc2ca;
+    --ok:#2f8a5b; --err:#c0392b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+  header{position:sticky;top:0;z-index:20;background:rgba(253,246,248,.97);backdrop-filter:blur(10px);
+         border-bottom:1px solid var(--border);padding:12px 18px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  h1{font-size:16px;margin:0;font-weight:800}
+  .spacer{flex:1}
+  button{font-family:inherit;font-size:13px;font-weight:700;border-radius:10px;padding:8px 14px;cursor:pointer;
+         border:1px solid var(--border2);background:var(--bg2);color:var(--text)}
+  button.primary{background:var(--pink);border-color:var(--pink);color:#fff}
+  button:disabled{opacity:.5;cursor:default}
+  button.mini{padding:5px 10px;font-size:12px;border-radius:8px}
+  main{padding:18px;max-width:1500px;margin:0 auto 80px;display:grid;grid-template-columns:minmax(320px,420px) 1fr;gap:16px;align-items:start}
+  @media (max-width:900px){ main{grid-template-columns:1fr} }
+  .card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin-bottom:14px}
+  .card>h2{font-size:14px;margin:0 0 4px;font-weight:800}
+  .card>p.hint{margin:0 0 12px;color:var(--muted);font-size:12px;line-height:1.5}
+  label.field{display:block;margin-bottom:10px}
+  label.field>span{display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px}
+  input[type=text],textarea,select,input[type=password]{width:100%;font-family:inherit;font-size:13px;padding:8px 10px;
+    border-radius:9px;border:1px solid var(--border2);background:var(--bg);color:var(--text);outline:none}
+  textarea{resize:vertical;line-height:1.5}
+  input:focus,textarea:focus,select:focus{border-color:var(--pink)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+  .row>*{flex:1;min-width:130px}
+  .toggles{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px}
+  .toggles label{display:flex;gap:6px;align-items:center;font-size:12px;font-weight:700;color:var(--muted)}
+  .flags{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .flag{font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;border:1px solid var(--border2);color:var(--muted);background:var(--bg3)}
+  .flag.on{background:var(--pink-bg);border-color:var(--pink-border);color:var(--pink)}
+  pre.prompt{white-space:pre-wrap;word-break:break-word;background:var(--bg3);border:1px solid var(--border);
+    border-radius:10px;padding:12px;margin:0 0 10px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.6}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  td.src{width:110px;font-weight:800;color:var(--pink);white-space:nowrap}
+  td.empty{color:var(--muted);font-style:italic}
+  .imgs{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .imgs figure{margin:0}
+  .imgs img{width:100%;border-radius:10px;border:1px solid var(--border);display:block;background:var(--bg3)}
+  .imgs figcaption{font-size:11px;font-weight:800;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em}
+  .status{font-size:12px;font-weight:700;min-height:16px}
+  .status.err{color:var(--err)} .status.ok{color:var(--ok)} .status.busy{color:var(--muted)}
+  #gate{max-width:280px;margin:22vh auto;text-align:center}
+  #gate h1{margin-bottom:14px}
+  #pinErr{color:var(--err);font-size:12px;font-weight:700;min-height:16px;margin-top:8px}
+  .note{font-size:12px;color:var(--muted);line-height:1.55;margin:0 0 10px}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <h1>Prompt Lab</h1>
+  <input type="password" id="pin" inputmode="numeric" placeholder="Code" />
+  <div id="pinErr"></div>
+  <button class="primary" style="margin-top:10px;width:100%" onclick="checkPin()">Unlock</button>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <h1>Prompt Lab</h1>
+    <span class="status" id="loadStatus"></span>
+    <span class="spacer"></span>
+    <select id="charSelect" style="max-width:230px"><option value="">Load a saved character…</option></select>
+    <button class="mini" onclick="location.href='index.html'">App</button>
+    <button class="mini" onclick="location.href='settings.html'">Settings</button>
+  </header>
+
+  <main>
+    <!-- ── INPUTS ────────────────────────────────────────────────────── -->
+    <div>
+      <div class="card">
+        <h2>Scene state</h2>
+        <p class="hint">Everything the app knows when it builds a chat image prompt. Change anything and
+          the finished prompt on the right updates immediately — no generation needed.</p>
+
+        <label class="field"><span>Scene prompt (what the extractor model wrote)</span>
+          <textarea id="scenePrompt" rows="3"></textarea></label>
+
+        <label class="field"><span>Character name</span><input type="text" id="charName" /></label>
+        <label class="field"><span>Character description (from the appearance sliders)</span>
+          <textarea id="charDesc" rows="2"></textarea></label>
+
+        <div class="row">
+          <label class="field"><span>Her outfit</span><input type="text" id="charOutfit" /></label>
+          <label class="field"><span>Viewer's outfit</span><input type="text" id="userOutfit" /></label>
+        </div>
+
+        <div class="row">
+          <label class="field"><span>Location</span><input type="text" id="location" /></label>
+          <label class="field"><span>Proximity</span><input type="text" id="proximity" /></label>
+        </div>
+        <div class="row">
+          <label class="field"><span>Her pose</span><input type="text" id="charPose" /></label>
+          <label class="field"><span>Viewer's pose</span><input type="text" id="userPose" /></label>
+        </div>
+
+        <label class="field"><span>Explicit detail (used only when NSFW and the scene reads as intimate)</span>
+          <input type="text" id="explicitDetail" /></label>
+
+        <label class="field"><span>Recent action beats — contact is detected from these</span>
+          <textarea id="beats" rows="4" placeholder="User: *I rest my hand on her knee*
+Elena: *she leans into it*"></textarea></label>
+
+        <div class="toggles">
+          <label><input type="checkbox" id="nsfw" /> NSFW</label>
+          <label><input type="checkbox" id="verbatim" /> Hand-typed prompt (leave scene alone)</label>
+          <label><input type="checkbox" id="forceContact" /> Force contact on</label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Generate</h2>
+        <p class="hint">Renders the prompt exactly as the app would send it. The second panel repeats the
+          same prompt and seed with the reference image left out, so the reference's effect on framing is
+          visible rather than argued about.</p>
+        <div class="row">
+          <label class="field"><span>Model</span><select id="model"></select></label>
+        </div>
+        <label class="field"><span>Reference image URL (inputImage)</span><input type="text" id="refImage" /></label>
+        <div class="row">
+          <button class="primary" id="genBoth" onclick="generate('both')">Generate both</button>
+          <button id="genOne" onclick="generate('with')">With reference only</button>
+        </div>
+        <div class="status" id="genStatus"></div>
+      </div>
+    </div>
+
+    <!-- ── OUTPUT ────────────────────────────────────────────────────── -->
+    <div>
+      <div class="card">
+        <h2>Finished prompt</h2>
+        <div class="flags" id="flags"></div>
+        <pre class="prompt" id="fullPrompt"></pre>
+        <div class="row" style="justify-content:flex-end">
+          <button class="mini" style="flex:0" onclick="copyPrompt()">Copy</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Where each clause came from</h2>
+        <p class="hint">This is the whole point: eight sources are concatenated, and a clause that reads
+          wrong in the image can be traced to the source that produced it. Empty sources contribute nothing.</p>
+        <table><thead><tr><th>Source</th><th>Contributes</th></tr></thead><tbody id="partsBody"></tbody></table>
+      </div>
+
+      <div class="card">
+        <h2>Result</h2>
+        <div class="imgs">
+          <figure><figcaption>With reference image</figcaption><img id="imgWith" alt="" /></figure>
+          <figure><figcaption>No reference image</figcaption><img id="imgWithout" alt="" /></figure>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const CORRECT_PIN = "1555";
+  const UNLOCK_KEY = "personachat_unlocked";
+  const DATA_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/data-proxy";
+  const IMAGE_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/image-proxy";
+  const ACCESS_TOKEN = "pc_8f3a9d2e7b1c4f6a0d5e9c3b7a2f1e8d";
+  const STYLE_MODIFIERS = "photorealistic, natural lighting, 50mm, sharp focus";
+  const STORE_KEY = "prompt_lab_state";
+
+  let CFG = window.SiteConfig.clone(window.SiteConfig.DEFAULTS);
+  let IMG = window.ImagePrompt.create(CFG);
+  let characters = [];
+
+  // ── Gate ──────────────────────────────────────────────────────────────────
+  window.checkPin = function () {
+    if (document.getElementById("pin").value === CORRECT_PIN) {
+      localStorage.setItem(UNLOCK_KEY, "true");
+      unlock();
+    } else {
+      document.getElementById("pinErr").textContent = "Incorrect code.";
+      document.getElementById("pin").value = "";
+    }
+  };
+  document.getElementById("pin").addEventListener("keydown", e => { if (e.key === "Enter") window.checkPin(); });
+  function unlock() {
+    document.getElementById("gate").remove();
+    document.getElementById("app").hidden = false;
+    start();
+  }
+
+  // ── Fields ────────────────────────────────────────────────────────────────
+  const FIELDS = ["scenePrompt","charName","charDesc","charOutfit","userOutfit","location","proximity",
+                  "charPose","userPose","explicitDetail","beats","refImage","model"];
+  const CHECKS = ["nsfw","verbatim","forceContact"];
+  const $ = id => document.getElementById(id);
+  const val = id => $(id).value.trim();
+
+  // The lab's own defaults are a scene that exercises every source at once,
+  // so the first thing anyone sees is a fully populated prompt rather than a
+  // blank one they have to invent inputs for.
+  const SEED_STATE = {
+    scenePrompt: "kneeling on the rug in front of him, looking up, mouth open",
+    charName: "Elena",
+    charDesc: "28 year old, female, eastern european, black hair, blue eyes, pale skin, 165 cm tall, petite frame, slender build, C cup breasts",
+    charOutfit: "nothing",
+    userOutfit: "nothing",
+    location: "the living room",
+    proximity: "close enough to touch",
+    charPose: "kneeling",
+    userPose: "standing",
+    explicitDetail: "",
+    beats: "User: *I run my fingers into her hair*\nElena: *she leans into my hand*",
+    refImage: "",
+    nsfw: true, verbatim: false, forceContact: false,
+  };
+
+  function readState() {
+    const s = {};
+    FIELDS.forEach(f => { s[f] = $(f).value; });
+    CHECKS.forEach(c => { s[c] = $(c).checked; });
+    return s;
+  }
+  function writeState(s) {
+    FIELDS.forEach(f => { if (s[f] !== undefined && $(f)) $(f).value = s[f]; });
+    CHECKS.forEach(c => { if (s[c] !== undefined) $(c).checked = !!s[c]; });
+  }
+
+  // Beats are typed the way the app's extractor sees them, one labelled line
+  // per message, so contact detection runs on the real shape of its input.
+  function beatsToMessages(text, characterName) {
+    return String(text || "").split("\n").map(line => line.trim()).filter(Boolean).map(line => {
+      const m = line.match(/^([^:]+):\s*(.*)$/);
+      const who = m ? m[1].trim() : "";
+      const content = m ? m[2] : line;
+      const isUser = /^user$/i.test(who) || (!m && false);
+      return { role: isUser ? "user" : "assistant", content };
+    });
+  }
+
+  function currentAssembly() {
+    const staging = {
+      location: val("location") || null,
+      charPose: val("charPose") || null,
+      userPose: val("userPose") || null,
+      proximity: val("proximity") || null,
+    };
+    const messages = beatsToMessages(val("beats"), val("charName"));
+    return IMG.assembleImagePrompt({
+      scenePrompt: val("scenePrompt"),
+      name: $("verbatim").checked ? val("charName") : undefined,
+      charDesc: val("charDesc"),
+      charOutfit: val("charOutfit"),
+      userOutfit: val("userOutfit"),
+      staging,
+      nsfw: $("nsfw").checked,
+      explicitDetail: val("explicitDetail"),
+      messages,
+      characterName: val("charName"),
+      styleModifiers: STYLE_MODIFIERS,
+      keepSceneVerbatim: $("verbatim").checked,
+      contact: $("forceContact").checked ? true : undefined,
+    });
+  }
+
+  const SOURCE_LABELS = {
+    pov: "POV clause", name: "Name", charDesc: "Appearance", wardrobe: "Her outfit",
+    staging: "Staging", scene: "Scene", explicit: "Explicit", style: "Style",
+  };
+
+  function render() {
+    const out = currentAssembly();
+    // The proportion guard is appended inside generateImageWiro, after
+    // assembly, so it has to be shown here too or the lab would be a clause
+    // short of what Wiro actually receives.
+    const sent = `${out.prompt}, ${CFG.image.proportionGuard}`;
+    $("fullPrompt").textContent = sent;
+
+    const flags = [
+      ["contact", out.contact, "touching"],
+      ["intimate", out.intimate, "intimate scene"],
+      ["stripped", out.strippedLimbs, "viewer limbs stripped"],
+    ];
+    $("flags").innerHTML = flags.map(([k, on, label]) =>
+      `<span class="flag ${on ? "on" : ""}">${on ? "&#10003;" : "&#8213;"} ${label}</span>`).join("")
+      + `<span class="flag">${sent.split(/\s+/).length} words</span>`;
+
+    $("partsBody").innerHTML = Object.keys(SOURCE_LABELS).map(k => {
+      const v = out.parts[k];
+      return `<tr><td class="src">${SOURCE_LABELS[k]}</td>` +
+        (v ? `<td>${escapeHtml(v)}</td>` : `<td class="empty">nothing</td>`) + `</tr>`;
+    }).join("") + `<tr><td class="src">Guard</td><td>${escapeHtml(CFG.image.proportionGuard)}</td></tr>`;
+
+    localStorage.setItem(STORE_KEY, JSON.stringify(readState()));
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  }
+
+  window.copyPrompt = function () {
+    navigator.clipboard.writeText($("fullPrompt").textContent).catch(() => {});
+  };
+
+  // ── Generation ────────────────────────────────────────────────────────────
+  // Same submit/poll shape as the app's generateImageWiro, so a prompt that
+  // works here works there. Deliberately not sharing that function: it also
+  // uploads to storage and writes a gallery, which the lab has no business
+  // doing.
+  async function runWiro(prompt, model, inputImage, seed) {
+    const params = (CFG.models.imageParams || {})[model] || { resolution: "2k", aspectRatio: "9:16" };
+    const body = {
+      model, prompt,
+      resolution: params.resolution, aspectRatio: params.aspectRatio,
+      maxImages: 1, watermark: "false", seed,
+    };
+    if (params.outputFormat) body.outputFormat = params.outputFormat;
+    if (inputImage) body.inputImage = inputImage;
+
+    const res = await fetch(IMAGE_PROXY_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...body, action: "submit" }),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${await res.text().catch(() => "")}`);
+    const { taskId } = await res.json();
+    if (!taskId) throw new Error("no task id returned");
+
+    const schedule = [900, 900, 1200, 1500, 2000];
+    for (let i = 0; i < 160; i++) {
+      await new Promise(r => setTimeout(r, schedule[Math.min(i, schedule.length - 1)]));
+      let s;
+      try {
+        s = await fetch(IMAGE_PROXY_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "status", taskId, outputFormat: body.outputFormat }),
+        });
+      } catch { continue; }
+      if (s.status === 202) continue;
+      if (!s.ok) throw new Error(`${s.status} ${await s.text().catch(() => "")}`);
+      const done = await s.json();
+      if (done && done.imageUrl) return done.imageUrl;
+    }
+    throw new Error(`did not finish in time (task ${taskId})`);
+  }
+
+  window.generate = async function (mode) {
+    const status = $("genStatus");
+    const prompt = $("fullPrompt").textContent;
+    const model = val("model");
+    const ref = val("refImage");
+    // One seed for both panels: with the seed held fixed the only difference
+    // between them is the reference image, which is the thing being tested.
+    const seed = Math.floor(Math.random() * 2147483647);
+    $("genBoth").disabled = $("genOne").disabled = true;
+    $("imgWith").removeAttribute("src");
+    if (mode === "both") $("imgWithout").removeAttribute("src");
+    status.className = "status busy";
+    status.textContent = `Generating${mode === "both" ? " both" : ""}… seed ${seed}`;
+    const started = Date.now();
+    try {
+      const jobs = [runWiro(prompt, model, ref || null, seed).then(u => { $("imgWith").src = u; })];
+      if (mode === "both") jobs.push(runWiro(prompt, model, null, seed).then(u => { $("imgWithout").src = u; }));
+      await Promise.all(jobs);
+      status.className = "status ok";
+      status.textContent = `Done in ${((Date.now() - started) / 1000).toFixed(1)}s (seed ${seed})`;
+    } catch (e) {
+      status.className = "status err";
+      status.textContent = `Failed: ${e.message}`;
+    }
+    $("genBoth").disabled = $("genOne").disabled = false;
+  };
+
+  // ── Loading a real character ──────────────────────────────────────────────
+  // Typed-up guesses at the scene state are the reason a prompt can look fine
+  // in a lab and wrong in the app. These are the actual saved values.
+  function applyCharacter(c) {
+    if (!c) return;
+    const appearanceDesc = IMG.buildAppearancePrompt(c.appearance);
+    const gender = c.gender === "Custom" ? (c.customGender || "") : (c.gender || "");
+    const age = c.age ? `${c.age} year old` : "";
+    const staging = c.staging || {};
+    writeState({
+      charName: c.name || "",
+      charDesc: [age, gender, appearanceDesc].filter(Boolean).join(", "),
+      charOutfit: c.charOutfit || "",
+      userOutfit: c.userOutfit || "",
+      location: staging.location || "",
+      charPose: staging.charPose || "",
+      userPose: staging.userPose || "",
+      proximity: staging.proximity || "",
+      explicitDetail: c.explicitDetail || "",
+      nsfw: !!c.nsfw,
+      refImage: c.referenceImage || "",
+    });
+    render();
+  }
+
+  async function loadCharacters() {
+    const status = $("loadStatus");
+    status.className = "status busy";
+    status.textContent = "Loading characters…";
+    try {
+      const res = await fetch(DATA_PROXY_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_characters", token: ACCESS_TOKEN }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      characters = data.characters || [];
+      const sel = $("charSelect");
+      characters.forEach((c, i) => {
+        const o = document.createElement("option");
+        o.value = String(i);
+        o.textContent = c.name || `Character ${i + 1}`;
+        sel.appendChild(o);
+      });
+      status.className = "status ok";
+      status.textContent = `${characters.length} saved`;
+    } catch (e) {
+      status.className = "status err";
+      status.textContent = `Characters unavailable (${e.message}) — type the state by hand`;
+    }
+  }
+
+  // ── Boot ──────────────────────────────────────────────────────────────────
+  async function start() {
+    // Same load path as the app, so the lab reflects saved config overrides
+    // rather than the built-in defaults.
+    try {
+      const { config } = await window.SiteConfig.loadConfig();
+      CFG = config;
+      IMG = window.ImagePrompt.create(CFG);
+    } catch (e) {
+      console.warn("Site config unavailable, using built-in defaults:", e);
+    }
+
+    const sel = $("model");
+    (CFG.models.image || []).forEach(m => {
+      const o = document.createElement("option");
+      o.value = m.id; o.textContent = m.label;
+      sel.appendChild(o);
+    });
+
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch {}
+    writeState({ ...SEED_STATE, ...(saved || {}) });
+    if (!val("model")) sel.value = "seedream-v4-5-uncensored";
+
+    FIELDS.concat(CHECKS).forEach(id => {
+      $(id).addEventListener("input", render);
+      $(id).addEventListener("change", render);
+    });
+    $("charSelect").addEventListener("change", e => applyCharacter(characters[Number(e.target.value)]));
+
+    render();
+    loadCharacters();
+  }
+
+  if (localStorage.getItem(UNLOCK_KEY) === "true") unlock();
+})();
+</script>
+</body>
+</html>
