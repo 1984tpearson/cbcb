@@ -418,7 +418,15 @@
     intentions: {
       maxActive: 2,
       header: "\n\n[PRIVATE INTENTIONS — yours alone, never stated outright]\n",
-      pacing: "\nThese are private. Never announce them, never explain them, never let them run the conversation. At most ONE small, natural step toward ONE of them per reply — a question, a hint, an excuse to be nearer, a suggestion dropped lightly — and only when the conversation offers an opening. If there is no natural opening this turn, do nothing about them at all; they simply sit in the back of your mind. If the user deflects, changes the subject, or does not take you up on it, let it drop for now rather than pushing.",
+      // The brake, for goals that are still being worked up to. It is written
+      // for the early stages and used to be appended at EVERY stage, which
+      // capped a goal that had reached the point of acting at "one small step,
+      // a hint, a suggestion dropped lightly, and let it drop if they do not
+      // take it up" — so a fully set-up intention could never be carried out.
+      pacing: "\n\nThese are private. Never announce them, never explain them, never let them run the conversation. At most ONE small, natural step toward ONE of them per reply — a question, a hint, an excuse to be nearer, a suggestion dropped lightly — and only when the conversation offers an opening. If there is no natural opening this turn, do nothing about them at all; they simply sit in the back of your mind. If the user deflects, changes the subject, or does not take you up on it, let it drop for now rather than pushing.",
+      // Used instead once a goal has reached the point of acting. The brake
+      // comes off: the whole approach was for this.
+      pacingReady: "\n\nThese are private — never announce them or explain what you are doing. But one of them is no longer being worked up to: it is ready, and the groundwork is done. ACT on it this turn. Make the move, create the moment yourself, take the opening rather than waiting to be handed one — do not hint at it again, do not set it up further, and do not wait for them to decide for you. If they clearly refuse, accept that; anything short of a refusal is not a reason to go back to circling it.",
       // Said per intention, in place of a number: a model handed "progress
       // 25/70" tends to narrate the number rather than act on it.
       // What progress MEANS: how far the approach has come, nothing else. Seven

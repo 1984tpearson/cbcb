@@ -837,7 +837,13 @@ function buildIntentionsNote(character) {
     ? lines.join("\n")
     : lines.map((line, i) => notes[i] ? `${line} ${notes[i]}` : line).join("\n");
 
-  return cfg.header + body + (shared ? `\n${shared}` : "") + (cfg.pacing || "");
+  // Which pacing applies depends on whether anything is actually ready. The
+  // brake is for goals still being worked up to; once one has reached the
+  // acting stage, telling her to take "one small step" and drop it if not
+  // taken up is what kept a fully set-up intention from ever happening.
+  const anyReady = active.some(intent => ratioFor(intent) >= 1);
+  const pacing = (anyReady ? cfg.pacingReady : cfg.pacing) || cfg.pacing || "";
+  return cfg.header + body + (shared ? `\n${shared}` : "") + pacing;
 }
 
 // Rolls intentions back to a snapshot taken before a reply that has since been
