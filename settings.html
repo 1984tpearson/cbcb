@@ -629,11 +629,17 @@
   function buildImage() {
     const i = "image.";
     return [
-      card("Point of view", "Appended to every in-chat image. One of the limb clauses is picked per shot depending on what the scene and the tracked poses say.", [
-        field("Base POV clause", i + "povBase", "area"),
+      card("Point of view",
+        "Chat images are only shot from the user's point of view when the two of them are actually touching \u2014 that is read from the action beats in the conversation. Every other shot is third-person, because a first-person frame puts an arm at the edge of the picture whether or not anything asked for one.",
+        [
+        field("When they are NOT touching", i + "thirdPersonFraming", "area",
+          "Used instead of all the POV clauses below. This is most images."),
+        field("Base POV clause", i + "povBase", "area",
+          "Only used when the beats show them touching."),
         field("Viewer is touching something", i + "povArmsModifier", "area"),
         field("Scene already names the viewer's limbs", i + "povArmsOwnedModifier", "area"),
-        field("Viewer is touching nothing", i + "povNoLimbs", "area"),
+        field("Viewer is touching nothing", i + "povNoLimbs", "area",
+          "Legacy \u2014 no longer used now that a shot with no contact is third-person rather than a POV frame with the limbs suppressed."),
         field("Intimate scene", i + "povIntimateModifier", "area"),
       ]),
       card("Guardrails", "Wiro has no negative prompt, so this goes into the positive one.", [

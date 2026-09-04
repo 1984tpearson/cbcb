@@ -374,6 +374,7 @@ const POV_ARMS_MODIFIER = CFG.image.povArmsModifier;
 // Seedream leans toward putting hands into a POV frame whether or not anything
 // asked for them, so when the viewer is touching nothing, say so explicitly.
 const POV_NO_LIMBS = CFG.image.povNoLimbs;
+const THIRD_PERSON_FRAMING = CFG.image.thirdPersonFraming || CFG.image.povNoLimbs;
 // When the scene already names the limb, claim it rather than adding another:
 // this tells the model whose arms those are and that there is only one pair,
 // instead of introducing a second pair alongside them.
@@ -467,13 +468,14 @@ function detectPhysicalContact(messages, characterName) {
 // unless an action beat shows the two of them touching.
 function buildPovModifiers(sceneText, staging, nsfw, userOutfit, contact) {
   const scene = sceneText || "";
+  // A hand-typed prompt naming the user's own hand counts as contact: they
+  // asked for it explicitly.
+  const wantsPov = contact || POV_CUSTOM_LIMB_RE.test(scene);
+  // No contact, no POV. Keeping the first-person frame and merely asking for
+  // the viewer's limbs to stay out of it never held — the framing itself puts
+  // an arm at the edge of shot. A third-person camera cannot.
+  if (!wantsPov) return THIRD_PERSON_FRAMING;
   const parts = [POV_BASE];
-  if (!contact) {
-    // Hand-typed prompts are the one exception: someone who wrote "my hand on
-    // her waist" is asking for it explicitly.
-    parts.push(POV_CUSTOM_LIMB_RE.test(scene) ? POV_ARMS_MODIFIER : POV_NO_LIMBS);
-    return parts.join(", ");
-  }
   if (isIntimateScene(scene, staging, nsfw)) {
     parts.push(povSelfBody(
       userOutfit,
