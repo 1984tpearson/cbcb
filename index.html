@@ -1354,11 +1354,10 @@ function buildStagingImageDesc(staging) {
 // Whole words only, so "your" catches but "yourself" in a garment name would
 // too — which is fine, neither belongs in a caption.
 const FIRST_SECOND_PERSON_RE = /\b(I|I'm|I've|me|my|mine|we|we're|us|our|you|you're|your|yours)\b/i;
-// In a POV shot the man is the camera, and the image generator has no way to
-// know that — it only sees that a man was described, and draws one. So in POV
-// captions the word must not appear at all; his visible parts are "the
-// viewer's". Detected the same way as a first-person slip, and as ruinous.
-const MALE_SUBJECT_RE = /\b(the man|a man|man's|men|he|he's|him|his)\b/i;
+// "The viewer's hand" reads to an image model as a hand belonging to nobody in
+// the frame, and it gets drawn floating — or, seen once, as a second woman's.
+// His parts need an owner and a frame edge instead.
+const VIEWER_POSSESSIVE_RE = /\bviewer'?s\b/i;
 
 async function composeImagePrompt({ messages, character, model, framing, extra, pov }) {
   const recent = (messages || []).slice(-6).filter(m => m.role !== "image")
@@ -1413,10 +1412,13 @@ async function composeImagePrompt({ messages, character, model, framing, extra, 
     const opener = CFG.image.openerPov || "A first-person POV photograph shot from the viewer's own eyes,";
     paragraph = `${opener} ${paragraph.replace(/^A (?:close-up )?photograph of /i, "").replace(/^./, c => c.toLowerCase())}`;
   }
-  // Only in a POV shot: there, naming him is what puts a second man in frame.
-  if (pov && MALE_SUBJECT_RE.test(paragraph)) {
-    console.warn("[image] composer named the man in a POV shot, retrying");
-    paragraph = await rewrite("This is a first-person shot taken from the man's own eyes, so he cannot appear in it — but the caption names him, which will put a second man in the picture. Rewrite it with no \"man\", \"he\", \"him\" or \"his\" anywhere. Write every part of him that is in shot as \"the viewer's\" instead — the viewer's hand, the viewer's chest, and so on. Keep everything else the same. Return only the rewritten paragraph.");
+  // Unowned body parts are the thing that actually breaks a POV image: named
+  // as "the viewer's", they belong to nobody in the picture and get drawn
+  // floating. Caught the same way, and rewritten to anchor them to him and to
+  // an edge of the frame.
+  if (pov && VIEWER_POSSESSIVE_RE.test(paragraph)) {
+    console.warn("[image] POV caption used unowned 'viewer's' parts, retrying");
+    paragraph = await rewrite("Parts described as \"the viewer's\" belong to nobody in the picture and will be drawn as floating objects — a hand entering from nowhere, a detached body part. Rewrite so every part of him is his (\"his hand\", \"his forearm\", \"his hips\") AND says where it enters the frame: reaching in from the lower right, across the bottom edge, in the immediate foreground below the camera. He is still not standing in the scene and his face is still not visible — the camera is his eyes. Keep everything else the same. Return only the rewritten paragraph.");
   }
   return paragraph;
 }
