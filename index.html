@@ -413,7 +413,11 @@ function isIntimateScene(sceneText, staging, nsfw) {
 // when a contact verb and a reference to the other person appear together, so
 // "I pour myself a drink" does not qualify and "I rest my hand on her knee"
 // does.
-const CONTACT_VERB_RE = /\b(touch\w*|hold\w*|held|grab\w*|grasp\w*|grip\w*|takes?|taking|took|reach\w*|stroke\w*|caress\w*|kiss\w*|hug\w*|embrac\w*|cuddl\w*|pull\w*|push\w*|press\w*|squeez\w*|cup\w*|brush\w*|rest\w*|place[sd]?|placing|slid\w*|slip\w*|lean\w*|straddl\w*|climb\w*|wrap\w*|tug\w*|guid\w*|lift\w*|carr\w*|thrust\w*|rid(?:e|es|ing)|grind\w*|fuck\w*|undress\w*|unbutton\w*|unzip\w*)\b/i;
+const CONTACT_VERB_RE = /\b(touch\w*|hold\w*|held|grab\w*|grasp\w*|grip\w*|takes?|taking|took|reach\w*|stroke\w*|caress\w*|kiss\w*|hug\w*|embrac\w*|cuddl\w*|pull\w*|push\w*|press\w*|squeez\w*|cup\w*|brush\w*|rest\w*|place[sd]?|placing|slid\w*|slip\w*|lean\w*|straddl\w*|climb\w*|wrap\w*|tug\w*|guid\w*|lift\w*|carr\w*|thrust\w*|rid(?:e|es|ing)|grind\w*|fuck\w*|undress\w*|unbutton\w*|unzip\w*|run\w*|ran|trail\w*|trace[sd]?|tracing|drag\w*|sink\w*|sank|settle[sd]?|straddle|nuzzl\w*|bite|bites|biting|bit|lick\w*|suck\w*|stradd\w*|find[s]?|found|meet[s]?|met|curl\w*|hook\w*|thread\w*|lace[sd]?|lacing|entwin\w*|tangl\w*|clutch\w*|cling\w*|clung|hold|dig[s]?|dug)\b/i;
+// A body part of one person against the other is contact even with no verb
+// the list happens to recognise: "my hand on your chest", "her lips on mine".
+// The verb list will always have gaps; anatomy plus a preposition does not.
+const CONTACT_ANATOMY_RE = /\b(hand|hands|arm|arms|finger|fingers|palm|lips|mouth|tongue|chest|thigh|thighs|hip|hips|leg|legs|knee|body|skin|cheek|forehead|shoulder|waist|back|neck|breast|breasts|cock|pussy)\b[^,]{0,24}\b(on|against|to|over|around|between|in|onto|into|down|up|through|beneath|under)\b/i;
 // The object has to be the OTHER person. Accepting "my" and "me" made almost
 // every beat count — "I lean back in my chair", "I take a sip of my drink",
 // "I rest my head against the wall" are all a contact verb next to a
@@ -424,7 +428,7 @@ const CONTACT_TARGET_BY_CHARACTER = /\b(you|your|yours)\b/i;
 const CONTACT_TARGET_BY_USER = /\b(her|hers|him|his|she|he|them|their)\b/i;
 const MUTUAL_RE = /\b(each other|one another|together|our hands|between us)\b/i;
 function beatShowsContact(beat, speakerIsUser, characterName) {
-  if (!CONTACT_VERB_RE.test(beat)) return false;
+  if (!CONTACT_VERB_RE.test(beat) && !CONTACT_ANATOMY_RE.test(beat)) return false;
   if (MUTUAL_RE.test(beat)) return true;
   if (speakerIsUser) {
     const namePattern = characterName
@@ -450,9 +454,22 @@ function stripViewerLimbs(sceneText) {
   return kept.join(", ");
 }
 
-function detectPhysicalContact(messages, characterName) {
-  // Only the latest exchange: contact three turns ago is over.
-  const beats = extractActionText((messages || []).slice(-2), characterName);
+// Contact that is already established does not get restated every turn: once
+// she is in his lap the beats move on to what they are saying. So the tracked
+// proximity counts as well, and it is the more reliable of the two mid-scene.
+const CONTACT_PROXIMITY_RE = /\b(touching|against|pressed|entwined|tangled|wrapped|on top of|in his lap|in her lap|on his lap|on her lap|straddling|no (?:space|gap) between|skin to skin|nose to nose|inches? apart|arm'?s? length)\b/i;
+function stagingShowsContact(staging) {
+  if (!staging) return false;
+  return [staging.proximity, staging.charPose, staging.userPose]
+    .some(v => v && CONTACT_PROXIMITY_RE.test(v));
+}
+
+function detectPhysicalContact(messages, characterName, staging) {
+  if (stagingShowsContact(staging)) return true;
+  // Four messages rather than two: contact established a couple of turns ago
+  // is usually still true, and dropping POV mid-scene because the latest beat
+  // happened to be about something else was worse than holding it a turn long.
+  const beats = extractActionText((messages || []).slice(-4), characterName);
   if (!beats) return false;
   return beats.split("\n").some(line => {
     // extractActionText labels each line with who acted, which is what makes
@@ -3344,7 +3361,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         ? (character.explicitDetail || "") : "";
       // A hand-typed prompt is left alone — if they wrote a hand into it, they
       // meant it. Only the contact flag decides the POV clause.
-      const contact = detectPhysicalContact(messages, character.name);
+      const contact = detectPhysicalContact(messages, character.name, character.staging);
       const fullPrompt = joinPromptParts([buildPovModifiers(customImgPrompt, character.staging, character.nsfw, character.userOutfit, contact), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, explicitDesc, styleModifiers]);
       const url = await generateImageWiro({
         prompt: fullPrompt,
@@ -3400,7 +3417,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const stagingDesc = buildStagingImageDesc(character.staging);
       const explicitDesc = isIntimateScene(prompt, character.staging, character.nsfw)
         ? (character.explicitDetail || "") : "";
-      const contact = detectPhysicalContact(messages, character.name);
+      const contact = detectPhysicalContact(messages, character.name, character.staging);
       // The extractor writes this text, so it is the one place a stray hand
       // can still get in. Cut those clauses when nobody is touching.
       const scenePrompt = contact ? prompt : stripViewerLimbs(prompt);
