@@ -1379,6 +1379,7 @@ async function composeImagePrompt({ messages, character, model, framing, extra, 
     // drawn — in a POV shot he is the camera, in a third-person shot he is
     // simply not there. Naming him as a figure is what produced three people.
     people: (pov ? CFG.image.peoplePov : CFG.image.peopleThirdPerson) || "",
+    opener: (pov ? CFG.image.openerPov : CFG.image.openerThirdPerson) || "A photograph of",
     proximity: st.proximity || "unstated",
     framing: framing || "",
     extra: extra ? `${extra}\n` : "",
@@ -1403,6 +1404,14 @@ async function composeImagePrompt({ messages, character, model, framing, extra, 
   if (FIRST_SECOND_PERSON_RE.test(paragraph)) {
     console.warn("[image] composer slipped into first person, retrying");
     paragraph = await rewrite("That is written from inside the scene. Rewrite it as a detached third-person caption of the photograph: no \"I\", \"me\", \"my\", \"we\", \"you\" or \"your\" anywhere, every body part attributed to somebody, starting with \"A photograph of\". Return only the rewritten paragraph.");
+  }
+  // The framing has to be IN the caption, because the caption is all the image
+  // generator ever sees. Enforced rather than asked for: if the declaration is
+  // missing it is prepended, which is free and cannot fail.
+  if (pov && !/first[- ]person|POV/i.test(paragraph)) {
+    console.warn("[image] POV declaration missing from caption, prepending it");
+    const opener = CFG.image.openerPov || "A first-person POV photograph shot from the viewer's own eyes,";
+    paragraph = `${opener} ${paragraph.replace(/^A (?:close-up )?photograph of /i, "").replace(/^./, c => c.toLowerCase())}`;
   }
   // Only in a POV shot: there, naming him is what puts a second man in frame.
   if (pov && MALE_SUBJECT_RE.test(paragraph)) {

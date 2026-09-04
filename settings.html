@@ -650,6 +650,9 @@
         [
           field("Composer instruction", i + "composeInstruction", "area",
             "{charDesc}, {charOutfit}, {location}, {charPose}, {userPose}, {userOutfitClause}, {proximity}, {framing}, {extra}, {recent} and {styleNote} are substituted in."),
+          field("Opening words \u2014 POV shot", i + "openerPov", "area",
+            "The caption is the only thing the image generator sees, so the framing has to be stated in it. Prepended automatically if the composer leaves it out."),
+          field("Opening words \u2014 third-person shot", i + "openerThirdPerson", "area"),
           field("Who is visible \u2014 POV shot", i + "peoplePov", "area",
             "Used when they are touching. The man is the camera, so only the woman is drawn."),
           field("Who is visible \u2014 third-person shot", i + "peopleThirdPerson", "area",
