@@ -3154,16 +3154,23 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // it to the model's default — a specific custom prompt (e.g. "wearing
       // a red dress") will still tend to win out since it's more specific
       // and closer to the end of the prompt.
-      const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
-      const stagingDesc = buildStagingImageDesc(character.staging);
-      // Author-supplied wording for explicit scenes, used verbatim. Only
-      // reaches the model when NSFW is on and the scene reads as intimate.
-      const explicitDesc = isIntimateScene(customImgPrompt, character.staging, character.nsfw)
-        ? (character.explicitDetail || "") : "";
-      // A hand-typed prompt is left alone — if they wrote a hand into it, they
-      // meant it. Only the contact flag decides the POV clause.
-      const contact = detectPhysicalContact(messages, character.name);
-      const fullPrompt = joinPromptParts([buildPovModifiers(customImgPrompt, character.staging, character.nsfw, character.userOutfit, contact), character.name, charDesc, wardrobeDesc, stagingDesc, customImgPrompt, explicitDesc, styleModifiers]);
+      // keepSceneVerbatim: a hand-typed prompt is left alone — if they wrote
+      // a hand into it, they meant it. Only the contact flag decides the POV
+      // clause. Same assembly call as the chat path, so the lab shows both.
+      const { prompt: fullPrompt } = assembleImagePrompt({
+        scenePrompt: customImgPrompt,
+        name: character.name,
+        charDesc,
+        charOutfit: character.charOutfit,
+        userOutfit: character.userOutfit,
+        staging: character.staging,
+        nsfw: character.nsfw,
+        explicitDetail: character.explicitDetail,
+        messages,
+        characterName: character.name,
+        styleModifiers,
+        keepSceneVerbatim: true,
+      });
       const url = await generateImageWiro({
         prompt: fullPrompt,
         model: settings.imageModel,
@@ -3214,15 +3221,21 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // has no guaranteed reference to what's actually being worn, so this
       // is the more reliable source. Appearance + wardrobe go FIRST so SD
       // weights them highest, scene context after.
-      const wardrobeDesc = character.charOutfit ? `wearing ${character.charOutfit}` : "";
-      const stagingDesc = buildStagingImageDesc(character.staging);
-      const explicitDesc = isIntimateScene(prompt, character.staging, character.nsfw)
-        ? (character.explicitDetail || "") : "";
-      const contact = detectPhysicalContact(messages, character.name);
-      // The extractor writes this text, so it is the one place a stray hand
-      // can still get in. Cut those clauses when nobody is touching.
-      const scenePrompt = contact ? prompt : stripViewerLimbs(prompt);
-      const fullImgPrompt = joinPromptParts([buildPovModifiers(scenePrompt, character.staging, character.nsfw, character.userOutfit, contact), charDesc, wardrobeDesc, stagingDesc, scenePrompt, explicitDesc, styleModifiers]);
+      // Assembly lives in image-prompt.js so prompt-lab.html builds the
+      // prompt through this exact call — a lab that reimplements it would
+      // eventually be lying about what the app sends.
+      const { prompt: fullImgPrompt } = assembleImagePrompt({
+        scenePrompt: prompt,
+        charDesc,
+        charOutfit: character.charOutfit,
+        userOutfit: character.userOutfit,
+        staging: character.staging,
+        nsfw: character.nsfw,
+        explicitDetail: character.explicitDetail,
+        messages,
+        characterName: character.name,
+        styleModifiers,
+      });
       const url = await generateImageWiro({
         prompt: fullImgPrompt,
         model: settings.imageModel,
