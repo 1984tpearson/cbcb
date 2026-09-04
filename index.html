@@ -1351,9 +1351,13 @@ function buildStagingImageDesc(staging) {
 // state, instead of gluing fragments together with commas. Every fact arrives
 // attached to the person it belongs to, which is what stops clothing and
 // actions landing on the wrong one.
+// Whole words only, so "your" catches but "yourself" in a garment name would
+// too — which is fine, neither belongs in a caption.
+const FIRST_SECOND_PERSON_RE = /\b(I|I'm|I've|me|my|mine|we|we're|us|our|you|you're|your|yours)\b/i;
+
 async function composeImagePrompt({ messages, character, model, framing, extra }) {
   const recent = (messages || []).slice(-6).filter(m => m.role !== "image")
-    .map(m => `${m.role === "user" ? "The other person" : "She"}: ${m.content}`).join("\n");
+    .map(m => `${m.role === "user" ? "THE MAN" : "THE WOMAN"}: ${m.content}`).join("\n");
   const appearanceDesc = buildAppearancePrompt(character.appearance);
   const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
   const ageDesc = character.age ? `${character.age} year old` : "";
@@ -1373,8 +1377,25 @@ async function composeImagePrompt({ messages, character, model, framing, extra }
     recent: recent || "(no conversation yet)",
     styleNote: CFG.image.styleNote || "",
   });
-  const paragraph = await aiComplete({ model, messages: [{ role: "user", content }] });
-  return paragraph.trim().replace(/^"|"$/g, "");
+  const clean = (text) => String(text || "").trim().replace(/^"|"$/g, "");
+  let paragraph = clean(await aiComplete({ model, messages: [{ role: "user", content }] }));
+  // The roleplay it reads is written in the first person, and imitating that
+  // voice is the one failure that ruins the image outright: a caption saying
+  // "I stand before her" puts the viewer in the photograph as a character,
+  // overrides the camera line, and leaves body parts owned by a narrator who
+  // is not in the frame. Cheap to detect, so it gets one corrective retry.
+  if (FIRST_SECOND_PERSON_RE.test(paragraph)) {
+    console.warn("[image] composer slipped into first person, retrying");
+    paragraph = clean(await aiComplete({
+      model,
+      messages: [
+        { role: "user", content },
+        { role: "assistant", content: paragraph },
+        { role: "user", content: "That is written from inside the scene. Rewrite it as a detached third-person caption of the photograph: no \"I\", \"me\", \"my\", \"we\", \"you\" or \"your\" anywhere, every body part attributed to the woman or the man, starting with \"A photograph of\". Return only the rewritten paragraph." },
+      ],
+    }));
+  }
+  return paragraph;
 }
 
 async function buildImagePromptFromContext({ messages, character, model }) {
