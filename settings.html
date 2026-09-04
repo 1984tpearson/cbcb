@@ -645,23 +645,10 @@
       card("Guardrails", "Wiro has no negative prompt, so this goes into the positive one.", [
         field("Proportion guard", i + "proportionGuard", "area"),
       ]),
-      card("Writing the image prompt",
-        "Seedream reads natural language, not keyword lists \u2014 ByteDance's own example prompts for these models are full paragraphs. The tracked appearance, wardrobe, staging and camera framing are handed to a model that writes them up as one description, rather than being concatenated into a list of tags.",
-        [
-          field("Composer instruction", i + "composeInstruction", "area",
-            "{charDesc}, {charOutfit}, {location}, {charPose}, {userPose}, {userOutfitClause}, {proximity}, {framing}, {extra}, {recent} and {styleNote} are substituted in."),
-          field("Opening words \u2014 POV shot", i + "openerPov", "area",
-            "The caption is the only thing the image generator sees, so the framing has to be stated in it. Prepended automatically if the composer leaves it out."),
-          field("Opening words \u2014 third-person shot", i + "openerThirdPerson", "area"),
-          field("Who is visible \u2014 POV shot", i + "peoplePov", "area",
-            "Used when they are touching. The man is the camera, so only the woman is drawn."),
-          field("Who is visible \u2014 third-person shot", i + "peopleThirdPerson", "area",
-            "Used when they are not touching. Naming him as a figure in the scene is what produced captions with three people in them."),
-          field("Photographic style", i + "styleNote", "area",
-            "One sentence, used to close the description."),
-          field("Old tag-style extractor (unused)", i + "scenePromptInstruction", "area",
-            "Legacy \u2014 kept in case you want the previous comma-separated approach back. Nothing reads it now."),
-        ]),
+      card("Scene extraction", "Sent to the extractor model to turn the last few messages into an image prompt.", [
+        field("Instruction", i + "scenePromptInstruction", "area",
+          "{name}, {charDesc}, {recent}, {actNote} and {ownBodyRule} are substituted in."),
+      ]),
     ];
   }
 

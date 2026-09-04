@@ -566,41 +566,6 @@
       thirdPersonFraming: "candid third-person photograph taken from a natural camera distance, observing the scene, the viewer is not in the shot and no part of them is in frame",
       povNoLimbs: "empty foreground, clear unobstructed view of the scene, the viewer's arms down at their sides below the frame",
       povIntimateModifier: "the viewer's own body framing the bottom of the shot",
-      // Seedream v4/v5 read natural language, not keyword lists — ByteDance's
-      // own example prompts for these models are full paragraphs of prose.
-      // The old approach concatenated fragments from six sources with commas,
-      // in the SD 1.5 / SDXL tag style, which left actions with no subject and
-      // clothing floating free of the person wearing it. That is why outfits
-      // and actions came out attached to the wrong person or dropped.
-      // The template used to label the man as a figure in the scene AND talk
-      // about "the viewer" in the camera line, so the composer took them for
-      // two different people and wrote a caption with three in it: her, him,
-      // and a disembodied arm. The cast is now stated outright, and it is the
-      // same either way — she is the only person actually drawn.
-      // The caption is the ONLY thing the image generator sees. The camera line
-      // was guidance to the composer, and the mandated opener "A photograph
-      // of" then stripped the last trace of it — so a POV shot arrived
-      // described as an ordinary photograph, and was rendered as one. The
-      // opener has to carry the framing.
-      openerPov: "A first-person POV photograph shot from the viewer's own eyes,",
-      openerThirdPerson: "A photograph of",
-      // Banning the word was wrong. Written as "the viewer's hand" and "the
-      // viewer's cock", the parts had no body to belong to, and Seedream drew
-      // them detached — floating hands entering from the sides, a disembodied
-      // cock, one hand even read as a woman's. His parts have to be named AND
-      // anchored: whose they are, and which edge of the frame they enter from.
-      // What was actually wrong originally was describing him as a separate
-      // figure standing in the scene, not the fact that he was named.
-      peoplePov: "The woman is the only whole person in frame. The camera is the man's eyes, so he is NOT standing in the scene — do not describe him as standing in front of her, facing her, or seen from outside. His face, head and shoulders are never visible; the camera is where they would be. His hands, arms, torso and hips MAY appear, and when they do they must be anchored: say they are his, and say where they enter the picture — his hand reaching in from the lower right of frame, his forearm across the bottom edge, his hips in the immediate foreground below the camera looking down. Never write a body part on its own, and never call any part of him \"the viewer's\" — that leaves it belonging to nobody, and it will be drawn floating.",
-      peopleThirdPerson: "One person only: the woman. The man is not in the photograph at all — not standing in it, not at its edge, no part of him in frame.",
-      styleNote: "Photorealistic, shot on a 50mm lens with natural light and shallow depth of field.",
-      // Voice rules first, because getting them wrong breaks everything else:
-      // fed a first-person roleplay transcript with no instruction about
-      // voice, the composer wrote first-person narrative ("As I stand before
-      // her... my hand..."). That put the viewer in the picture as a
-      // character, overrode the camera line, and left body parts described as
-      // objects with no owner — which Seedream rendered as detached limbs.
-      composeInstruction: "You are writing a caption that describes a single photograph, for an image generator that reads natural language.\n\nVOICE — these matter more than anything else below:\n- Write in the THIRD PERSON, present tense, as a detached description of a picture.\n- NEVER use \"I\", \"me\", \"my\", \"we\", \"you\" or \"your\". There is no narrator in the photograph.\n- Begin with EXACTLY these words, unchanged: {opener}\n  The image generator reads only your caption, never these instructions, so if the caption does not say what kind of shot it is, it will not be that kind of shot.\n- It is a caption, not a story. No \"as she...\", no build-up, no what happens next.\n- Every body part belongs to somebody: write \"her hand\" or \"the man's hand\", never a bare \"hand\" or \"a leg\". Never describe a body part on its own, away from the person it is attached to.\n\nWrite ONE paragraph of 70 to 110 words.\n\nTHE WOMAN: {charDesc}\nSHE IS WEARING: {charOutfit}\nWHERE: {location}\nHER POSITION: {charPose}\nWHO IS VISIBLE: {people}\nWHERE HE IS, for her eyeline and pose only: {userPose}\nDISTANCE BETWEEN THEM: {proximity}\nCAMERA: {framing}\n{extra}\nWhat is happening at this exact moment, from the roleplay. This is reference for the action ONLY — do not copy its first-person voice:\n{recent}\n\nAlso:\n- Her clothing is exactly as given above. Do not substitute, upgrade or invent garments. If it says she is wearing nothing, say she is naked.\n- Follow the CAMERA and WHO IS VISIBLE lines exactly: they decide who is in the picture.\n- \"The man\" and \"the viewer\" are THE SAME PERSON. Never write both as though two people were present, and never put a third person in the photograph.\n- Any part of him that is in shot must say whose it is and which edge of the frame it enters from. A part with no owner and no anchor gets drawn as a floating object.\n- One instant only: one pose, one expression, one action.\n- No names, no mood words, no \"atmosphere\", no camera brands.\n- Finish with one short sentence of photographic style: {styleNote}\n\nReturn ONLY the paragraph, nothing else.",
       // Wiro/Seedream has no negative_prompt parameter, so proportion guidance
       // goes into the positive prompt instead.
       proportionGuard: "realistic human proportions, two arms and two hands per person, no extra limbs",
