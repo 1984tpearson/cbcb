@@ -430,6 +430,7 @@
     ["prompts", "Prompt text", buildPrompts],
     ["voice", "Age & voice", buildVoice],
     ["intentions", "Intentions", buildIntentions],
+    ["openings", "Openings", buildOpenings],
     ["image", "Image prompts", buildImage],
     ["models", "Models & options", buildModels],
     ["advanced", "Advanced", buildAdvanced],
@@ -590,6 +591,29 @@
           field("Added otherwise", i + "sfwNote", "area"),
           field("Progress prompt", i + "advancePrompt", "area",
             "{name}, {list} and {recent} are substituted in."),
+        ]),
+    ];
+  }
+
+  function buildOpenings() {
+    const i = "openings.";
+    return [
+      card("Opening scenarios",
+        "The choices offered when a conversation starts. Categories are drawn at random from the lists below, so starting again gives different options. A character marked NSFW gets a mix of both lists; everyone else only ever sees the SFW one.",
+        [
+          field("How many to offer", i + "count", "number"),
+          field("How many of those are NSFW", i + "nsfwCount", "number",
+            "Only for a character marked NSFW \u2014 the rest come from the SFW list. Zero offers them the same categories as everyone else."),
+          field("Instruction", i + "instruction", "area",
+            "{seed}, {count}, {name}, {categoryList}, {nsfwLine} and {excludeClause} are substituted in. The character's own persona, personality and voice are sent separately as the system message, so this only has to describe the task."),
+          field("Added for an NSFW character", i + "nsfwLine", "area",
+            "Appended to the instruction only when the character is marked NSFW."),
+          field("Added when re-rolling", i + "excludeTemplate", "area",
+            "{exclude} is the list of scenario names already shown."),
+          jsonField("SFW categories", i + "sfwCategories",
+            "One is drawn per scenario. More entries means less repetition across restarts."),
+          jsonField("NSFW categories", i + "nsfwCategories",
+            "Only drawn from for a character marked NSFW."),
         ]),
     ];
   }

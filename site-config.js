@@ -590,6 +590,55 @@
       reactivity: "meta-llama/llama-3.1-8b-instruct",
     },
 
+    // ── Opening scenarios ────────────────────────────────────────────────────
+    // The five choices offered when a conversation starts. Categories are
+    // drawn at random from these lists so repeated starts differ; an NSFW
+    // character gets a mix, everyone else gets only the SFW list.
+    openings: {
+      count: 5,
+      // How many of the five come from the NSFW list when the character is
+      // marked NSFW. The rest come from the SFW list. Zero means an NSFW
+      // character is offered the same categories as everyone else.
+      nsfwCount: 2,
+      sfwCategories: [
+        "a completely mundane everyday moment (doing chores, cooking, commuting) with no romantic angle whatsoever",
+        "an awkward or embarrassing situation for one or both of you",
+        "a tense or emotionally charged moment — an argument, confession, or unresolved tension",
+        "a late night or early morning — tired, vulnerable, guards down",
+        "something physically active — sport, exercise, working with hands",
+        "a public place with other people around — risk of being seen or overheard",
+        "a moment of genuine crisis or stress — something has gone wrong",
+        "a lighthearted or absurd situation — funny, silly, unexpected",
+        "a quiet intimate moment — not necessarily sexual, just close and personal",
+        "a first — the first time in a new place together, or doing something new together",
+        "a power shift — one of you is in a position of authority or vulnerability",
+        "a reunion — they haven't seen each other in a while",
+        "a taboo or risky situation given the relationship or setting",
+        "a moment of jealousy or rivalry",
+        "something completely unexpected interrupts a normal situation",
+        "a quiet moment of domesticity — making tea, sitting in silence, reading nearby",
+        "one of them is clearly upset or withdrawn and not saying why",
+        "a celebration or good news — someone is happy about something",
+        "physical proximity forced by circumstance — cramped space, sharing something, stuck together",
+        "a moment caught off guard — one walks in on the other unexpectedly",
+      ],
+      nsfwCategories: [
+        "a classic 'stuck' scenario with obvious sexual tension — e.g. helping with something awkward, getting stuck somewhere, needing assistance in a compromising position",
+        "an innocent request that escalates — e.g. help trying on clothes/lingerie, applying sunscreen, a massage that wasn't meant to go anywhere",
+        "caught in a state of undress — someone walks in at the wrong (or right) moment",
+        "a dare, bet, or game that escalates beyond what either expected",
+        "one of them makes an unmistakably bold move out of nowhere — direct and confident, no buildup",
+        "forbidden proximity — sneaking around, hiding together, pretending nothing is happening while very close",
+        "a role reversal where one is clearly in charge and uses it",
+        "something domestic turns charged — cooking together, sharing a shower, getting changed nearby",
+      ],
+      // Added only for an NSFW character.
+      nsfwLine: "\n- For sexually charged scenarios be bold and explicit about the situation — don't sanitise it",
+      // Added only when re-rolling, listing what has already been shown.
+      excludeTemplate: "\n- NEVER use any of these scenarios that have already been shown: {exclude}. Use completely different situations.",
+      instruction: "[seed:{seed}] Generate {count} opening scenarios for an in-person encounter with {name}. Each scenario must match its assigned category exactly — do not substitute or blend categories.\n\n{categoryList}\n\nRules:\n- Write the opening message in FIRST PERSON — use \"I\", never \"she\", \"he\", or the character's name in third person\n- The two of you are physically together — never reference texting, messaging, screens, or anything virtual\n- Each opening must feel genuinely distinct in tone and energy from the others\n- Include physical actions and expressions in asterisks woven naturally into the message, in first person (e.g. *I glance up* not *she glances up*)\n- Write ONLY your own character's actions and words. Never write what the other person does, says or feels — an opening that has them already sitting down, answering or reacting has decided their move for them\n- Vary locations, times of day, and energy levels\n- 1-3 sentences per opening message{nsfwLine}{excludeClause}\n\nReturn ONLY valid JSON, an array of exactly {count} objects:\n[{\"label\": \"short 2-4 word scenario name\", \"setting\": \"one sentence describing the scene/context\", \"message\": \"the in-character opening\"}]\n\nNo extra text, no markdown, just the JSON array.",
+    },
+
     // ── Option lists ─────────────────────────────────────────────────────────
     options: {
       genders: ["Female", "Male", "Non-binary", "Custom"],
