@@ -551,12 +551,16 @@
     const i = "intentions.";
     return [
       card("Private intentions",
-        "Things a character quietly wants and works toward over many turns without saying so. The pacing rules and the nerve gate are what stop a model simply achieving the goal in its next message \u2014 loosen them and characters start blurting.",
+        "Things a character quietly wants and works toward over many turns without saying so. While a goal is still being worked up to, the pacing rules and the nerve gate are what stop a model simply achieving it in its next message \u2014 loosen them and characters start blurting. Once a goal reaches the top of its climb the brake comes off and the two \u201cready\u201d fields below take over.",
         [
           field("Most active at once", i + "maxActive", "number"),
           field("Block heading", i + "header", "area"),
           field("Pacing rules", i + "pacing", "area",
-            "Sent every turn alongside the goals. This is the part doing the real work."),
+            "Sent alongside the goals while none of them is ready. This is the brake: one small step per reply, and drop it if the user does not take it up."),
+          field("Pacing once a goal is ready", i + "pacingReady", "area",
+            "Replaces the pacing rules above as soon as any goal reaches the top of its climb. Kept short on purpose \u2014 it is framing, not the instruction."),
+          field("Do-it-now directive", i + "readyDirective", "area",
+            "{goal} is substituted in. Sent as the last message before the reply is generated, not as part of the character prompt \u2014 the same words in the prompt were ignored eight times in nine, because a rule sitting thousands of tokens earlier loses to everything after it. If a character keeps hinting at a ready goal instead of doing it, this is the field to sharpen."),
           jsonField("How they pursue a goal, by honesty", i + "methodTiers",
             "Keyed off the honesty slider, with \u201cearly\u201d, \u201cmid\u201d and \u201clate\u201d wording for each. A manipulative character is working the goal from the first moment and escalates what they are willing to do; an honest one does not manoeuvre at all early on. Skipped entirely if the honesty slider is switched off for that character."),
           jsonField("Where early becomes mid becomes late", i + "methodProgressBands",
