@@ -1354,6 +1354,11 @@ function buildStagingImageDesc(staging) {
 // Whole words only, so "your" catches but "yourself" in a garment name would
 // too — which is fine, neither belongs in a caption.
 const FIRST_SECOND_PERSON_RE = /\b(I|I'm|I've|me|my|mine|we|we're|us|our|you|you're|your|yours)\b/i;
+// In a POV shot the man is the camera, and the image generator has no way to
+// know that — it only sees that a man was described, and draws one. So in POV
+// captions the word must not appear at all; his visible parts are "the
+// viewer's". Detected the same way as a first-person slip, and as ruinous.
+const MALE_SUBJECT_RE = /\b(the man|a man|man's|men|he|he's|him|his)\b/i;
 
 async function composeImagePrompt({ messages, character, model, framing, extra, pov }) {
   const recent = (messages || []).slice(-6).filter(m => m.role !== "image")
@@ -1387,16 +1392,22 @@ async function composeImagePrompt({ messages, character, model, framing, extra, 
   // "I stand before her" puts the viewer in the photograph as a character,
   // overrides the camera line, and leaves body parts owned by a narrator who
   // is not in the frame. Cheap to detect, so it gets one corrective retry.
+  const rewrite = async (note) => clean(await aiComplete({
+    model,
+    messages: [
+      { role: "user", content },
+      { role: "assistant", content: paragraph },
+      { role: "user", content: note },
+    ],
+  }));
   if (FIRST_SECOND_PERSON_RE.test(paragraph)) {
     console.warn("[image] composer slipped into first person, retrying");
-    paragraph = clean(await aiComplete({
-      model,
-      messages: [
-        { role: "user", content },
-        { role: "assistant", content: paragraph },
-        { role: "user", content: "That is written from inside the scene. Rewrite it as a detached third-person caption of the photograph: no \"I\", \"me\", \"my\", \"we\", \"you\" or \"your\" anywhere, every body part attributed to the woman or the man, starting with \"A photograph of\". Return only the rewritten paragraph." },
-      ],
-    }));
+    paragraph = await rewrite("That is written from inside the scene. Rewrite it as a detached third-person caption of the photograph: no \"I\", \"me\", \"my\", \"we\", \"you\" or \"your\" anywhere, every body part attributed to somebody, starting with \"A photograph of\". Return only the rewritten paragraph.");
+  }
+  // Only in a POV shot: there, naming him is what puts a second man in frame.
+  if (pov && MALE_SUBJECT_RE.test(paragraph)) {
+    console.warn("[image] composer named the man in a POV shot, retrying");
+    paragraph = await rewrite("This is a first-person shot taken from the man's own eyes, so he cannot appear in it — but the caption names him, which will put a second man in the picture. Rewrite it with no \"man\", \"he\", \"him\" or \"his\" anywhere. Write every part of him that is in shot as \"the viewer's\" instead — the viewer's hand, the viewer's chest, and so on. Keep everything else the same. Return only the rewritten paragraph.");
   }
   return paragraph;
 }
