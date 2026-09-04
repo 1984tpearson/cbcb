@@ -350,6 +350,61 @@ window.ImagePrompt = {
       return parts.filter(Boolean).length > 0 ? parts.filter(Boolean).join(", ") : "";
     }
 
+    // Returns { scene, touching, viewerBody } rather than a prompt string. Whether
+    // the two of them are touching used to be decided here by regular expression,
+    // which is not something a verb list can do: it missed "she nibbles his
+    // earlobe" and accepted "I pour a drink and watch her undress". The model is
+    // already reading the conversation to write the scene, so it answers that at
+    // the same time, and says which of the viewer's own parts are in the shot.
+    async function extractScene({ messages, character, model, aiComplete }) {
+      const recent = messages.slice(-10).filter(m => m.role !== "image").map(m => `${m.role === "user" ? "User" : character.name}: ${m.content}`).join("\n");
+      const appearanceDesc = buildAppearancePrompt(character.appearance);
+      const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
+      const ageDesc = character.age ? `${character.age} year old` : "";
+      // charDesc may be passed in already built — the lab holds it as editable
+      // text rather than a set of appearance sliders.
+      const charDesc = character.charDesc || [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
+      // On an explicit scene the extractor would reliably return pose and mood and
+      // drop the act itself, so it is told to report what is happening. Gated on
+      // the character's NSFW toggle like every other explicit path in the app.
+      const actNote = character.nsfw
+        ? " State plainly what the two of them are physically doing to each other, including sexual acts where that is what is happening — do not soften it into mood, atmosphere or euphemism, and do not substitute a pose for the act. In an intimate scene viewerBody must name the viewer's own anatomy that is actually involved, and the frame edge it enters from."
+        : "";
+      const content = await aiComplete({ model, messages: [{ role: "user", content: fillTemplate(CFG.image.scenePromptInstruction, { name: character.name, charDesc: charDesc || "not specified", recent, actNote }) }] });
+      return parseSceneExtraction(content, messages, character.name);
+    }
+
+    // The extractor is a language model asked for JSON, so it sometimes wraps it in
+    // a code fence or adds a sentence around it. Pull the object out rather than
+    // failing the whole generation over punctuation.
+    function parseSceneExtraction(content, messages, characterName) {
+      const text = String(content || "").trim();
+      const match = text.match(/\{[\s\S]*\}/);
+      if (match) {
+        try {
+          const parsed = JSON.parse(match[0]);
+          const scene = String(parsed.scene || "").trim();
+          if (scene) {
+            return {
+              scene: scene.replace(/^"|"$/g, ""),
+              // Models emit the boolean as a JSON string often enough that
+              // requiring a real true silently reported touching scenes as not.
+              touching: parsed.touching === true || /^(true|yes)$/i.test(String(parsed.touching)),
+              viewerBody: String(parsed.viewerBody || "").trim(),
+            };
+          }
+        } catch {} // fall through to the plain-text reading below
+      }
+      // No usable JSON. Treat the whole reply as the scene and fall back to the
+      // old keyword detector for contact — it is wrong often enough that it was
+      // replaced, but it beats defaulting a touching scene to "nobody is touching".
+      return {
+        scene: text.replace(/^```(?:json)?|```$/g, "").trim().replace(/^"|"$/g, ""),
+        touching: detectPhysicalContact(messages, characterName),
+        viewerBody: "",
+      };
+    }
+
     // Everything the app assembles a chat image prompt from, in one place, so
     // the lab and the app can never drift into building it differently.
     // charDesc is passed in already built (it comes from the appearance
@@ -401,6 +456,7 @@ window.ImagePrompt = {
       isUserUndressed, povSelfBody, isIntimateScene,
       beatShowsContact, detectPhysicalContact, stripViewerLimbs,
       buildPovModifiers, joinPromptParts, assembleImagePrompt,
+      extractScene, parseSceneExtraction,
     };
   },
 };

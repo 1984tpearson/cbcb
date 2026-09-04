@@ -76,6 +76,7 @@
     <span class="status" id="loadStatus"></span>
     <span class="spacer"></span>
     <select id="charSelect" style="max-width:230px"><option value="">Load a saved character…</option></select>
+    <button class="mini" onclick="resetFields()">Reset fields</button>
     <button class="mini" onclick="location.href='index.html'">App</button>
     <button class="mini" onclick="location.href='settings.html'">Settings</button>
   </header>
@@ -88,7 +89,16 @@
         <p class="hint">Everything the app knows when it builds a chat image prompt. Change anything and
           the finished prompt on the right updates immediately — no generation needed.</p>
 
-        <label class="field"><span>Scene prompt (what the extractor model wrote)</span>
+        <label class="field"><span>Conversation — the last few messages, as the app sees them</span>
+          <textarea id="conversation" rows="5" placeholder="User: *I step closer and cup her cheek*
+Elena: *she tilts her face into my palm* You took your time."></textarea></label>
+        <div class="row" style="margin-bottom:12px">
+          <label class="field" style="margin:0"><span>Extractor model</span><select id="textModel"></select></label>
+          <button style="flex:0 0 auto" id="runExtract" onclick="runExtractor()">Run extractor</button>
+        </div>
+        <div class="status" id="extractStatus" style="margin-bottom:12px"></div>
+
+        <label class="field"><span>Scene prompt (the extractor's "scene")</span>
           <textarea id="scenePrompt" rows="3"></textarea></label>
 
         <label class="field"><span>Character name</span><input type="text" id="charName" /></label>
@@ -112,7 +122,7 @@
         <label class="field"><span>Explicit detail (used only when NSFW and the scene reads as intimate)</span>
           <input type="text" id="explicitDetail" /></label>
 
-        <label class="field"><span>Viewer's body in frame (extractor's viewerBody)</span>
+        <label class="field"><span>Viewer&#39;s body in frame (the extractor&#39;s "viewerBody")</span>
           <input type="text" id="viewerBody" placeholder="the viewer's hand in her hair, entering from the top of the frame" /></label>
 
         <label class="field"><span>Recent action beats — only used by the old keyword fallback</span>
@@ -122,11 +132,13 @@ Elena: *she leans into it*"></textarea></label>
         <div class="toggles">
           <label><input type="checkbox" id="nsfw" /> NSFW</label>
           <label><input type="checkbox" id="verbatim" /> Hand-typed prompt (leave scene alone)</label>
-          <label><input type="checkbox" id="touching" /> Touching (extractor's answer)</label>
+          <label><input type="checkbox" id="touching" /> Touching (the extractor&#39;s answer)</label>
         </div>
-        <p class="note">Touching and the viewer's body now come from the extractor model, which reads the
-          scene and answers in the same call. The beats box only drives the old keyword detector, which
-          survives as a fallback for when the model returns something unparseable.</p>
+        <p class="note">Scene, touching and the viewer's body are the extractor's three answers, and
+          "Run extractor" fills all three by calling it for real — the same function the app calls, not a
+          copy of it. Edit them by hand to test an assembly change without paying for another extraction.
+          The beats box only drives the old keyword detector, which survives as a fallback for a reply
+          that will not parse.</p>
       </div>
 
       <div class="card">
@@ -183,6 +195,7 @@ Elena: *she leans into it*"></textarea></label>
   const UNLOCK_KEY = "personachat_unlocked";
   const DATA_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/data-proxy";
   const IMAGE_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/image-proxy";
+  const AI_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/ai-proxy";
   const ACCESS_TOKEN = "pc_8f3a9d2e7b1c4f6a0d5e9c3b7a2f1e8d";
   const STYLE_MODIFIERS = "photorealistic, natural lighting, 50mm, sharp focus";
   const STORE_KEY = "prompt_lab_state";
@@ -210,7 +223,8 @@ Elena: *she leans into it*"></textarea></label>
 
   // ── Fields ────────────────────────────────────────────────────────────────
   const FIELDS = ["scenePrompt","charName","charDesc","charOutfit","userOutfit","location","proximity",
-                  "charPose","userPose","explicitDetail","beats","viewerBody","refImage","model"];
+                  "charPose","userPose","explicitDetail","beats","viewerBody","refImage","model",
+                  "conversation","textModel"];
   const CHECKS = ["nsfw","verbatim","touching"];
   const $ = id => document.getElementById(id);
   const val = id => $(id).value.trim();
@@ -231,6 +245,7 @@ Elena: *she leans into it*"></textarea></label>
     explicitDetail: "",
     beats: "User: *I run my fingers into her hair*\nElena: *she leans into my hand*",
     viewerBody: "the viewer's hand in her hair, entering from the top of the frame",
+    conversation: "User: *I run my fingers into her hair*\nElena: *she leans into my hand and closes her eyes* Don't stop.",
     refImage: "",
     nsfw: true, verbatim: false, touching: true,
   };
@@ -321,6 +336,73 @@ Elena: *she leans into it*"></textarea></label>
 
   window.copyPrompt = function () {
     navigator.clipboard.writeText($("fullPrompt").textContent).catch(() => {});
+  };
+
+  // ── Extractor ─────────────────────────────────────────────────────────────
+  // Calls the same IMG.extractScene the app calls, with the same aiComplete
+  // shape, so what comes back here is what the app would get. The lab used to
+  // have no extractor at all and its touching/viewerBody fields were typed by
+  // hand — which meant it happily demonstrated the old, broken branch.
+  async function aiComplete({ model, messages, params }) {
+    const res = await fetch(AI_PROXY_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages, ...(params || {}) }),
+    });
+    if (!res.ok) throw new Error(`AI proxy ${res.status}: ${(await res.text().catch(() => "")).slice(0, 160)}`);
+    const data = await res.json();
+    if (data && data.error) throw new Error(typeof data.error === "string" ? data.error : (data.error.message || "AI proxy error"));
+    const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    if (!content) throw new Error("AI proxy returned no content");
+    return content;
+  }
+
+  // The conversation box is plain text, one labelled line per message, which
+  // is exactly the shape extractScene expects to stitch back together.
+  function conversationToMessages(text) {
+    return String(text || "").split("\n").map(l => l.trim()).filter(Boolean).map(line => {
+      const m = line.match(/^([^:]+):\s*(.*)$/);
+      return { role: m && /^user$/i.test(m[1].trim()) ? "user" : "assistant", content: m ? m[2] : line };
+    });
+  }
+
+  window.runExtractor = async function () {
+    const status = $("extractStatus");
+    const messages = conversationToMessages(val("conversation"));
+    if (!messages.length) {
+      status.className = "status err";
+      status.textContent = "Put a couple of messages in the conversation box first.";
+      return;
+    }
+    $("runExtract").disabled = true;
+    status.className = "status busy";
+    status.textContent = "Running the extractor…";
+    const started = Date.now();
+    try {
+      const out = await IMG.extractScene({
+        messages,
+        // Only the fields extractScene actually reads. charDesc is rebuilt
+        // from the appearance here, so the lab's own text box is used as-is.
+        character: { name: val("charName"), nsfw: $("nsfw").checked, charDesc: val("charDesc") },
+        model: val("textModel"),
+        aiComplete,
+      });
+      writeState({ scenePrompt: out.scene, touching: out.touching, viewerBody: out.viewerBody });
+      render();
+      status.className = "status ok";
+      status.textContent = `Extracted in ${((Date.now() - started) / 1000).toFixed(1)}s — touching: ${out.touching}` +
+        (out.viewerBody ? "" : " (no viewer body)");
+    } catch (e) {
+      status.className = "status err";
+      status.textContent = `Failed: ${e.message}`;
+    }
+    $("runExtract").disabled = false;
+  };
+
+  window.resetFields = function () {
+    localStorage.removeItem(STORE_KEY);
+    writeState(SEED_STATE);
+    if (!val("model")) $("model").value = "seedream-v4-5-uncensored";
+    render();
   };
 
   // ── Generation ────────────────────────────────────────────────────────────
@@ -460,6 +542,12 @@ Elena: *she leans into it*"></textarea></label>
       const o = document.createElement("option");
       o.value = m.id; o.textContent = m.label;
       sel.appendChild(o);
+    });
+    const tsel = $("textModel");
+    (CFG.models.text || []).forEach(m => {
+      const o = document.createElement("option");
+      o.value = m.id; o.textContent = m.label;
+      tsel.appendChild(o);
     });
 
     let saved = null;
