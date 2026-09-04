@@ -14,6 +14,7 @@
 // so nothing here can read CFG until the caller hands it over.
 window.ImagePrompt = {
   create(CFG) {
+    const { tierFor, fillTemplate } = window.SiteConfig;
 
     const ACTION_TEXT_RE = /\*{1,2}([^*]+)\*{1,2}/g;
     function extractActionText(messages, characterName) {
@@ -208,6 +209,123 @@ window.ImagePrompt = {
       return kept.join(", ");
     }
 
+    const HEIGHT_CM_MIN = CFG.appearance.heightCmMin;
+    const HEIGHT_CM_MAX = CFG.appearance.heightCmMax;
+    const sliderToCm = (value) => Math.round(HEIGHT_CM_MIN + ((value ?? 50) / 100) * (HEIGHT_CM_MAX - HEIGHT_CM_MIN));
+    const cmToSlider = (cm) => Math.min(100, Math.max(0, Math.round(((cm - HEIGHT_CM_MIN) / (HEIGHT_CM_MAX - HEIGHT_CM_MIN)) * 100)));
+
+    function appearancePhrasePreview(key, value) {
+      const a = CFG.appearance;
+      switch (key) {
+        case "height": {
+          // Both the measurement and a descriptive phrase: image models read
+          // "tall" far more reliably than they read a number, but the number is
+          // what the user actually set.
+          const tier = tierFor(a.heightTiers, value);
+          return `${sliderToCm(value)} cm, ${tier ? tier.phrase : ""}`;
+        }
+        case "build": {
+          const tier = tierFor(a.buildTiers, value);
+          return tier ? tier.phrase : "";
+        }
+        case "chest": {
+          const cups = a.chestCups || [];
+          if (cups.length === 0) return "";
+          const idx = Math.min(cups.length - 1, Math.floor(value / (100 / cups.length)));
+          return fillTemplate(a.chestTemplate, { cup: cups[idx] });
+        }
+        case "waist": {
+          const tier = tierFor(a.waistTiers, value);
+          return tier ? tier.phrase : "";
+        }
+        case "hips": {
+          const tier = tierFor(a.hipsTiers, value);
+          return tier ? tier.phrase : "";
+        }
+        default:
+          return "";
+      }
+    }
+
+    // The appearance sliders describe hair, eyes, skin and body, but nothing
+    // about facial structure, so the face was left entirely to the model's prior
+    // — which lands on the same default face almost every time. Randomising the
+    // seed alone does not move identity much on Seedream-class models; the face
+    // has to actually be described.
+    function pickFaceVariation() {
+      const all = CFG.appearance.faceVariationPools || [];
+      const count = CFG.appearance.faceVariationPoolCount ?? 4;
+      const pools = [...all].sort(() => Math.random() - 0.5).slice(0, count);
+      return pools.map(pool => pool[Math.floor(Math.random() * pool.length)]).join(", ");
+    }
+
+    function buildAppearancePrompt(appearance) {
+      if (!appearance) return "";
+      const a = appearance;
+      const cfg = CFG.appearance;
+      const parts = [];
+
+      const hair = a.hairColour === "Custom" ? a.hairColourCustom : a.hairColour;
+      const eyes = a.eyeColour === "Custom" ? a.eyeColourCustom : a.eyeColour;
+      const skin = a.skinTone === "Custom" ? a.skinToneCustom : a.skinTone;
+
+      const ethnicity = a.ethnicity === "Custom" ? a.ethnicityCustom : a.ethnicity;
+      if (ethnicity) parts.push(ethnicity.toLowerCase());
+      if (hair) parts.push(`${hair.toLowerCase()} hair`);
+      if (eyes) parts.push(`${eyes.toLowerCase()} eyes`);
+      if (skin) parts.push(`${skin.toLowerCase()} skin`);
+
+      const h = a.height ?? 50;
+      const b = a.build ?? 50;
+
+      // A tier marked skipInPrompt is the unremarkable middle one — saying
+      // "average height" adds nothing the model can use, so it is only shown as
+      // the slider's own preview text.
+      const phraseFor = (tiers, value) => {
+        const tier = tierFor(tiers, value);
+        return tier && !tier.skipInPrompt ? tier.phrase : null;
+      };
+
+      // Height + build combined into one phrase when both land at the extreme
+      // low end, instead of stacking two separate "very short" / "very slim"
+      // modifiers — that combination is what was pushing generations toward
+      // caricature proportions (tiny torso, stretched limbs) rather than a
+      // proportionally short, slim figure.
+      const heightCm = fillTemplate(cfg.heightMeasurementTemplate, { cm: sliderToCm(h) });
+      if (h <= 25 && b <= 20) {
+        parts.push(`${heightCm}, ${cfg.combinedShortSlim}`);
+      } else {
+        parts.push(heightCm);
+        const heightPhrase = phraseFor(cfg.heightTiers, h);
+        if (heightPhrase) parts.push(heightPhrase);
+        const buildPhrase = phraseFor(cfg.buildTiers, b);
+        if (buildPhrase) parts.push(buildPhrase);
+      }
+
+      const chest = a.chest ?? 50;
+      parts.push(appearancePhrasePreview("chest", chest));
+
+      const waist = a.waist ?? 50;
+      const hips = a.hips ?? 50;
+
+      // Waist + hips combined when both point the same direction — "narrow
+      // waist, narrow hips" as two separate phrases reads as more extreme than
+      // either was meant to be individually, since they're largely describing
+      // the same silhouette.
+      if (waist <= 30 && hips <= 30) {
+        parts.push(cfg.combinedSlenderWaistline);
+      } else if (waist >= 70 && hips >= 70) {
+        parts.push(cfg.combinedCurvyWaistline);
+      } else {
+        const waistPhrase = phraseFor(cfg.waistTiers, waist);
+        if (waistPhrase) parts.push(waistPhrase);
+        const hipsPhrase = phraseFor(cfg.hipsTiers, hips);
+        if (hipsPhrase) parts.push(hipsPhrase);
+      }
+
+      return parts.filter(Boolean).length > 0 ? parts.filter(Boolean).join(", ") : "";
+    }
+
     // Everything the app assembles a chat image prompt from, in one place, so
     // the lab and the app can never drift into building it differently.
     // charDesc is passed in already built (it comes from the appearance
@@ -253,6 +371,8 @@ window.ImagePrompt = {
     return {
       ACTION_TEXT_RE, extractActionText,
       EMPTY_STAGING, STAGING_KEYS, hasStaging, buildStagingImageDesc,
+      HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
+      appearancePhrasePreview, buildAppearancePrompt,
       isUserUndressed, povSelfBody, isIntimateScene,
       beatShowsContact, detectPhysicalContact, stripViewerLimbs,
       buildPovModifiers, joinPromptParts, assembleImagePrompt,
