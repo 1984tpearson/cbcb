@@ -2020,10 +2020,15 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:8 }}>
                   <span style={{ fontSize:11, color:"var(--text4)", flexShrink:0 }}>Progress</span>
-                  <div style={{ flex:1, height:6, borderRadius:3, background:"var(--bg3)", overflow:"hidden" }}>
-                    <div style={{ width:`${pct}%`, height:"100%", background: pct >= 100 ? "var(--pink)" : "var(--blue, #7aa7d6)" }} />
-                  </div>
-                  <span style={{ fontSize:11, color:"var(--text3)", width:64, textAlign:"right" }}>
+                  {/* Draggable, not just a readout. Progress only ever moved by
+                      the tracker's judgement, and the only control was a reset
+                      to zero — so a goal the scene had plainly set up could sit
+                      at 0%, stuck in the stage that says "nothing has come of
+                      this yet", with no way to say otherwise. */}
+                  <input type="range" min={0} max={100} style={{ flex:1 }}
+                    value={pct}
+                    onChange={e => set({ progress: Math.round((Number(e.target.value) / 100) * threshold) })} />
+                  <span style={{ fontSize:11, color: pct >= 100 ? "var(--pink)" : "var(--text3)", width:64, textAlign:"right" }}>
                     {done ? (intent.status === "achieved" ? "achieved" : "dropped") : (pct >= 100 ? "ready" : `${pct}%`)}
                   </span>
                 </div>
@@ -3061,14 +3066,20 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     const recent = newMessages.filter(m => m.role !== "image").slice(-8)
       .map(m => `${m.role === "user" ? "User" : currentChar.name}: ${m.content}`).join("\n");
     const turns = newMessages.filter(m => m.role !== "image").length;
+    // Forming a new intention is a small summarising job the 8B model handles.
+    // Judging whether a conversation moved a goal forward is not: it is the
+    // same read-the-scene-across-turns task the small model kept failing at
+    // for wardrobe and staging, and when it answers 0 the goal never advances
+    // and the character waits forever.
     const model = settings.reactivityModel || CFG.models.reactivity;
+    const advanceModel = settings.selectedModel || model;
 
     // ── Advance what already exists ──
     const existing = activeIntentions(currentChar);
     if (existing.length > 0) {
       try {
         const list = existing.map((it, i) => `${i}. ${it.goal}`).join("\n");
-        const raw = await aiComplete({ model, messages: [{ role: "user", content:
+        const raw = await aiComplete({ model: advanceModel, messages: [{ role: "user", content:
           fillTemplate(cfg.advancePrompt, { name: currentChar.name, list, recent }) }] });
         const updates = parseJsonReply(raw);
         if (Array.isArray(updates)) {
