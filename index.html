@@ -2624,6 +2624,15 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   // The ref is updated synchronously so a patch landing before React re-renders
   // still sees its predecessor's result.
   const characterRef = useRef(initialChar);
+  // Bumped whenever a reply is discarded — regenerated or deleted. The trackers
+  // are fired without being awaited and each is a second LLM call taking
+  // seconds, so by the time you have read a reply and hit regenerate they are
+  // still in flight. The snapshot restore was correct and then simply lost the
+  // race: the discarded reply's judgement landed a moment later and wrote its
+  // progress straight back over the rollback. A tracker now carries the epoch
+  // it started under and drops its result if the turn it was judging is gone.
+  const sceneEpochRef = useRef(0);
+  const discardScene = () => { sceneEpochRef.current += 1; };
   const commitCharacter = (patch) => {
     const base = characterRef.current;
     const next = typeof patch === "function" ? patch(base) : { ...base, ...patch };
@@ -2633,6 +2642,10 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
     onUpdateCharacter(next);
     return next;
   };
+
+  // For anything judging a reply: commits only if that reply is still there.
+  const commitIfCurrent = (epoch, patch) =>
+    (epoch === sceneEpochRef.current) ? commitCharacter(patch) : characterRef.current;
 
   useEffect(() => {
     dataApi.getChatSession(sessionId)
@@ -2785,6 +2798,10 @@ No other text.` }]
   };
 
   const applyWardrobe = async (newMessages, currentChar) => {
+    // The reply this is judging, so a verdict that arrives after it has been
+    // regenerated or deleted is dropped rather than applied to a scene it no
+    // longer describes.
+    const epoch = sceneEpochRef.current;
     try {
       const recent = newMessages.filter(m => m.role !== "image").slice(-3)
         .map(m => `${m.role === "user" ? "User" : currentChar.name}: ${m.content}`).join("\n");
@@ -2843,7 +2860,7 @@ No other text.` }]
       const userProposed = evidenceSupported(parsed.userEvidence, recent)
         ? cleanOutfitUpdate(parsed.userOutfit) : null;
       if (!charProposed && !userProposed) return;
-      commitCharacter(prev => {
+      commitIfCurrent(epoch, prev => {
         const charOutfit = charProposed ?? prev.charOutfit ?? null;
         const userOutfit = userProposed ?? prev.userOutfit ?? null;
         if (charOutfit === prev.charOutfit && userOutfit === prev.userOutfit) return prev;
@@ -2873,6 +2890,11 @@ No other text.` }]
     })),
   });
   const restoreScene = (snap) => {
+    // The reply is gone either way, so any tracker still judging it must be
+    // stood down even when there is no snapshot to roll back to (an older chat,
+    // or the opening message). Doing this only alongside a restore would leave
+    // exactly those turns racing.
+    discardScene();
     if (!snap) return characterRef.current;
     return commitCharacter(prev => ({
       ...prev,
@@ -2886,6 +2908,7 @@ No other text.` }]
   };
 
   const applyStaging = async (newMessages, currentChar) => {
+    const epoch = sceneEpochRef.current;   // see commitIfCurrent
     try {
       // Staging is a full restatement, not change detection. Wardrobe uses the
       // "null means no change" contract because clothes rarely change and
@@ -2938,7 +2961,7 @@ No other text.` }]
       });
       const parsed = parseJsonReply(raw);
       if (!parsed) return;
-      commitCharacter(prev => {
+      commitIfCurrent(epoch, prev => {
         const base = prev.staging || EMPTY_STAGING;
         const next = { ...base };
         let changed = false;
@@ -2954,6 +2977,7 @@ No other text.` }]
   };
 
   const applyReactivity = async (newMessages, currentChar) => {
+    const epoch = sceneEpochRef.current;   // see commitIfCurrent
     if (!currentChar.reactiveEnabled && currentChar.reactiveEnabled !== undefined) return;
     try {
       const chatSlice = newMessages.filter(m => m.role !== "image").slice(-8)
@@ -3011,7 +3035,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
 
       // Deltas are applied to the latest sliders, not the snapshot this call
       // started from, so a wardrobe write landing in between is not clobbered.
-      commitCharacter(prev => {
+      commitIfCurrent(epoch, prev => {
         const baseSliders = prev.sliders || DEFAULT_SLIDERS;
         const newSliders = { ...baseSliders };
         const offKeys = new Set(prev.disabledSliders || []);
@@ -3040,6 +3064,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
   // so a turn costs at most one extra call, and usually none: generation only
   // runs when there is room and enough conversation to base a want on.
   const applyIntentions = async (newMessages, currentChar) => {
+    const epoch = sceneEpochRef.current;   // see commitIfCurrent
     const cfg = CFG.intentions;
     if (!cfg) return;
     const recent = newMessages.filter(m => m.role !== "image").slice(-8)
@@ -3062,7 +3087,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
           fillTemplate(cfg.advancePrompt, { name: currentChar.name, list, recent }) }] });
         const updates = parseJsonReply(raw);
         if (Array.isArray(updates)) {
-          commitCharacter(prev => {
+          commitIfCurrent(epoch, prev => {
             const all = applyIntentionVerdicts(prev.intentions || [], existing, updates, cfg);
             return all ? { ...prev, intentions: all } : prev;
           });
@@ -3129,7 +3154,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
             })),
         }));
       if (fresh.length === 0) return;
-      commitCharacter(prev => {
+      commitIfCurrent(epoch, prev => {
         // Re-check against the newest state: the panel may have added one while
         // this was in flight.
         const all = prev.intentions || [];
@@ -3250,6 +3275,9 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
   const handleDeleteMessage = (index, isLast) => {
     if (!isLast) {
       if (!confirm("Delete this message and everything after it?")) return;
+      // No snapshot to restore from this far back, but the replies being
+      // deleted may still have trackers in flight — stand them down.
+      discardScene();
       setMessages(m => m.slice(0, index));
     } else {
       // Same problem as regeneration: the reply is gone, so the state it moved
