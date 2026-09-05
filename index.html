@@ -512,11 +512,40 @@ function intentionBoldness(sliders) {
 
 // The progress a character must reach before they will actually make the move.
 // A bold character needs about half what a timid one does for the same goal.
-function intentionThreshold(intention, sliders) {
-  const nerve = Math.max(0, Math.min(100, Number(intention.nerve) || 0));
+function nerveThreshold(nerve, sliders) {
+  const n = Math.max(0, Math.min(100, Number(nerve) || 0));
   const relief = CFG.intentions.boldnessRelief || 200;
   const scale = CFG.intentions.nerveToProgress ?? 1;
-  return Math.max(1, nerve * scale * (1 - intentionBoldness(sliders) / relief));
+  return Math.max(1, n * scale * (1 - intentionBoldness(sliders) / relief));
+}
+
+function intentionThreshold(intention, sliders) {
+  return nerveThreshold(intention.nerve, sliders);
+}
+
+// ── Prerequisite steps ───────────────────────────────────────────────────────
+// A goal may carry steps: things that have to happen before the goal is even
+// possible ("buy the ingredients", "bake the cake", before "eat the cake").
+// They are groundwork, not the goal — finishing the last one does not achieve
+// anything, it unlocks the goal, which then runs its own climb against its own
+// nerve exactly as an unstaged goal always has. So the last step is never the
+// goal restated, and a generator that forgets to name the goal as a step can
+// no longer end an intention early.
+const intentionSteps = (intention) =>
+  (Array.isArray(intention && intention.steps) ? intention.steps : []).filter(s => s && (s.text || "").trim());
+
+// The first step not yet done, or null once the groundwork is finished (or was
+// never there) and the goal itself is what is being worked on.
+const activeStep = (intention) => intentionSteps(intention).find(s => !s.done) || null;
+
+// The climb that currently applies: the active step's, or the goal's own once
+// there is no step left. Everything downstream — the stage wording, the gate,
+// the do-it-now directive — reads this rather than the goal's threshold, so a
+// cheap piece of groundwork is not made to wait out the goal's whole climb.
+function currentThreshold(intention, sliders) {
+  const step = activeStep(intention);
+  if (!step) return intentionThreshold(intention, sliders);
+  return nerveThreshold(step.nerve ?? CFG.intentions.defaultStepNerve ?? 15, sliders);
 }
 
 const activeIntentions = (character) =>
@@ -534,11 +563,20 @@ function readyIntentionDirective(character) {
   if (character.intentionsEnabled === false) return "";
   const sliders = character.sliders || DEFAULT_SLIDERS;
   const ready = activeIntentions(character).find(intent => {
-    const threshold = intentionThreshold(intent, sliders);
+    const threshold = currentThreshold(intent, sliders);
     return (Number(intent.progress) || 0) / threshold >= 1;
   });
   if (!ready) return "";
-  return fillTemplate(cfg.readyDirective, { goal: ready.goal.trim().replace(/[.!?]$/, "") });
+  const goal = ready.goal.trim().replace(/[.!?]$/, "");
+  // While groundwork is outstanding it is the STEP that is ready, never the
+  // goal. Naming the goal here would hand a character who has only just bought
+  // the ingredients an instruction to eat the cake this reply.
+  const step = activeStep(ready);
+  if (step) {
+    const template = cfg.stepReadyDirective || cfg.readyDirective;
+    return fillTemplate(template, { step: step.text.trim().replace(/[.!?]$/, ""), goal });
+  }
+  return fillTemplate(cfg.readyDirective, { goal });
 }
 
 // The block the character sees. Progress is described, never numbered — handed
@@ -551,7 +589,7 @@ function buildIntentionsNote(character) {
   const sliders = character.sliders || DEFAULT_SLIDERS;
 
   const ratioFor = (intent) => {
-    const threshold = intentionThreshold(intent, sliders);
+    const threshold = currentThreshold(intent, sliders);
     return Math.max(0, Math.min(1, (Number(intent.progress) || 0) / threshold));
   };
 
@@ -561,7 +599,15 @@ function buildIntentionsNote(character) {
     // Goals are written as fragments ("get the user to come swimming"), so the
     // stage note needs a stop in front of it or the two run together.
     const goal = /[.!?]$/.test(intent.goal.trim()) ? intent.goal.trim() : `${intent.goal.trim()}.`;
-    return `- ${goal}${stage ? ` ${stage.note}` : ""}`;
+    // Only the step being worked on is named, never the whole ladder: shown
+    // the full list a model narrates the plan rather than walking it. The goal
+    // still leads the line, so the far thing shapes behaviour while the near
+    // thing is what she can act on.
+    const step = activeStep(intent);
+    const stepNote = step && cfg.stepLine
+      ? fillTemplate(cfg.stepLine, { step: step.text.trim().replace(/[.!?]$/, "") })
+      : "";
+    return `- ${goal}${stepNote}${stage ? ` ${stage.note}` : ""}`;
   });
 
   // How they will go about it, from the honesty slider. Sits with the goals
@@ -619,7 +665,14 @@ function mergeIntentionSnapshot(current, snapshot) {
     return intent.source !== "auto";   // hand-added since the snapshot: keep
   }).map(intent => {
     const was = before.get(intent.id);
-    return was ? { ...intent, progress: was.progress, status: was.status } : intent;
+    if (!was) return intent;
+    const restored = { ...intent, progress: was.progress, status: was.status };
+    // Steps edited in the panel since the snapshot may not line up with it, so
+    // flags are restored only where the two lists are the same length.
+    if (Array.isArray(was.steps) && Array.isArray(intent.steps) && was.steps.length === intent.steps.length) {
+      restored.steps = intent.steps.map((s, i) => ({ ...s, done: !!was.steps[i] }));
+    }
+    return restored;
   });
 }
 
@@ -1739,7 +1792,7 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
           <div style={S.divider} />
           <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Private Intentions</span>
           <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>
-            Things {character.name} quietly wants and works toward over many turns, without saying so. They form on their own as you talk — edit or add your own here. "Nerve" is how much courage the goal takes: the higher it is, the longer they work up to it, and a shy character takes longer than a bold one for the same goal.
+            Things {character.name} quietly wants and works toward over many turns, without saying so. They form on their own as you talk — edit or add your own here. "Nerve" is how much courage the goal takes: the higher it is, the longer they work up to it, and a shy character takes longer than a bold one for the same goal. A goal can also have steps — things that must happen before it is even possible. They are worked through in order, one at a time, and only once they are all done does the character start on the goal itself.
           </p>
           <label style={{ ...S.label, display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
             <input type="checkbox" checked={intentionsEnabled} onChange={e => setIntentionsEnabled(e.target.checked)} />
@@ -1751,10 +1804,18 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
             </p>
           )}
           {intentions.map((intent, idx) => {
-            const threshold = intentionThreshold(intent, sliders);
+            const threshold = currentThreshold(intent, sliders);
             const pct = Math.round(Math.max(0, Math.min(1, (intent.progress || 0) / threshold)) * 100);
             const done = (intent.status || "active") !== "active";
             const set = (patch) => setIntentions(list => list.map((x, i) => i === idx ? { ...x, ...patch } : x));
+            // Steps are prerequisites, so the progress bar under them is
+            // always the CURRENT one's climb, not the goal's. Which is what
+            // makes the readout honest: "buy the ingredients — 60%" rather
+            // than a bar that barely moves while the groundwork is done.
+            const steps = Array.isArray(intent.steps) ? intent.steps : [];
+            const current = activeStep(intent);
+            const setSteps = (fn) => set({ steps: fn(steps) });
+            const setStep = (si, patch) => setSteps(list => list.map((x, i) => i === si ? { ...x, ...patch } : x));
             return (
               <div key={intent.id || idx} style={{ border:"1px solid var(--border)", borderRadius:10, padding:10, marginBottom:8, opacity: done ? 0.55 : 1 }}>
                 <textarea style={{ ...S.input, height: 48, resize:"vertical" }}
@@ -1766,8 +1827,42 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
                     value={intent.nerve ?? 40} onChange={e => set({ nerve: Number(e.target.value) })} />
                   <span style={{ fontSize:11, color:"var(--text3)", width:26, textAlign:"right" }}>{intent.nerve ?? 40}</span>
                 </div>
+                <div style={{ marginTop:10 }}>
+                  <span style={{ fontSize:11, color:"var(--text4)" }}>
+                    Steps first {steps.length > 0 ? `(${steps.filter(st => st.done).length}/${steps.length} done)` : ""}
+                  </span>
+                  {steps.length === 0 && (
+                    <p style={{ fontSize:11, color:"var(--text4)", margin:"4px 0" }}>
+                      None — they work on the goal directly. Add steps for something that cannot happen yet, e.g. buy the ingredients before baking the cake.
+                    </p>
+                  )}
+                  {steps.map((st, si) => (
+                    <div key={si} style={{ display:"flex", alignItems:"center", gap:6, marginTop:4,
+                      opacity: st.done ? 0.5 : 1 }}>
+                      <input type="checkbox" checked={!!st.done}
+                        title="Done"
+                        onChange={e => setStep(si, { done: e.target.checked })} />
+                      <input style={{ ...S.input, flex:1, fontSize:12, padding:"5px 7px",
+                        textDecoration: st.done ? "line-through" : "none" }}
+                        value={st.text || ""} placeholder="e.g. buy the ingredients"
+                        onChange={e => setStep(si, { text: e.target.value })} />
+                      <input type="number" min={0} max={100} title="Nerve for this step"
+                        style={{ ...S.input, width:52, fontSize:12, padding:"5px 6px" }}
+                        value={st.nerve ?? (CFG.intentions.defaultStepNerve ?? 15)}
+                        onChange={e => setStep(si, { nerve: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })} />
+                      <button style={{ ...S.btnSecondary, fontSize:11, padding:"4px 8px" }}
+                        onClick={() => setSteps(list => list.filter((_, i) => i !== si))}>×</button>
+                    </div>
+                  ))}
+                  <button style={{ ...S.btnSecondary, fontSize:11, padding:"4px 8px", marginTop:6 }}
+                    onClick={() => setSteps(list => [...list, { text:"", nerve: CFG.intentions.defaultStepNerve ?? 15, done:false }])}>
+                    + Add a step
+                  </button>
+                </div>
                 <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:8 }}>
-                  <span style={{ fontSize:11, color:"var(--text4)", flexShrink:0 }}>Progress</span>
+                  <span style={{ fontSize:11, color:"var(--text4)", flexShrink:0 }}>
+                    {current ? "Step" : "Progress"}
+                  </span>
                   {/* Draggable, not just a readout. Progress only ever moved by
                       the tracker's judgement, and the only control was a reset
                       to zero — so a goal the scene had plainly set up could sit
@@ -1779,6 +1874,11 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
                   <span style={{ fontSize:11, color: pct >= 100 ? "var(--pink)" : "var(--text3)", width:64, textAlign:"right" }}>
                     {done ? (intent.status === "achieved" ? "achieved" : "dropped") : (pct >= 100 ? "ready" : `${pct}%`)}
                   </span>
+                </div>
+                <div style={{ fontSize:11, color:"var(--text4)", marginTop:4 }}>
+                  {done ? "" : current
+                    ? `Working on: ${(current.text || "").trim() || "an unnamed step"}`
+                    : (steps.length ? "Groundwork done — working on the goal itself" : "")}
                 </div>
                 <div style={{ display:"flex", gap:8, marginTop:8 }}>
                   {done
@@ -1793,7 +1893,7 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
           <button style={{ ...S.btnSecondary, marginBottom: 4 }}
             onClick={() => setIntentions(list => [...list, {
               id: `int_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-              goal: "", nerve: 40, progress: 0, status: "active", source: "manual",
+              goal: "", nerve: 40, progress: 0, status: "active", source: "manual", steps: [],
             }])}>+ Add an intention</button>
 
           <div style={S.divider} />
@@ -1897,7 +1997,7 @@ Return ONLY the JSON object, no other text.` }] });
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, disabledSliders, reactiveEnabled, intentionsEnabled, intentions: intentions.filter(i => (i.goal || "").trim()), memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, staging: hasStaging(staging) ? staging : null, explicitDetail: explicitDetail.trim() || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
+          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, disabledSliders, reactiveEnabled, intentionsEnabled, intentions: intentions.filter(i => (i.goal || "").trim()).map(i => ({ ...i, steps: (i.steps || []).filter(st => (st.text || "").trim()) })), memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, staging: hasStaging(staging) ? staging : null, explicitDetail: explicitDetail.trim() || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
         </div>
       </div>
     </div>
@@ -2676,7 +2776,13 @@ No other text.` }]
     staging: char.staging ?? null,
     // Only the moving parts — the goal text is never changed by a reply, so
     // storing it would just be a way to overwrite an edit made since.
-    intentions: (char.intentions || []).map(i => ({ id: i.id, progress: i.progress ?? 0, status: i.status || "active" })),
+    // Steps move too — a discarded reply may have ticked one off — so their
+    // done flags ride along, by position. The text is not stored, for the same
+    // reason the goal is not.
+    intentions: (char.intentions || []).map(i => ({
+      id: i.id, progress: i.progress ?? 0, status: i.status || "active",
+      steps: Array.isArray(i.steps) ? i.steps.map(s => !!(s && s.done)) : null,
+    })),
   });
   const restoreScene = (snap) => {
     if (!snap) return characterRef.current;
@@ -2863,7 +2969,16 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     const existing = activeIntentions(currentChar);
     if (existing.length > 0) {
       try {
-        const list = existing.map((it, i) => `${i}. ${it.goal}`).join("\n");
+        // Each line names the ONE thing that intention is working on now: the
+        // outstanding step where there is one, otherwise the goal itself. The
+        // judge never sees the rest of the ladder, so it cannot award progress
+        // on the goal for groundwork that has not happened yet.
+        const list = existing.map((it, i) => {
+          const step = activeStep(it);
+          return step
+            ? `${i}. GOAL: ${it.goal} — CURRENT STEP: ${step.text}`
+            : `${i}. GOAL: ${it.goal}`;
+        }).join("\n");
         const raw = await aiComplete({ model: advanceModel, messages: [{ role: "user", content:
           fillTemplate(cfg.advancePrompt, { name: currentChar.name, list, recent }) }] });
         const updates = parseJsonReply(raw);
@@ -2877,11 +2992,35 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
               if (!target) continue;
               const idx = all.findIndex(x => x.id === target.id);
               if (idx === -1) continue;
+              const current = all[idx];
               const delta = Math.max(-maxDelta, Math.min(maxDelta, Number(u.delta) || 0));
-              const status = ["active", "achieved", "abandoned"].includes(u.status) ? u.status : all[idx].status;
-              const progress = Math.max(0, Math.min(100, (Number(all[idx].progress) || 0) + delta));
-              if (progress === all[idx].progress && status === all[idx].status) continue;
-              all[idx] = { ...all[idx], progress, status };
+              // "achieved" is not the judge's to give any more — it says only
+              // whether the thing it was shown has happened, and what that
+              // completes depends on which phase the goal is in.
+              const status = ["active", "abandoned"].includes(u.status) ? u.status : (current.status || "active");
+              const progress = Math.max(0, Math.min(100, (Number(current.progress) || 0) + delta));
+              const step = activeStep(current);
+              const done = u.done === true;
+
+              if (step && done) {
+                // Groundwork finished: tick it off and start the next climb
+                // from zero. If that was the last step the goal itself becomes
+                // what she is working on — it is not achieved by this, only
+                // unlocked, and still has its own nerve to climb.
+                let ticked = false;
+                all[idx] = { ...current, progress: 0, status, steps: current.steps.map(x => {
+                  if (ticked || !x || x.done || !(x.text || "").trim()) return x;
+                  ticked = true;
+                  return { ...x, done: true };
+                }) };
+                changed = true;
+                continue;
+              }
+
+              // No steps left, so this is the goal itself — done means done.
+              const nextStatus = (!step && done) ? "achieved" : status;
+              if (progress === current.progress && nextStatus === current.status) continue;
+              all[idx] = { ...current, progress, status: nextStatus };
               changed = true;
             }
             return changed ? { ...prev, intentions: all } : prev;
@@ -2921,6 +3060,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
           recent,
           existing: live.map(i => i.goal).join("; ") || "none",
           max: room,
+          maxSteps: cfg.maxSteps ?? 4,
         }) }] });
       const parsed = parseJsonReply(raw);
       if (!Array.isArray(parsed) || parsed.length === 0) return;
@@ -2934,6 +3074,18 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
           progress: 0,
           status: "active",
           source: "auto",
+          // Steps are optional and usually absent — most goals need no
+          // groundwork, and the prompt says so. A model that answers with bare
+          // strings instead of objects is accepted rather than dropped.
+          steps: (Array.isArray(p.steps) ? p.steps : [])
+            .map(st => (typeof st === "string" ? { text: st } : st))
+            .filter(st => st && typeof st.text === "string" && st.text.trim())
+            .slice(0, cfg.maxSteps ?? 4)
+            .map(st => ({
+              text: st.text.trim().slice(0, 120),
+              nerve: Math.max(0, Math.min(100, Math.round(Number(st.nerve)) || (cfg.defaultStepNerve ?? 15))),
+              done: false,
+            })),
         }));
       if (fresh.length === 0) return;
       commitCharacter(prev => {

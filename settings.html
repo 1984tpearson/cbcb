@@ -560,7 +560,7 @@
     const i = "intentions.";
     return [
       card("Private intentions",
-        "Things a character quietly wants and works toward over many turns without saying so. While a goal is still being worked up to, the pacing rules and the nerve gate are what stop a model simply achieving it in its next message \u2014 loosen them and characters start blurting. Once a goal reaches the top of its climb the brake comes off and the two \u201cready\u201d fields below take over.",
+        "Things a character quietly wants and works toward over many turns without saying so. While a goal is still being worked up to, the pacing rules and the nerve gate are what stop a model simply achieving it in its next message \u2014 loosen them and characters start blurting. Once a goal reaches the top of its climb the brake comes off and the \u201cready\u201d fields below take over. A goal may also carry prerequisite steps \u2014 things that must happen before it is possible at all. They are worked through one at a time, each with its own nerve, and finishing the last one does not achieve the goal: it unlocks it, and the goal then runs its own climb as usual.",
         [
           field("Most active at once", i + "maxActive", "number"),
           field("Block heading", i + "header", "area"),
@@ -574,6 +574,13 @@
             "Keyed off the honesty slider, with \u201cearly\u201d, \u201cmid\u201d and \u201clate\u201d wording for each. A manipulative character is working the goal from the first moment and escalates what they are willing to do; an honest one does not manoeuvre at all early on. Skipped entirely if the honesty slider is switched off for that character."),
           jsonField("Where early becomes mid becomes late", i + "methodProgressBands",
             "Two fractions of the climb, e.g. [0.4, 0.8]."),
+          field("Current step line", i + "stepLine", "area",
+            "Appended after a goal that still has groundwork outstanding. {step} is substituted in. Only the step being worked on is ever named \u2014 shown the whole ladder a model narrates the plan instead of walking it."),
+          field("Do-it-now directive for a step", i + "stepReadyDirective", "area",
+            "Replaces the directive above when what is ready is a prerequisite step rather than the goal. {step} and {goal} are substituted in. Keep it clear that the step is groundwork, or a character who has just bought the ingredients will eat the cake in the same reply."),
+          field("Most steps per goal", i + "maxSteps", "number"),
+          field("Default nerve for a step", i + "defaultStepNerve", "number",
+            "Used when a generated step does not come with one. Groundwork is meant to be quick \u2014 the long climb belongs to the goal."),
           jsonField("Progress wording", i + "stages",
             "Said instead of a number \u2014 a model handed \u201cprogress 25/70\u201d narrates the figure rather than acting on it. \u201cmax\u201d is the fraction of the way to the gate."),
         ]),
@@ -594,11 +601,11 @@
           field("Turns before the first one", i + "generateAfterTurns", "number"),
           field("Reconsider every N turns", i + "regenerateEveryTurns", "number"),
           field("Generation prompt", i + "generatePrompt", "area",
-            "{name}, {persona}, {relationship}, {familiarity}, {likes}, {attraction}, {nsfwNote}, {recent}, {existing} and {max} are substituted in."),
+            "{name}, {persona}, {relationship}, {familiarity}, {likes}, {attraction}, {nsfwNote}, {recent}, {existing}, {max} and {maxSteps} are substituted in."),
           field("Added for an adult character", i + "nsfwNote", "area"),
           field("Added otherwise", i + "sfwNote", "area"),
           field("Progress prompt", i + "advancePrompt", "area",
-            "{name}, {list} and {recent} are substituted in."),
+            "{name}, {list} and {recent} are substituted in. Each line of {list} names only the one thing that goal is working on now \u2014 its outstanding step, or the goal itself once there are none left \u2014 so \u201cdone\u201d means that thing, not the whole goal."),
         ]),
     ];
   }
