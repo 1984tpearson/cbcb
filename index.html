@@ -3083,8 +3083,26 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     if (existing.length > 0) {
       try {
         const list = intentionJudgeList(existing);
+        // The judge sees where the scene actually stands, not just the last few
+        // messages. A step can be satisfied by the situation rather than by an
+        // event — "get him into your bedroom" is done the moment you are both
+        // in the bedroom — and whatever brought that about may have scrolled
+        // out of the excerpt turns ago, at which point nothing in the
+        // conversation could ever tick it off and the goal sat there ready
+        // forever.
+        const st = currentChar.staging;
+        const scene = hasStaging(st)
+          ? [
+              st.location ? `Setting: ${st.location}.` : "",
+              st.charPose ? `${currentChar.name} is ${st.charPose}.` : "",
+              st.userPose ? `The user is ${st.userPose}.` : "",
+              st.proximity ? `Distance between them: ${st.proximity}.` : "",
+              currentChar.charOutfit ? `${currentChar.name} is wearing: ${currentChar.charOutfit}.` : "",
+              currentChar.userOutfit ? `The user is wearing: ${currentChar.userOutfit}.` : "",
+            ].filter(Boolean).join(" ")
+          : "Not tracked.";
         const raw = await aiComplete({ model: advanceModel, messages: [{ role: "user", content:
-          fillTemplate(cfg.advancePrompt, { name: currentChar.name, list, recent }) }] });
+          fillTemplate(cfg.advancePrompt, { name: currentChar.name, list, recent, scene }) }] });
         const updates = parseJsonReply(raw);
         if (Array.isArray(updates)) {
           commitIfCurrent(epoch, prev => {
