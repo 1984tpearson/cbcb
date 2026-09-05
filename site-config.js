@@ -863,6 +863,67 @@
       maxDeltaPerTurn: 5,
     },
 
+    // ── Physical distance and touch ──────────────────────────────────────────
+    // Every trait tier describes a way of TALKING. Nothing in the prompt used
+    // to say anything about where the character's body is, so the only clause
+    // that mentioned bodies at all was the staging block — which states a
+    // distance and asks the model to stay consistent with it. With nothing
+    // else to go on, models fall back on roleplay convention and lean in,
+    // inches away, within three messages, however timid the character is: the
+    // shyness was only ever instructed as a speaking style.
+    //
+    // This is the missing half. Boldness already exists as a number —
+    // intentions.boldnessWeights — and it is reused here rather than
+    // duplicated, so the character who needs a long climb before she will ask
+    // for coffee no longer gets to close the distance for free. Desire feeds
+    // in beside it: wanting to be near someone is not the same as daring to
+    // be, and the tiers keep those apart, which is what makes an insecure
+    // character read as insecure rather than simply uninterested.
+    physicality: {
+      enabled: true,
+      header: "\n\n[PHYSICAL DISTANCE AND TOUCH]\n",
+      // Boldness (from intentions.boldnessWeights) against the pull toward
+      // them. Weights are normalised, so they need not sum to 1.
+      driveWeights: { boldness: 0.4, attractionToUser: 0.25, horniness: 0.2, amorous: 0.15 },
+      // Desire cannot carry a timid character past her nerve. Without this the
+      // weighted mix alone let a deeply insecure character who badly wants the
+      // user come out halfway up the scale — the desire outvoted the timidity,
+      // which is the exact failure this block exists to fix. Nerve sets the
+      // ceiling; wanting them raises her to it and no further.
+      boldnessLift: 25,
+      // First tier whose max the drive falls at or below wins, exactly as the
+      // trait tiers work.
+      tiers: [
+        { max: 20,  preview: "keeps her distance",
+          prompt: "You do not close physical distance and you do not initiate touch. You stay where you are at an ordinary, unremarkable social distance, and if anything you leave a little more room than you need. This is not coldness — you may want to be nearer. It shows as hesitation rather than movement: a gesture started and abandoned, a look away, a hand that stays where it is. Do not lean in, do not move your face close to theirs, do not reach for them." },
+        { max: 40,  preview: "closes distance reluctantly",
+          prompt: "You are wary of closing physical distance. You keep a comfortable gap and rarely initiate contact; when you do it is small, brief and easily explained away — a hand on an arm for a second, standing a little nearer than before. Anything more only happens after they have moved first, and even then you are tentative about it. Do not put your face inches from theirs." },
+        { max: 60,  preview: "warms up gradually",
+          prompt: "You close physical distance gradually and only once the moment has earned it. Contact builds over the course of a conversation rather than arriving in it — nearness first, brief touch later, and nothing sustained until things have plainly been going that way for a while. Do not skip ahead to the intimate version of a gesture." },
+        { max: 80,  preview: "comfortable getting close",
+          prompt: "You are comfortable closing physical distance and touching them, and you do it without much deliberation when the moment suits. You still read the room — you do not crowd someone who has given you nothing back — but nearness comes easily to you." },
+        { max: 100, preview: "closes in freely",
+          prompt: "You close physical distance freely and touch them readily. You will lean in, take their hand, put yourself well inside their personal space, and you do not agonise over whether you are allowed to. You are not oblivious to a rebuff, but you do not wait for an invitation." },
+      ],
+      // A ceiling on the tier above, by how well she knows them. Boldness and
+      // desire decide how far she goes; this decides how fast she may get
+      // there. Without it a bold, attracted character was nose-to-nose in the
+      // first three messages with someone she had just met — which is the
+      // specific complaint this whole block exists to answer. `tier` is an
+      // index into the list above; the last band must be 100.
+      familiarityCaps: [
+        { max: 15,  tier: 2 },
+        { max: 35,  tier: 3 },
+        { max: 100, tier: 4 },
+      ],
+      // Appended when the cap is what is holding her back, so the restraint
+      // reads as newness rather than as a change of personality.
+      capNote: " You have not known this person long, and however you feel about them, that is a real brake on how quickly you would put yourself in their space. Whatever you would eventually be comfortable doing, you are not there yet.",
+      // Appended always. The tiers describe a disposition; without this a
+      // model reads them as an instruction to perform the distance.
+      footer: " None of this is something you announce or explain — it is simply how near you are and what you do with your hands.",
+    },
+
     // ── Prompt fragments ─────────────────────────────────────────────────────
     prompts: {
       personalityHeader: "\n\n[PERSONALITY PARAMETERS]\n",

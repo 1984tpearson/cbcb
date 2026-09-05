@@ -265,6 +265,22 @@
     return label;
   }
 
+  // A plain on/off, for the handful of settings that are a boolean rather than
+  // a string. Editing one as JSON works but reads as a trap on a page where
+  // every other checkbox-shaped thing is a checkbox.
+  function checkboxField(labelText, path, hint) {
+    const box = el("input", { type: "checkbox" });
+    box.checked = at(path) !== false;
+    const span = el("span", { className: isChanged(path) ? "changed" : "" }, [labelText]);
+    box.addEventListener("change", () => {
+      setAt(path, box.checked);
+      span.className = isChanged(path) ? "changed" : "";
+    });
+    const row = el("label", { className: "field", style: "flex-direction:row;align-items:center;gap:8px;" }, [box, span]);
+    if (hint) row.appendChild(el("div", { className: "hint", style: "color:var(--muted);font-size:11px;margin-top:3px;" }, [hint]));
+    return row;
+  }
+
   // Anything without a purpose-built editor (option lists, model lists, face
   // pools) is edited as JSON — still editable, and it keeps this page from
   // needing a bespoke widget per shape.
@@ -430,6 +446,7 @@
     ["prompts", "Prompt text", buildPrompts],
     ["voice", "Age & voice", buildVoice],
     ["intentions", "Intentions", buildIntentions],
+    ["physicality", "Closeness", buildPhysicality],
     ["openings", "Openings", buildOpenings],
     ["image", "Image prompts", buildImage],
     ["models", "Models & options", buildModels],
@@ -606,6 +623,28 @@
           field("Added otherwise", i + "sfwNote", "area"),
           field("Progress prompt", i + "advancePrompt", "area",
             "{name}, {list}, {scene} and {recent} are substituted in. Each line of {list} names only the one thing that goal is working on now \u2014 its outstanding step, or the goal itself once there are none left \u2014 so \u201cdone\u201d means that thing, not the whole goal. {scene} is the tracked location, poses and clothing: a step can be satisfied by where things stand rather than by anything in the excerpt, and whatever brought that about may have scrolled out of it long ago."),
+        ]),
+    ];
+  }
+
+  function buildPhysicality() {
+    const i = "physicality.";
+    return [
+      card("Physical distance and touch",
+        "How near a character puts herself and whether she initiates contact. Every trait prompt above describes a way of TALKING, so without this a shy character reaches the model as a shy speaking style and then leans in inches from the user\u2019s face by the third message, because nothing said otherwise. Drive is boldness (the same weights the nerve gate uses \u2014 confidence, forwardness, coyness) mixed with attraction, arousal and how amorous she is, so wanting to be near someone and daring to be stay separate.",
+        [
+          checkboxField("Send this block at all", i + "enabled"),
+          field("Block heading", i + "header", "area"),
+          jsonField("Drive weights", i + "driveWeights",
+            "Slider keys to weights, plus \u201cboldness\u201d for the nerve-gate score. Normalised, so they need not add up to 1. A slider switched off for a character is dropped and the rest renormalised."),
+          jsonField("Tiers", i + "tiers",
+            "First tier whose \u201cmax\u201d the drive falls at or below wins, exactly like the trait prompts. The last must be 100."),
+          jsonField("Familiarity ceiling", i + "familiarityCaps",
+            "Caps the tier above by how well she knows the user \u2014 \u201ctier\u201d is a 0-based index into the list. Drive decides how far she will go; this decides how fast she may get there, so no amount of attraction makes a stranger nose-to-nose in three messages."),
+          field("Added when the ceiling is what is holding her back", i + "capNote", "area",
+            "So the restraint reads as newness rather than as a personality she does not have."),
+          field("Added always", i + "footer", "area",
+            "Without something like this a model performs the distance instead of simply keeping it."),
         ]),
     ];
   }

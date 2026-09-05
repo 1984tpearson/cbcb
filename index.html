@@ -658,6 +658,78 @@ function buildIntentionsNote(character) {
   return cfg.header + body + (shared ? `\n${shared}` : "") + pacing;
 }
 
+// ─── PHYSICAL DISTANCE AND TOUCH ─────────────────────────────────────────────
+// See the physicality block in site-config.js for why this exists at all. In
+// short: every trait tier describes a way of talking, so "deeply insecure" and
+// "complete stranger" reached the model as a speaking style and left where she
+// puts her body entirely to roleplay convention — which is nose-to-nose by the
+// third message.
+//
+// Boldness is not recomputed here. intentionBoldness already turns confidence,
+// forwardness and coyness into the number that decides how long a character
+// takes to work up to something, and closing physical distance is exactly that
+// kind of move; a second, differently-weighted notion of nerve would let a
+// character be timid about asking and bold about touching in the same reply.
+function physicalityDrive(character) {
+  const cfg = CFG.physicality;
+  const sliders = character.sliders || DEFAULT_SLIDERS;
+  const off = new Set(character.disabledSliders || []);
+  const weights = cfg.driveWeights || {};
+  let total = 0, sum = 0;
+  for (const key of Object.keys(weights)) {
+    // A disabled slider is dropped and the rest renormalised, rather than
+    // being counted at its default — switching off horniness should leave the
+    // other traits deciding, not quietly add a fixed 15 to the total.
+    if (key !== "boldness" && off.has(key)) continue;
+    const value = key === "boldness"
+      ? intentionBoldness(sliders)
+      : (sliders[key] ?? CFG.sliderDefaults[key] ?? 50);
+    total += weights[key] * value;
+    sum += weights[key];
+  }
+  if (sum <= 0) return 50;
+  const mixed = total / sum;
+  // Nerve is a ceiling, not just an ingredient. Averaged in, a strong enough
+  // pull toward the user simply outvoted a timid character's boldness and put
+  // her halfway up the scale — so wanting them may lift her to the edge of
+  // what her nerve allows, and no further.
+  const lift = CFG.physicality.boldnessLift;
+  const ceiling = typeof lift === "number" ? intentionBoldness(sliders) + lift : Infinity;
+  return Math.max(0, Math.min(100, Math.min(mixed, ceiling)));
+}
+
+function buildPhysicalityNote(character) {
+  const cfg = CFG.physicality;
+  if (!cfg || cfg.enabled === false) return "";
+  const tiers = cfg.tiers || [];
+  if (tiers.length === 0) return "";
+
+  const drive = physicalityDrive(character);
+  let index = tiers.findIndex(t => drive <= t.max);
+  if (index < 0) index = tiers.length - 1;
+
+  // How far she will go is drive; how fast she may get there is familiarity.
+  // Kept as a separate ceiling rather than folded into the weights above,
+  // because a stranger should not be reachable by a high enough attraction
+  // score — no amount of wanting makes three messages long enough.
+  let capped = false;
+  const sliders = character.sliders || DEFAULT_SLIDERS;
+  if (!new Set(character.disabledSliders || []).has("familiarity")) {
+    const familiarity = sliders.familiarity ?? CFG.sliderDefaults.familiarity ?? 10;
+    const cap = tierFor(cfg.familiarityCaps || [], familiarity);
+    if (cap && typeof cap.tier === "number" && cap.tier < index) {
+      index = Math.max(0, cap.tier);
+      capped = true;
+    }
+  }
+
+  const tier = tiers[index];
+  if (!tier || !tier.prompt) return "";
+  return (cfg.header || "\n\n") + tier.prompt
+    + (capped ? (cfg.capNote || "") : "")
+    + (cfg.footer || "");
+}
+
 // What the progress judge is shown, one entry per active intention. Progress is
 // only ever awarded for the ONE thing an intention is working on now — its
 // outstanding step, or the goal once there are none left. The judge does see
@@ -978,6 +1050,7 @@ async function sendChat({ messages, character, model, settings }) {
     : "";
 
   const st = character.staging;
+  const physicalityNote = buildPhysicalityNote(character);
   const stagingClause = hasStaging(st)
     ? `\n\n[STAGING — where everyone is right now]\n${[
         st.location ? `Setting: ${st.location}.` : "",
@@ -987,7 +1060,7 @@ async function sendChat({ messages, character, model, settings }) {
       ].filter(Boolean).join(" ")} Stay physically consistent with this — don't teleport, stand up without standing up, or forget where you both are. Move only when the scene actually calls for it, and describe the movement when you do.`
     : "";
 
-  const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + voiceNote + personaNote + nsfwClause + actionClause + agencyClause + plainClause + wardrobeClause + stagingClause + memoryClause + intentionsNote;
+  const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + voiceNote + personaNote + nsfwClause + actionClause + agencyClause + plainClause + wardrobeClause + stagingClause + physicalityNote + memoryClause + intentionsNote;
 
   // Appended to the request only — never stored in the conversation — exactly
   // as the regeneration instruction is.
@@ -3706,10 +3779,10 @@ Describe the CURRENT state, after everything above has happened:
 - location: where they are now, e.g. "the living room of her house, evening". If someone moved rooms, use the new room.
 - charPose: ${currentChar.name}'s body position now, completing "she is ...", e.g. "sitting on the couch, turned toward him". POSTURE ONLY — sitting, standing, lying, leaning, kneeling, and where. Not gestures, not expressions, not emotions.
 - userPose: the User's body position now, same rules, e.g. "sitting beside her on the couch".
-- proximity: how far apart they are now, e.g. "side by side, almost touching", "a metre apart", "across the room".
+- proximity: the distance they have SETTLED at, e.g. "side by side, almost touching", "a metre apart", "across the room". This is where they are standing or sitting relative to each other, not the closest point either of them momentarily reached. A lean-in, a reach across, a touch in passing or a moment of leaning close does not change it — if she leaned in to say something and did not stay there, they are still as far apart as they were. Record a nearer distance only when they have actually moved and stayed moved: sat down together, closed the gap and remained in it, ended up in each other's arms. Where a moment of closeness has passed and neither of them moved, restate the previous distance unchanged.
 
 Rules:
-- The most recent action wins. If someone sat down, they are sitting, even if they were standing a moment ago.
+- For location and pose, the most recent action wins: if someone sat down, they are sitting, even if they were standing a moment ago. Proximity is the exception — it follows the settled-distance rule above, so a momentary lean does not override it.
 - All four must describe one coherent scene: two people sitting together on a couch are not a metre apart.
 - Under 15 words each, concrete and physical.
 - Use null ONLY if nothing in the conversation or previous staging supports a value.
