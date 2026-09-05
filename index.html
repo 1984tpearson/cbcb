@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=3"></script>
-  <script src="image-prompt.js?v=3"></script>
+  <script src="site-config.js?v=4"></script>
+  <script src="image-prompt.js?v=4"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -2878,6 +2878,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   const [bgImage, setBgImage] = useState(initialChar.backgroundImage);
   const [showBgMenu, setShowBgMenu] = useState(false);
   const [showPersonality, setShowPersonality] = useState(false);
+  const [showFaceEditor, setShowFaceEditor] = useState(false);
   const [openingScenarios, setOpeningScenarios] = useState(null);
   const [openingLoading, setOpeningLoading] = useState(false);
   const [seenScenarioLabels, setSeenScenarioLabels] = useState([]);
@@ -3653,8 +3654,9 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
             <button style={S.backBtn} className="discreet-back-btn" onClick={onBack}>‹ Back</button>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1 }}>
               {character.referenceImage && (
-                <div style={{ width: 32, height: 32, borderRadius: "50%", overflow: "hidden", marginBottom: 2 }}>
-                  <img src={character.referenceImage} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <div style={{ width: 32, height: 32, borderRadius: "50%", overflow: "hidden", marginBottom: 2, cursor: "pointer" }}
+                  title="Edit face" onClick={() => setShowFaceEditor(true)}>
+                  <img src={character.referenceImage} alt="Edit face" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                 </div>
               )}
               <span className="discreet-char-name">{character.name}</span>
@@ -3665,7 +3667,11 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
           <>
             <button style={S.backBtn} onClick={onBack}>← Back</button>
             <div style={S.chatHeaderInfo}>
-              {character.referenceImage && <img src={character.referenceImage} alt="" style={S.chatAvatar} />}
+              {character.referenceImage && (
+                <img src={character.referenceImage} alt="Edit face" title="Edit face"
+                  style={{ ...S.chatAvatar, cursor: "pointer" }}
+                  onClick={() => setShowFaceEditor(true)} />
+              )}
               <div style={{ minWidth: 0 }}>
                 <span style={S.chatCharName}>{character.name}</span>
                 <div style={{ display: "flex", gap: 5, marginTop: 2, marginBottom: 4 }}>
@@ -3977,6 +3983,15 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
 
       {showPersonality && (
         <CharacterPersonalityPanel character={character} onSave={handlePersonalitySave} onClose={() => setShowPersonality(false)} />
+      )}
+
+      {/* Opened from the header avatar. commitCharacter both updates the chat's
+          own copy and persists, so a new base image anchors the very next image
+          generated in this conversation rather than only after a reopen. */}
+      {showFaceEditor && (
+        <FaceEditor character={character} settings={settings}
+          onSave={c => { commitCharacter(c); setShowFaceEditor(false); }}
+          onClose={() => setShowFaceEditor(false)} />
       )}
     </div>
   );
