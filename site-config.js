@@ -472,7 +472,14 @@
                 { value: "Glam", phrase: "full glam makeup, flawless base, contoured" },
                 { value: "Smoky", phrase: "smoky eye makeup" },
                 { value: "Bold", phrase: "bold, high-contrast makeup" },
-                { value: "Goth", phrase: "dark gothic makeup, pale base" },
+                // Not "gothic", and no "pale base". "Gothic" reads to an image
+                // model as theatrical — stage paint, Halloween, vampire — and
+                // "pale base" is a literal instruction to whiten her over the
+                // skin tone the base image already establishes. Together they
+                // produced corpse paint. Naming the individual features instead
+                // gets the subculture look without the costume, and "natural
+                // skin tone" defends the base image's own colouring.
+                { value: "Goth", phrase: "understated everyday goth makeup, smudged black eyeliner, dark smoky eyeshadow, deep plum-black lip, natural skin tone" },
                 { value: "Editorial", phrase: "editorial high-fashion makeup" },
               ] },
               { key: "lips", label: "Lips", options: [
