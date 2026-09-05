@@ -382,8 +382,17 @@
         // Used instead when the identity anchor is deliberately loosened for a
         // bone-structure change, which img2img otherwise resists.
         editPreambleLoose: "the same person with the same hair colour, skin tone and colouring, restyled facial structure",
-        // Appended to every face-editor generation.
-        editSuffix: "head and shoulders visible, flattering natural light, photorealistic, sharp focus on the face, high detail",
+        // Everything the edit must leave alone. The face editor changes a face;
+        // it is not a request for a new photograph of that person, so the shot
+        // itself — its crop, distance, pose, clothing and background — has to be
+        // named as fixed. Without this the model returns a portrait no matter
+        // what the reference was, because a prompt about a face reads as a brief
+        // for a headshot.
+        editFraming: "keep the reference image's exact framing, camera distance, crop, pose, clothing and background — reproduce the same photograph and change only the face",
+        // Appended to every face-editor generation. Deliberately says nothing
+        // about composition or shot type: editFraming above is what decides
+        // those, and a second opinion here would only argue with it.
+        editSuffix: "photorealistic, natural lighting, sharp focus, high detail",
         groups: [
           {
             key: "makeup",

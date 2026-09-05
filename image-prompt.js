@@ -339,7 +339,7 @@ window.ImagePrompt = {
       const preamble = loosenIdentity ? cfg.editPreambleLoose : cfg.editPreamble;
       // With nothing set the editor is being used to re-shoot the base image
       // unchanged, so the preamble and suffix alone are the whole request.
-      return [preamble, charDesc, facePart, cfg.editSuffix].filter(Boolean).join(", ");
+      return [preamble, cfg.editFraming, charDesc, facePart, cfg.editSuffix].filter(Boolean).join(", ");
     }
 
     function buildAppearancePrompt(appearance) {
