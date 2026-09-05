@@ -607,6 +607,51 @@
         // limit. Stored in a companion "<key>Custom" entry.
         customValue: "Custom",
       },
+
+      // ── Body & tattoos ──────────────────────────────────────────────────────
+      // The base image is nude on purpose: it is the only thing passed to the
+      // image model, clothing is decided per scene in chat, and tattoos hidden
+      // under clothes in the reference are tattoos the model never learns
+      // about. It is never displayed — avatarImage is what the UI renders.
+      body: {
+        customValue: "Custom",
+        noneValue: "None",
+        // Cropped at mid-thigh rather than head-to-toe. Full length shows the
+        // last few tattoos at the cost of shrinking the face to a handful of
+        // pixels, and the face is the thing this image exists to anchor.
+        baseFraming: "full body nude, standing straight facing the camera, framed from mid-thigh upwards, arms relaxed at the sides and fully visible, plain neutral grey studio background, even soft lighting, whole body in frame",
+        baseNudeClause: "completely nude, no clothing of any kind, all skin visible",
+        basePreamble: "same person, same face and identity as the reference image, same hair, skin tone and colouring",
+        baseSuffix: "photorealistic, natural skin texture, sharp focus, high detail",
+        // Said explicitly rather than left unsaid: an unstated absence lets the
+        // model invent tattoos, and a base image is the last place you want a
+        // detail arriving by accident.
+        noTattoos: "clean unmarked skin, no tattoos",
+        fields: [
+          { key: "tattoos", label: "Tattoos", options: [
+            { value: "None", phrase: "clean unmarked skin, no tattoos" },
+            { value: "One small tattoo", phrase: "a single small tattoo" },
+            { value: "One arm", phrase: "tattoos on one arm" },
+            { value: "Both arms", phrase: "tattoos on both arms" },
+            { value: "Full sleeve", phrase: "a full tattoo sleeve on one arm" },
+            { value: "Both sleeves", phrase: "full tattoo sleeves on both arms" },
+            { value: "Chest", phrase: "a chest tattoo" },
+            { value: "Back piece", phrase: "a large back tattoo" },
+            { value: "Ribs", phrase: "a tattoo along the ribs" },
+            { value: "Thigh", phrase: "a thigh tattoo" },
+            { value: "Neck", phrase: "a neck tattoo" },
+            { value: "Hands", phrase: "tattooed hands and fingers" },
+            { value: "Scattered", phrase: "several small tattoos scattered across the body" },
+            { value: "Heavily covered", phrase: "heavily tattooed, most of the body covered in tattoos" },
+          ] },
+        ],
+        // The avatar is display only and never reaches the image model, so it
+        // is free to be a flattering clothed portrait with no consequences for
+        // what gets generated in chat.
+        avatarPreamble: "same person, same face and identity as the reference image",
+        avatarFraming: "head and shoulders portrait, fully clothed in an everyday top, neutral background",
+        avatarSuffix: "photorealistic, natural lighting, sharp focus, high detail",
+      },
     },
 
     // ── Age-appropriate voice ────────────────────────────────────────────────

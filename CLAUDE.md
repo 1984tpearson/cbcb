@@ -12,7 +12,8 @@ Once the owner edits one entry, their saved copy of that entire array takes
 over and later changes to the other entries in it silently never arrive.
 Stored whole: `sliderDefs`, `reactiveSliderKeys`, every list under `options`,
 `models.text` / `models.image`, `appearance.*Tiers`, `chestCups`,
-`faceVariationPools`. Merged per key (no clash): `traitTiers`, `prompts`,
+`faceVariationPools`, `appearance.face.groups` (and each field's `options`),
+`appearance.face.structure`, `appearance.body.fields`. Merged per key (no clash): `traitTiers`, `prompts`,
 `sliderDefaults`, `reactiveMaxDrift`, `models.imageParams`, and the scalar
 appearance fields.
 
@@ -38,6 +39,25 @@ new default) and offer the two choices:
 - **drop** — remove their override so they pick up the new default instead.
 
 Either way they decide, not you. If there is no clash, just make the change.
+
+## Two images per character, and they must never swap
+
+- `referenceImage` — nude, 3/4 length. The **only** image passed to the image
+  model, and never rendered. Nude because clothing is decided per scene in
+  chat, and a tattoo hidden under clothes in the reference is one the model
+  never learns about.
+- `avatarImage` — clothed portrait. Rendered everywhere, never sent to the
+  model. Read it through `characterAvatar(c)`, which falls back to
+  `referenceImage` so characters predating the split still display correctly.
+
+Two images only conflict when both feed the generator, which is why the avatar
+is display-only. `backgroundImage` follows the avatar unless deliberately set
+to something else.
+
+Tattoos (`appearance.body`) are decided in the body editor and reach chat
+images **only as pixels in the base image** — nothing about them enters
+`buildAppearancePrompt` or any chat prompt. Do not add them there: the base
+image is already the source of truth, and a second one would argue with it.
 
 ## Layout
 

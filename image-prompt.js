@@ -368,6 +368,33 @@ window.ImagePrompt = {
       return groupsClear && structClear;
     }
 
+    // ── Body base image & avatar ────────────────────────────────────────────
+    // Both are editor-only. Nothing here is reachable from buildAppearancePrompt
+    // or any chat prompt: tattoos travel into chat images entirely as pixels in
+    // the base image, never as words, which is the whole reason the base image
+    // is nude. Adding them to prompt assembly as well would be a second source
+    // of truth arguing with the first.
+    function buildBodyBasePrompt({ body, charDesc }) {
+      const cfg = (CFG.appearance && CFG.appearance.body) || null;
+      if (!cfg) return "";
+      const values = body || {};
+      const marks = (cfg.fields || [])
+        .map(field => faceFieldPhrase(values, field, cfg, cfg.noneValue))
+        .filter(Boolean);
+      // Absence stated rather than implied — left unsaid, the model is free to
+      // invent tattoos, and this image is what every later generation copies.
+      const skin = marks.length ? marks.join(", ") : cfg.noTattoos;
+      return [cfg.basePreamble, cfg.baseFraming, cfg.baseNudeClause, charDesc, skin, cfg.baseSuffix]
+        .filter(Boolean).join(", ");
+    }
+
+    function buildAvatarPrompt({ charDesc }) {
+      const cfg = (CFG.appearance && CFG.appearance.body) || null;
+      if (!cfg) return "";
+      return [cfg.avatarPreamble, cfg.avatarFraming, charDesc, cfg.avatarSuffix]
+        .filter(Boolean).join(", ");
+    }
+
     // The change request sent to the image model when regenerating a base image
     // from the face editor. The reference image carries the identity, so this
     // says what the face should now look like rather than re-describing the
@@ -588,6 +615,7 @@ window.ImagePrompt = {
       HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
       appearancePhrasePreview, buildAppearancePrompt,
       buildFacePrompt, buildFaceEditPrompt, faceFieldPhrase, isFaceUnset,
+      buildBodyBasePrompt, buildAvatarPrompt,
       isUserUndressed, povSelfBody, isIntimateScene,
       beatShowsContact, detectPhysicalContact, stripViewerLimbs,
       buildPovModifiers, joinPromptParts, subjectFor, assembleImagePrompt,

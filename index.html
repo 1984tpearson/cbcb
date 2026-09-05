@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=7"></script>
-  <script src="image-prompt.js?v=7"></script>
+  <script src="site-config.js?v=8"></script>
+  <script src="image-prompt.js?v=8"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -360,6 +360,7 @@ const {
   HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
   appearancePhrasePreview, buildAppearancePrompt,
   buildFacePrompt, buildFaceEditPrompt, isFaceUnset,
+  buildBodyBasePrompt, buildAvatarPrompt,
   isUserUndressed, povSelfBody, isIntimateScene,
   detectPhysicalContact, stripViewerLimbs,
   buildPovModifiers, joinPromptParts, assembleImagePrompt,
@@ -1272,6 +1273,35 @@ const DEFAULT_APPEARANCE = {
   face: null,
 };
 
+// Two images, two jobs, and they must never swap.
+//
+//   referenceImage — nude, 3/4 length. The ONLY thing passed to the image
+//                    model, and never rendered. Nude because clothing is
+//                    decided per scene in chat, and a tattoo hidden under
+//                    clothes in the reference is one the model never learns.
+//   avatarImage    — clothed portrait. Rendered everywhere, and never passed
+//                    to the image model.
+//
+// The conflict two base images would create only exists when both feed the
+// generator; a display-only image cannot disagree with anything. The fallback
+// to referenceImage is what keeps characters that predate the split looking
+// exactly as they did — their reference is still the clothed image it always
+// was until the body editor converts them.
+const characterAvatar = (c) => (c && (c.avatarImage || c.referenceImage)) || null;
+
+const BODY_CFG = (CFG.appearance && CFG.appearance.body) || { fields: [], noneValue: "None", customValue: "Custom" };
+
+// Same shape as normaliseFace: fill in fields a stored body predates, so a
+// dropdown never renders blank instead of on its sentinel.
+function normaliseBody(body) {
+  const out = {};
+  for (const field of BODY_CFG.fields || []) {
+    out[field.key] = BODY_CFG.noneValue;
+    out[field.key + "Custom"] = "";
+  }
+  return { ...out, ...(body || {}) };
+}
+
 const FACE_CFG = (CFG.appearance && CFG.appearance.face) || { groups: [], structure: [], noneValue: "None", unsetValue: "Any" };
 
 // A face with every field on its "nothing set" sentinel. Built from the config
@@ -2179,6 +2209,141 @@ function AppearanceSection({ appearance, onChange }) {
   );
 }
 
+// ─── BODY EDITOR ──────────────────────────────────────────────────────────────
+// Owns the two images and the split between them: the nude base that anchors
+// every generation, and the clothed avatar the UI shows. Tattoos live here
+// because they only exist as pixels in the base image — nothing about them
+// reaches a chat prompt, so this screen is the only place they are decided.
+function BodyEditor({ character, settings, onSave, onClose }) {
+  const [body, setBody] = useState(() => normaliseBody(character.appearance && character.appearance.body));
+  const [baseUrl, setBaseUrl] = useState(character.referenceImage || null);
+  const [avatarUrl, setAvatarUrl] = useState(character.avatarImage || null);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [lightbox, setLightbox] = useState(null);
+
+  // The avatar this save will land on. Written out here because it is also the
+  // migration: a character converted for the first time has no avatarImage, and
+  // its outgoing clothed referenceImage is exactly the portrait we want, so it
+  // is claimed as the avatar before the nude one takes its place.
+  const nextAvatar = avatarUrl || character.avatarImage || character.referenceImage || null;
+  const converting = !character.avatarImage && baseUrl !== character.referenceImage;
+
+  const charDesc = () => {
+    const appearanceDesc = buildAppearancePrompt(character.appearance);
+    const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
+    const ageDesc = character.age ? `${character.age} year old` : "";
+    return [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
+  };
+
+  const generate = async (kind) => {
+    const anchor = kind === "base" ? (baseUrl || nextAvatar) : (baseUrl || avatarUrl);
+    if (!anchor) { setError("This character has no image yet — generate one in the character editor first."); return; }
+    setBusy(kind); setError("");
+    try {
+      const prompt = kind === "base"
+        ? buildBodyBasePrompt({ body, charDesc: charDesc() })
+        : buildAvatarPrompt({ charDesc: charDesc() });
+      const url = await generateImageWiro({
+        prompt,
+        model: settings.imageModel,
+        // The avatar is anchored to the nude base rather than the old avatar so
+        // it tracks the current face — it is a portrait of whoever the base
+        // image says she is now, which is the point of having it follow.
+        initImage: anchor,
+        seed: Math.floor(Math.random() * 2147483647),
+      });
+      if (kind === "base") setBaseUrl(url); else setAvatarUrl(url);
+    } catch (e) { setError(e.message); }
+    setBusy("");
+  };
+
+  const handleSave = () => {
+    // "Unless changed": a background still pointing at either image follows the
+    // avatar, and one deliberately set to something else is left alone.
+    const bgFollowed = !character.backgroundImage
+      || character.backgroundImage === character.referenceImage
+      || character.backgroundImage === character.avatarImage;
+    onSave({
+      ...character,
+      referenceImage: baseUrl,
+      avatarImage: nextAvatar,
+      backgroundImage: bgFollowed ? nextAvatar : character.backgroundImage,
+      appearance: { ...(character.appearance || {}), body },
+    });
+  };
+
+  const pane = (label, url, note, kind) => (
+    <div style={{ flex: 1, minWidth: 150 }}>
+      <label style={{ ...S.label, marginTop: 0 }}>{label}</label>
+      {url
+        ? <img src={url} alt={label} onClick={() => setLightbox(url)}
+            style={{ width: "100%", borderRadius: 10, display: "block", background: "var(--bg3)", cursor: "zoom-in" }} />
+        : <div style={{ width: "100%", height: 160, borderRadius: 10, background: "var(--bg3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "var(--text3)", textAlign: "center", padding: 8 }}>Not generated yet</div>}
+      <p style={{ fontSize: 11, color: "var(--text3)", margin: "4px 0 6px" }}>{note}</p>
+      <button style={S.btnSecondary} onClick={() => generate(kind)} disabled={!!busy}>
+        {busy === kind ? "Generating…" : url ? "↺ Regenerate" : "Generate"}
+      </button>
+    </div>
+  );
+
+  return (
+    <div style={S.overlay}>
+      <div style={{ ...S.modal, maxWidth: 560 }}>
+        <div style={S.modalHeader}>
+          <span style={S.modalTitle}>Body — {character.name}</span>
+          <button style={S.iconBtn} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalBody}>
+
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+            {pane("Base image", baseUrl, "Nude, 3/4 length. Anchors every image generated in chat. Never shown anywhere else.", "base")}
+            {pane("Avatar", avatarUrl, "What the app displays. Never sent to the image model.", "avatar")}
+          </div>
+
+          {converting && (
+            <p style={{ fontSize: 12, color: "var(--blue)", margin: "10px 0 0" }}>
+              Saving will keep this character's current picture as the avatar, so nothing on screen changes.
+            </p>
+          )}
+
+          <div style={S.divider} />
+
+          {(BODY_CFG.fields || []).map(field => (
+            <FaceField key={field.key} field={field}
+              value={body[field.key]} unsetValue={BODY_CFG.noneValue}
+              customValue={body[field.key + "Custom"]}
+              onChange={v => setBody(b => ({ ...b, [field.key]: v }))}
+              onCustomChange={v => setBody(b => ({ ...b, [field.key + "Custom"]: v }))} />
+          ))}
+          <p style={{ fontSize: 12, color: "var(--text3)", margin: "10px 0 0" }}>
+            Tattoos are carried into chat images by the base image itself, not by the prompt — so regenerate the base
+            image after changing this, or nothing will look any different.
+          </p>
+
+          {error && <p style={{ color: "#c05060", fontSize: 13, marginTop: 8 }}>{error}</p>}
+
+          <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+            <div style={{ flex: 1 }} />
+            <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
+            <button style={S.btnPrimary} onClick={handleSave} disabled={!!busy}>Save</button>
+          </div>
+
+        </div>
+      </div>
+
+      {lightbox && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt="expanded" style={{ maxWidth: "100%", maxHeight: "90vh", borderRadius: 12, objectFit: "contain", boxShadow: "0 8px 40px rgba(0,0,0,0.8)" }} />
+          <button style={{ position: "absolute", top: 20, right: 20, background: "rgba(255,255,255,0.15)", border: "none", color: "white", borderRadius: "50%", width: 40, height: 40, fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+            onClick={() => setLightbox(null)}>✕</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── FACE EDITOR ──────────────────────────────────────────────────────────────
 // Changes the face on an existing character — makeup, eyewear and details
 // primarily, facial structure when asked — and re-shoots the base image that
@@ -2217,7 +2382,7 @@ function FaceField({ field, value, customValue, onChange, onCustomChange, unsetV
   );
 }
 
-function FaceEditor({ character, settings, onSave, onClose }) {
+function FaceEditor({ character, settings, onSave, onClose, onOpenBody }) {
   const [face, setFace] = useState(() => normaliseFace(character.appearance && character.appearance.face));
   const [variants, setVariants] = useState(() => {
     const existing = character.faceVariants || [];
@@ -2289,8 +2454,10 @@ function FaceEditor({ character, settings, onSave, onClose }) {
   const handleApply = () => {
     // backgroundImage follows the reference image only where it was already
     // tracking it — a background deliberately set to something else is not
-    // this editor's to overwrite.
-    const followsRef = character.backgroundImage === character.referenceImage;
+    // this editor's to overwrite. And only while the character has no avatar
+    // of its own: once the base image is the nude one, the background follows
+    // the avatar instead, which this editor never touches.
+    const followsRef = !character.avatarImage && character.backgroundImage === character.referenceImage;
     onSave({
       ...character,
       referenceImage: activeUrl || character.referenceImage,
@@ -2408,6 +2575,10 @@ function FaceEditor({ character, settings, onSave, onClose }) {
             Saving sets the selected image as the base image used to anchor every chat generation, and applies these face
             settings to the character's description.
           </p>
+          {onOpenBody && (
+            <button style={{ background: "none", border: "none", color: "var(--blue)", fontSize: 13, fontWeight: 700, cursor: "pointer", padding: "10px 0 0", textAlign: "left" }}
+              onClick={onOpenBody}>Body &amp; tattoos →</button>
+          )}
 
         </div>
       </div>
@@ -2691,8 +2862,8 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
               ))}
             </div>
           )}
-          {!generatedImages.length && form.referenceImage && (
-            <img src={form.referenceImage} alt="ref" style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 8, marginBottom: 8, background: "var(--bg3)" }} />
+          {!generatedImages.length && characterAvatar(form) && (
+            <img src={characterAvatar(form)} alt="ref" style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 8, marginBottom: 8, background: "var(--bg3)" }} />
           )}
           <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
             <button style={S.btnSecondary} onClick={() => fileRef.current.click()} disabled={analysing}>{analysing ? "Reading image…" : "Upload Image"}</button>
@@ -2730,7 +2901,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
 }
 
 // ─── CHARACTER CARD ───────────────────────────────────────────────────────────
-function CharacterCard({ character, onSelect, onEdit, onEditFace, onDelete, discreetMode }) {
+function CharacterCard({ character, onSelect, onEdit, onEditFace, onEditBody, onDelete, discreetMode }) {
   const [hover, setHover] = useState(false);
   const genderLabel = character.gender === "Custom" ? (character.customGender || "Custom") : character.gender;
 
@@ -2740,8 +2911,8 @@ function CharacterCard({ character, onSelect, onEdit, onEditFace, onDelete, disc
         style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", background: hover ? "#f5f5f5" : "#ffffff" }}
         onClick={() => onSelect(character)} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
         <div style={{ width: 44, height: 44, borderRadius: "50%", overflow: "hidden", background: "#e9e9eb", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          {character.referenceImage
-            ? <img src={character.referenceImage} alt={character.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          {characterAvatar(character)
+            ? <img src={characterAvatar(character)} alt={character.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             : <span style={{ fontSize: 18, color: "#8e8e93" }}>{character.name[0]?.toUpperCase()}</span>}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -2753,6 +2924,7 @@ function CharacterCard({ character, onSelect, onEdit, onEditFace, onDelete, disc
         <div onClick={e => e.stopPropagation()} style={{ display: "flex", gap: 4 }}>
           <button style={{ background: "none", border: "none", color: "#8e8e93", fontSize: 15, cursor: "pointer", padding: "4px 6px" }} onClick={() => onEdit(character)} title="Edit">✎</button>
           <button style={{ background: "none", border: "none", color: "#8e8e93", fontSize: 15, cursor: "pointer", padding: "4px 6px" }} onClick={() => onEditFace(character)} title="Edit face">☺</button>
+          <button style={{ background: "none", border: "none", color: "#8e8e93", fontSize: 15, cursor: "pointer", padding: "4px 6px" }} onClick={() => onEditBody(character)} title="Body & tattoos">⚉</button>
           <button style={{ background: "none", border: "none", color: "#ff3b30", fontSize: 15, cursor: "pointer", padding: "4px 6px" }} onClick={() => onDelete(character.id)} title="Delete">✕</button>
         </div>
       </div>
@@ -2763,8 +2935,8 @@ function CharacterCard({ character, onSelect, onEdit, onEditFace, onDelete, disc
     <div style={{ ...S.characterCard, ...(hover ? { background: "rgba(255,255,255,0.07)", borderColor: "rgba(255,255,255,0.14)" } : {}) }}
       onClick={() => onSelect(character)} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
       <div style={S.characterAvatar}>
-        {character.referenceImage
-          ? <img src={character.referenceImage} alt={character.name} style={S.avatarImg} />
+        {characterAvatar(character)
+          ? <img src={characterAvatar(character)} alt={character.name} style={S.avatarImg} />
           : <span style={S.avatarInitial}>{character.name[0]?.toUpperCase()}</span>}
       </div>
       <div style={S.characterInfo}>
@@ -2779,6 +2951,7 @@ function CharacterCard({ character, onSelect, onEdit, onEditFace, onDelete, disc
       <div style={S.characterActions} onClick={e => e.stopPropagation()}>
         <button style={S.iconBtn} onClick={() => onEdit(character)} title="Edit">✎</button>
         <button style={S.iconBtn} onClick={() => onEditFace(character)} title="Edit face">☺</button>
+        <button style={S.iconBtn} onClick={() => onEditBody(character)} title="Body & tattoos">⚉</button>
         <button style={{ ...S.iconBtn, color: "#c05060" }} onClick={() => onDelete(character.id)} title="Delete">✕</button>
       </div>
     </div>
@@ -2905,6 +3078,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   const [showBgMenu, setShowBgMenu] = useState(false);
   const [showPersonality, setShowPersonality] = useState(false);
   const [showFaceEditor, setShowFaceEditor] = useState(false);
+  const [showBodyEditor, setShowBodyEditor] = useState(false);
   const [openingScenarios, setOpeningScenarios] = useState(null);
   const [openingLoading, setOpeningLoading] = useState(false);
   const [seenScenarioLabels, setSeenScenarioLabels] = useState([]);
@@ -3679,10 +3853,10 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
           <>
             <button style={S.backBtn} className="discreet-back-btn" onClick={onBack}>‹ Back</button>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1 }}>
-              {character.referenceImage && (
+              {characterAvatar(character) && (
                 <div style={{ width: 32, height: 32, borderRadius: "50%", overflow: "hidden", marginBottom: 2, cursor: "pointer" }}
                   title="Edit face" onClick={() => setShowFaceEditor(true)}>
-                  <img src={character.referenceImage} alt="Edit face" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  <img src={characterAvatar(character)} alt="Edit face" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                 </div>
               )}
               <span className="discreet-char-name">{character.name}</span>
@@ -3693,8 +3867,8 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
           <>
             <button style={S.backBtn} onClick={onBack}>← Back</button>
             <div style={S.chatHeaderInfo}>
-              {character.referenceImage && (
-                <img src={character.referenceImage} alt="Edit face" title="Edit face"
+              {characterAvatar(character) && (
+                <img src={characterAvatar(character)} alt="Edit face" title="Edit face"
                   style={{ ...S.chatAvatar, cursor: "pointer" }}
                   onClick={() => setShowFaceEditor(true)} />
               )}
@@ -3736,7 +3910,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                 {showBgMenu && (
                   <div style={S.bgMenu}>
                     <div style={S.bgMenuTitle}>Set Background</div>
-                    {character.referenceImage && <button style={S.bgMenuItem} onClick={() => handleSetBackground(character.referenceImage)}>Use reference image</button>}
+                    {characterAvatar(character) && <button style={S.bgMenuItem} onClick={() => handleSetBackground(characterAvatar(character))}>Use character image</button>}
                     {lastGeneratedImage && <button style={S.bgMenuItem} onClick={() => handleSetBackground(lastGeneratedImage.content)}>Use last generated</button>}
                     <button style={S.bgMenuItem} onClick={() => handleSetBackground(null)}>Clear background</button>
                   </div>
@@ -4017,7 +4191,14 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       {showFaceEditor && (
         <FaceEditor character={character} settings={settings}
           onSave={c => { commitCharacter(c); setShowFaceEditor(false); }}
-          onClose={() => setShowFaceEditor(false)} />
+          onClose={() => setShowFaceEditor(false)}
+          onOpenBody={() => { setShowFaceEditor(false); setShowBodyEditor(true); }} />
+      )}
+
+      {showBodyEditor && (
+        <BodyEditor character={character} settings={settings}
+          onSave={c => { commitCharacter(c); setShowBodyEditor(false); }}
+          onClose={() => setShowBodyEditor(false)} />
       )}
     </div>
   );
@@ -4034,6 +4215,7 @@ function App() {
   const [showCharForm, setShowCharForm] = useState(false);
   const [editingChar, setEditingChar] = useState(null);
   const [faceChar, setFaceChar] = useState(null);
+  const [bodyChar, setBodyChar] = useState(null);
   const [discreetMode, setDiscreetMode] = useState(() => storage.get("personachat_discreet", false));
 
   useEffect(() => { storage.set("personachat_settings", settings); }, [settings]);
@@ -4131,7 +4313,7 @@ function App() {
           <div style={discreetMode ? { display: "flex", flexDirection: "column", borderTop: "1px solid #e0e0e0" } : S.characterGrid}>
             {characters.map(c => (
               <CharacterCard key={c.id} character={c} onSelect={setActiveChar}
-                onEdit={c => { setEditingChar(c); setShowCharForm(true); }} onEditFace={setFaceChar} onDelete={deleteCharacter}
+                onEdit={c => { setEditingChar(c); setShowCharForm(true); }} onEditFace={setFaceChar} onEditBody={setBodyChar} onDelete={deleteCharacter}
                 discreetMode={discreetMode} />
             ))}
           </div>
@@ -4142,7 +4324,13 @@ function App() {
       {faceChar && (
         <FaceEditor character={faceChar} settings={settings}
           onSave={c => { saveCharacter(c); setFaceChar(null); }}
-          onClose={() => setFaceChar(null)} />
+          onClose={() => setFaceChar(null)}
+          onOpenBody={() => { setBodyChar(faceChar); setFaceChar(null); }} />
+      )}
+      {bodyChar && (
+        <BodyEditor character={bodyChar} settings={settings}
+          onSave={c => { saveCharacter(c); setBodyChar(null); }}
+          onClose={() => setBodyChar(null)} />
       )}
     </div>
   );
