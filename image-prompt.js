@@ -682,7 +682,7 @@ window.ImagePrompt = {
       ACTION_TEXT_RE, extractActionText,
       EMPTY_STAGING, STAGING_KEYS, hasStaging, buildStagingImageDesc,
       HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
-      appearancePhrasePreview, buildAppearancePrompt,
+      appearancePhrasePreview, buildAppearancePrompt, pickFaceVariation,
       buildFacePrompt, buildFaceEditPrompt, faceFieldPhrase, isFaceUnset,
       buildBodyBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
       isUserUndressed, povSelfBody, isIntimateScene,
