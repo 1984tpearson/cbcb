@@ -465,6 +465,12 @@ window.ImagePrompt = {
       const h = a.height ?? 50;
       const b = a.build ?? 50;
 
+      // Free text typed against one of the body fields, following the same
+      // "<key>Custom" convention hair/eye/skin already use. When present it
+      // replaces that field's tier phrase outright — the tier lists exist to
+      // save typing, not to be the only describable shapes.
+      const custom = key => String(a[key + "Custom"] || "").trim();
+
       // A tier marked skipInPrompt is the unremarkable middle one — saying
       // "average height" adds nothing the model can use, so it is only shown as
       // the slider's own preview text.
@@ -479,34 +485,42 @@ window.ImagePrompt = {
       // caricature proportions (tiny torso, stretched limbs) rather than a
       // proportionally short, slim figure.
       const heightCm = fillTemplate(cfg.heightMeasurementTemplate, { cm: sliderToCm(h) });
-      if (h <= 25 && b <= 20) {
+      const buildCustom = custom("build");
+      // The combined phrase exists to stop two extreme tier phrases stacking
+      // into caricature. A custom build is one phrase already, so there is
+      // nothing to combine and the author's own words win.
+      if (!buildCustom && h <= 25 && b <= 20) {
         parts.push(`${heightCm}, ${cfg.combinedShortSlim}`);
       } else {
         parts.push(heightCm);
         const heightPhrase = phraseFor(cfg.heightTiers, h);
         if (heightPhrase) parts.push(heightPhrase);
-        const buildPhrase = phraseFor(cfg.buildTiers, b);
+        const buildPhrase = buildCustom || phraseFor(cfg.buildTiers, b);
         if (buildPhrase) parts.push(buildPhrase);
       }
 
       const chest = a.chest ?? 50;
-      parts.push(appearancePhrasePreview("chest", chest));
+      parts.push(custom("chest") || appearancePhrasePreview("chest", chest));
 
       const waist = a.waist ?? 50;
       const hips = a.hips ?? 50;
+      const waistCustom = custom("waist");
+      const hipsCustom = custom("hips");
 
       // Waist + hips combined when both point the same direction — "narrow
       // waist, narrow hips" as two separate phrases reads as more extreme than
       // either was meant to be individually, since they're largely describing
       // the same silhouette.
-      if (waist <= 30 && hips <= 30) {
+      // Same reasoning as build: combining is a fix for two stacked tier
+      // phrases, so it steps aside as soon as either side is spelled out.
+      if (!waistCustom && !hipsCustom && waist <= 30 && hips <= 30) {
         parts.push(cfg.combinedSlenderWaistline);
-      } else if (waist >= 70 && hips >= 70) {
+      } else if (!waistCustom && !hipsCustom && waist >= 70 && hips >= 70) {
         parts.push(cfg.combinedCurvyWaistline);
       } else {
-        const waistPhrase = phraseFor(cfg.waistTiers, waist);
+        const waistPhrase = waistCustom || phraseFor(cfg.waistTiers, waist);
         if (waistPhrase) parts.push(waistPhrase);
-        const hipsPhrase = phraseFor(cfg.hipsTiers, hips);
+        const hipsPhrase = hipsCustom || phraseFor(cfg.hipsTiers, hips);
         if (hipsPhrase) parts.push(hipsPhrase);
       }
 

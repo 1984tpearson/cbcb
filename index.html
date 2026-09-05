@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=10"></script>
-  <script src="image-prompt.js?v=10"></script>
+  <script src="site-config.js?v=11"></script>
+  <script src="image-prompt.js?v=11"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -1826,8 +1826,6 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
   const [maritalStatus, setMaritalStatus] = useState(character.maritalStatus || "Single");
   const [relationship, setRelationship] = useState(character.relationship || "");
   const [relationshipCustom, setRelationshipCustom] = useState(character.relationshipCustom || "");
-  const [appearance, setAppearance] = useState(character.appearance || { ...DEFAULT_APPEARANCE });
-  const [showAppearancePanel, setShowAppearancePanel] = useState(false);
   const [nsfw, setNsfw] = useState(character.nsfw || false);
   const [autoImage, setAutoImage] = useState(character.autoImage || false);
   const [speakPlainly, setSpeakPlainly] = useState(character.speakPlainly || false);
@@ -1897,16 +1895,10 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
               value={relationshipCustom} onChange={e => setRelationshipCustom(e.target.value)} />
           )}
 
-          <div style={S.divider} />
-          <button style={{ ...S.btnSecondary, width:"100%", textAlign:"center" }}
-            onClick={() => setShowAppearancePanel(v => !v)}>
-            {showAppearancePanel ? "▲ Hide Appearance" : "▼ Appearance"}
-          </button>
-          {showAppearancePanel && (
-            <div style={{ marginTop:10 }}>
-              <AppearanceSection appearance={appearance} onChange={setAppearance} />
-            </div>
-          )}
+          {/* Appearance used to be editable here. It is not any more: changing
+              it changed nothing visible, since chat images take their look from
+              the base image and not from these words. It lives in the body
+              editor now, next to the regenerate button that makes it real. */}
           <div style={S.divider} />
           <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Wardrobe</span>
           <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Tracked automatically as clothing is mentioned in conversation. Edit manually to correct or set the starting state.</p>
@@ -2160,7 +2152,7 @@ Return ONLY the JSON object, no other text.` }] });
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, disabledSliders, reactiveEnabled, intentionsEnabled, intentions: intentions.filter(i => (i.goal || "").trim()).map(i => ({ ...i, steps: (i.steps || []).filter(st => (st.text || "").trim()) })), memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, staging: hasStaging(staging) ? staging : null, explicitDetail: explicitDetail.trim() || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, appearance, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
+          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, disabledSliders, reactiveEnabled, intentionsEnabled, intentions: intentions.filter(i => (i.goal || "").trim()).map(i => ({ ...i, steps: (i.steps || []).filter(st => (st.text || "").trim()) })), memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, staging: hasStaging(staging) ? staging : null, explicitDetail: explicitDetail.trim() || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
         </div>
       </div>
     </div>
@@ -2209,6 +2201,91 @@ function AppearanceSection({ appearance, onChange }) {
   );
 }
 
+// The body sliders as dropdowns, with the option labels derived from the tier
+// config rather than written out again. That keeps the label identical to the
+// phrase the prompt will use — the same reason personality previews and prompts
+// share a tier — and means a tier edit reaches this menu with no other work.
+//
+// Storage stays numeric: selecting a tier stores a value in the middle of its
+// band, so nothing downstream changes and no saved character needs migrating.
+const tierChoices = (tiers) => (tiers || []).map((t, i) => ({
+  value: t.phrase,
+  n: Math.round((((i === 0 ? 0 : tiers[i - 1].max) + t.max) / 2)),
+}));
+const cupChoices = (cups) => (cups || []).map((c, i) => ({
+  value: fillTemplate(CFG.appearance.chestTemplate, { cup: c }),
+  n: Math.round((i + 0.5) * (100 / cups.length)),
+}));
+
+const BODY_SHAPE_FIELDS = [
+  { key: "build", label: "Build", choices: tierChoices(CFG.appearance.buildTiers) },
+  { key: "chest", label: "Breasts", choices: cupChoices(CFG.appearance.chestCups) },
+  { key: "waist", label: "Waist", choices: tierChoices(CFG.appearance.waistTiers) },
+  { key: "hips",  label: "Hips",  choices: tierChoices(CFG.appearance.hipsTiers) },
+];
+
+// A numeric appearance field shown as a dropdown. The selected option is
+// whichever band the stored number falls in, so a value set by the slider in
+// the character form — or by the vibe generator — still shows correctly here.
+function ShapeField({ field, appearance, onChange }) {
+  const customKey = field.key + "Custom";
+  const customText = appearance[customKey] || "";
+  const n = appearance[field.key] ?? 50;
+  // Bands are contiguous, so the first whose midpoint band contains n wins;
+  // falling back to the last covers a value above every midpoint.
+  const current = customText ? "Custom" : (appearancePhrasePreview(field.key, n) || field.choices[0].value);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
+      <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>{field.label}</span>
+      <select style={S.select} value={current}
+        onChange={e => {
+          const v = e.target.value;
+          if (v === "Custom") { onChange({ [customKey]: customText || " " }); return; }
+          const choice = field.choices.find(c => c.value === v);
+          // Clearing the custom text is what makes the preset take effect —
+          // left behind it would keep overriding the band just chosen.
+          onChange({ [field.key]: choice ? choice.n : 50, [customKey]: "" });
+        }}>
+        {field.choices.map(c => <option key={c.value} value={c.value}>{c.value}</option>)}
+        <option value="Custom">Custom…</option>
+      </select>
+      {customText && (
+        <input style={{ ...S.input, marginTop: 4 }} autoFocus
+          placeholder={`Describe the ${field.label.toLowerCase()}…`}
+          value={customText.trim() ? customText : ""} onChange={e => onChange({ [customKey]: e.target.value })} />
+      )}
+    </div>
+  );
+}
+
+// Hair, eyes, skin and ethnicity already stored a "<key>Custom" companion, so
+// these only need rendering — the shape is the one the app already used.
+const COLOUR_FIELDS = [
+  { key: "ethnicity", label: "Ethnicity", options: ETHNICITIES, blank: "Not specified" },
+  { key: "hairColour", label: "Hair colour", options: HAIR_COLOURS },
+  { key: "eyeColour", label: "Eye colour", options: EYE_COLOURS },
+  { key: "skinTone", label: "Skin tone", options: SKIN_TONES },
+];
+
+function ColourField({ field, appearance, onChange }) {
+  const customKey = field.key + "Custom";
+  const value = appearance[field.key] ?? "";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
+      <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>{field.label}</span>
+      <select style={S.select} value={value} onChange={e => onChange({ [field.key]: e.target.value })}>
+        {field.blank && <option value="">{field.blank}</option>}
+        {field.options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+      {value === "Custom" && (
+        <input style={{ ...S.input, marginTop: 4 }} autoFocus
+          placeholder={`Describe the ${field.label.toLowerCase()}…`}
+          value={appearance[customKey] || ""} onChange={e => onChange({ [customKey]: e.target.value })} />
+      )}
+    </div>
+  );
+}
+
 // ─── BODY EDITOR ──────────────────────────────────────────────────────────────
 // Owns the two images and the split between them: the nude base that anchors
 // every generation, and the clothed avatar the UI shows. Tattoos live here
@@ -2216,6 +2293,11 @@ function AppearanceSection({ appearance, onChange }) {
 // reaches a chat prompt, so this screen is the only place they are decided.
 function BodyEditor({ character, settings, onSave, onClose }) {
   const [body, setBody] = useState(() => normaliseBody(character.appearance && character.appearance.body));
+  // Appearance is edited here too: once a character exists, this is where a
+  // change to it can actually reach an image, since regenerating the base is
+  // the only thing that makes it visible.
+  const [appearance, setAppearance] = useState(() => ({ ...DEFAULT_APPEARANCE, ...(character.appearance || {}) }));
+  const patchAppearance = (patch) => setAppearance(a => ({ ...a, ...patch }));
   const [baseUrl, setBaseUrl] = useState(character.referenceImage || null);
   const [avatarUrl, setAvatarUrl] = useState(character.avatarImage || null);
   const [busy, setBusy] = useState("");
@@ -2230,7 +2312,7 @@ function BodyEditor({ character, settings, onSave, onClose }) {
   const converting = !character.avatarImage && baseUrl !== character.referenceImage;
 
   const charDesc = () => {
-    const appearanceDesc = buildAppearancePrompt(character.appearance);
+    const appearanceDesc = buildAppearancePrompt(appearance);
     const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
     const ageDesc = character.age ? `${character.age} year old` : "";
     return [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
@@ -2269,7 +2351,7 @@ function BodyEditor({ character, settings, onSave, onClose }) {
       referenceImage: baseUrl,
       avatarImage: nextAvatar,
       backgroundImage: bgFollowed ? nextAvatar : character.backgroundImage,
-      appearance: { ...(character.appearance || {}), body },
+      appearance: { ...appearance, body },
     });
   };
 
@@ -2320,6 +2402,25 @@ function BodyEditor({ character, settings, onSave, onClose }) {
             Tattoos are carried into chat images by the base image itself, not by the prompt — so regenerate the base
             image after changing this, or nothing will look any different.
           </p>
+
+          <div style={S.divider} />
+
+          <label style={S.label}>Appearance</label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
+            {COLOUR_FIELDS.map(field => (
+              <ColourField key={field.key} field={field} appearance={appearance} onChange={patchAppearance} />
+            ))}
+            {BODY_SHAPE_FIELDS.map(field => (
+              <ShapeField key={field.key} field={field} appearance={appearance} onChange={patchAppearance} />
+            ))}
+          </div>
+          {/* Height stays a slider: it is the one appearance value still sent
+              with every chat image, and it is sent as a number of centimetres,
+              which a band would round away. */}
+          <div style={{ marginTop: 12 }}>
+            <SliderRow def={APPEARANCE_SLIDER_DEFS[0]} value={appearance.height ?? 50}
+              onChange={v => patchAppearance({ height: v })} />
+          </div>
 
           {error && <p style={{ color: "#c05060", fontSize: 13, marginTop: 8 }}>{error}</p>}
 
