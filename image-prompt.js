@@ -37,7 +37,11 @@ window.ImagePrompt = {
       if (!hasStaging(staging)) return "";
       const parts = [];
       if (staging.location) parts.push(staging.location);
-      if (staging.userPose) parts.push(`camera positioned as someone ${staging.userPose}`);
+      // userPose used to be emitted as "camera positioned as someone standing",
+      // which describes the camera as an object placed in the scene and fights
+      // the POV clause saying it is the viewer's own eyes — one model drew the
+      // camera held out to the side. The pose is already implied by where the
+      // viewer's body enters the frame.
       if (staging.proximity) parts.push(staging.proximity);
       // The pose goes in bare — SD reads "sitting on the edge of the bed" as a
       // pose directive, while a "she is ..." sentence just adds noise tokens.
@@ -175,15 +179,11 @@ window.ImagePrompt = {
       const scene = sceneText || "";
       const parts = [POV_BASE];
       if (contact && viewerBody) {
+        // viewerBody already says whose the limb is and where it enters, so
+        // "the foreground hand and arm belong to the viewer, one pair only"
+        // only repeated the ownership and added a second mention of hands and
+        // arms. Removing it measurably improved the images.
         parts.push(viewerBody);
-        // Claim the limbs only when the extractor actually put limbs in the
-        // shot. Appending it unconditionally added "the foreground hand and
-        // arm belong to the viewer" to a shot whose viewerBody was a mouth or
-        // an ear — putting hand and arm tokens into a frame that has neither,
-        // which is the same mistake as the clause that produced the foot.
-        if (POV_VIEWER_LIMB_RE.test(viewerBody) || POV_CUSTOM_LIMB_RE.test(viewerBody)) {
-          parts.push(POV_ARMS_OWNED_MODIFIER);
-        }
         // What the viewer is wearing is decided by the tracked outfit, never
         // by the scene text: "naked" in a scene prompt is almost always
         // describing her, and reading it as the viewer's state stripped the
@@ -368,7 +368,7 @@ window.ImagePrompt = {
       // drop the act itself, so it is told to report what is happening. Gated on
       // the character's NSFW toggle like every other explicit path in the app.
       const actNote = character.nsfw
-        ? " State plainly what the two of them are physically doing to each other, including sexual acts where that is what is happening — do not soften it into mood, atmosphere or euphemism, and do not substitute a pose for the act. In an intimate scene viewerBody must name the viewer's own anatomy that is actually involved, and the frame edge it enters from."
+        ? " State plainly what the two of them are physically doing to each other, including sexual acts where that is what is happening — do not soften it into mood, atmosphere or euphemism, and do not substitute a pose for the act. In an intimate scene viewerBody must name the viewer's own anatomy that is actually involved, and the frame edge it enters from. Give it a plain, ordinary size - write \"the viewer's normal sized penis\" rather than leaving the size unsaid, since unqualified the image model tends toward the exaggerated."
         : "";
       const content = await aiComplete({ model, messages: [{ role: "user", content: fillTemplate(CFG.image.scenePromptInstruction, { name: character.name, charDesc: charDesc || "not specified", recent, actNote }) }] });
       return parseSceneExtraction(content, messages, character.name);
@@ -405,6 +405,16 @@ window.ImagePrompt = {
       };
     }
 
+    // Read off the description rather than plumbed through from the character
+    // record, so the lab (which holds charDesc as editable text) and the app
+    // arrive at the same subject without a second source of truth.
+    function subjectFor(charDesc) {
+      const d = String(charDesc || "");
+      if (/\bfemale\b|\bwoman\b|\bgirl\b/i.test(d)) return "a woman";
+      if (/\bmale\b|\bman\b|\bboy\b/i.test(d)) return "a man";
+      return "a person";
+    }
+
     // Everything the app assembles a chat image prompt from, in one place, so
     // the lab and the app can never drift into building it differently.
     // charDesc is passed in already built (it comes from the appearance
@@ -412,7 +422,7 @@ window.ImagePrompt = {
     function assembleImagePrompt({
       scenePrompt, charDesc, charOutfit, userOutfit, staging, nsfw,
       explicitDetail, messages, characterName, styleModifiers,
-      contact: contactOverride, name, keepSceneVerbatim, viewerBody,
+      contact: contactOverride, name, keepSceneVerbatim, viewerBody, subjectNoun,
     }) {
       const contact = contactOverride !== undefined
         ? contactOverride
@@ -434,12 +444,22 @@ window.ImagePrompt = {
         explicit: isIntimateScene(scene, staging, nsfw) ? (explicitDetail || "") : "",
         style: styleModifiers || "photorealistic, natural lighting, 50mm, sharp focus",
       };
-      const order = ["pov", "name", "charDesc", "wardrobe", "staging", "scene", "explicit", "style"];
+      // Two sentences, not one comma run. Everything before the full stop is
+      // the viewer; everything after it is her. Run together, "the viewer
+      // wearing boxers, 19 year old, Female, ... wearing nothing" is two
+      // people's clothing in one list with nothing saying which is whose.
+      const viewerOrder = ["pov"];
+      const subjectOrder = ["name", "charDesc", "wardrobe", "staging", "scene", "explicit", "style"];
       // parts is returned alongside the finished string so the lab can show
       // which source each clause came from — the thing that was impossible to
       // see when this was a single joinPromptParts call inline in the app.
+      // "a woman, 19 years old, caucasian, ..." — the description had no
+      // subject at all, so it read as a continuation of the viewer's sentence.
+      const subject = subjectNoun !== undefined ? subjectNoun : subjectFor(charDesc);
+      const viewerText = joinPromptParts(viewerOrder.map(k => parts[k]));
+      const subjectText = joinPromptParts([subject].concat(subjectOrder.map(k => parts[k])));
       return {
-        prompt: joinPromptParts(order.map(k => parts[k])),
+        prompt: [viewerText, subjectText].filter(Boolean).join(". "),
         parts,
         contact,
         intimate: isIntimateScene(scene, staging, nsfw),
@@ -455,7 +475,7 @@ window.ImagePrompt = {
       appearancePhrasePreview, buildAppearancePrompt,
       isUserUndressed, povSelfBody, isIntimateScene,
       beatShowsContact, detectPhysicalContact, stripViewerLimbs,
-      buildPovModifiers, joinPromptParts, assembleImagePrompt,
+      buildPovModifiers, joinPromptParts, subjectFor, assembleImagePrompt,
       extractScene, parseSceneExtraction,
     };
   },
