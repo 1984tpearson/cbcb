@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=11"></script>
-  <script src="image-prompt.js?v=11"></script>
+  <script src="site-config.js?v=12"></script>
+  <script src="image-prompt.js?v=12"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -360,7 +360,7 @@ const {
   HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
   appearancePhrasePreview, buildAppearancePrompt,
   buildFacePrompt, buildFaceEditPrompt, isFaceUnset,
-  buildBodyBasePrompt, buildAvatarPrompt, buildChatCharDesc,
+  buildBodyBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
   isUserUndressed, povSelfBody, isIntimateScene,
   detectPhysicalContact, stripViewerLimbs,
   buildPovModifiers, joinPromptParts, assembleImagePrompt,
@@ -2286,6 +2286,36 @@ function ColourField({ field, appearance, onChange }) {
   );
 }
 
+// The appearance a base image was generated from. face is excluded — it is the
+// face editor's, changes there re-shoot the base image on their own terms — and
+// baseSnapshot itself is excluded so snapshots do not nest.
+function snapshotOf(appearance, body) {
+  const { baseSnapshot, face, ...rest } = appearance || {};
+  return { ...rest, body: body || null };
+}
+
+// Changed field keys, said in words. Several keys map to one aspect (skinTone
+// and ethnicity both move the skin), so this dedupes to what a person would
+// say changed rather than listing the fields.
+const APPEARANCE_CHANGE_LABELS = [
+  { keys: ["ethnicity", "ethnicityCustom"], label: "ethnicity" },
+  { keys: ["hairColour", "hairColourCustom"], label: "hair colour" },
+  { keys: ["eyeColour", "eyeColourCustom"], label: "eye colour" },
+  { keys: ["skinTone", "skinToneCustom"], label: "skin tone" },
+  { keys: ["height"], label: "height" },
+  { keys: ["build", "buildCustom"], label: "build" },
+  { keys: ["chest", "chestCustom"], label: "breasts" },
+  { keys: ["waist", "waistCustom"], label: "waist" },
+  { keys: ["hips", "hipsCustom"], label: "hips" },
+  { keys: ["body"], label: "tattoos" },
+];
+
+function describeAppearanceChanges(changedKeys) {
+  const set = new Set(changedKeys);
+  const labels = APPEARANCE_CHANGE_LABELS.filter(e => e.keys.some(k => set.has(k))).map(e => e.label);
+  return labels.length ? labels.join(", ") : "nothing";
+}
+
 // ─── BODY EDITOR ──────────────────────────────────────────────────────────────
 // Owns the two images and the split between them: the nude base that anchors
 // every generation, and the clothed avatar the UI shows. Tattoos live here
@@ -2298,6 +2328,24 @@ function BodyEditor({ character, settings, onSave, onClose }) {
   // the only thing that makes it visible.
   const [appearance, setAppearance] = useState(() => ({ ...DEFAULT_APPEARANCE, ...(character.appearance || {}) }));
   const patchAppearance = (patch) => setAppearance(a => ({ ...a, ...patch }));
+
+  // The appearance the current base image was generated from. Regenerating
+  // changes what differs from this and explicitly holds everything else, so
+  // editing the skin tone moves the skin tone and leaves the rest alone.
+  //
+  // Persisted as baseSnapshot rather than kept in this component, so a change
+  // made now, saved, and regenerated tomorrow is still recognised as a change.
+  // A character that predates the snapshot falls back to its saved appearance,
+  // which is what its base image was built from anyway.
+  const [baseline, setBaseline] = useState(() => {
+    const saved = character.appearance || {};
+    // Normalised on both sides of the comparison. A character saved before the
+    // tattoo field existed stores no body at all, and comparing that absence
+    // against the filled-in defaults read as "tattoos changed" on every first
+    // regenerate — releasing the one hold that keeps existing ink in place.
+    return saved.baseSnapshot || snapshotOf(saved, normaliseBody(saved.body));
+  });
+  const changedKeys = appearanceDiffKeys(baseline, snapshotOf(appearance, body));
   const [baseUrl, setBaseUrl] = useState(character.referenceImage || null);
   const [avatarUrl, setAvatarUrl] = useState(character.avatarImage || null);
   const [busy, setBusy] = useState("");
@@ -2324,7 +2372,7 @@ function BodyEditor({ character, settings, onSave, onClose }) {
     setBusy(kind); setError("");
     try {
       const prompt = kind === "base"
-        ? buildBodyBasePrompt({ body, charDesc: charDesc() })
+        ? buildBodyBasePrompt({ body, charDesc: charDesc(), changedKeys })
         : buildAvatarPrompt({ charDesc: charDesc() });
       const url = await generateImageWiro({
         prompt,
@@ -2335,7 +2383,13 @@ function BodyEditor({ character, settings, onSave, onClose }) {
         initImage: anchor,
         seed: Math.floor(Math.random() * 2147483647),
       });
-      if (kind === "base") setBaseUrl(url); else setAvatarUrl(url);
+      if (kind === "base") {
+        setBaseUrl(url);
+        // The new image now reflects these settings, so nothing is outstanding
+        // — a second regenerate should hold everything rather than re-applying
+        // a change already in the picture.
+        setBaseline(snapshotOf(appearance, body));
+      } else setAvatarUrl(url);
     } catch (e) { setError(e.message); }
     setBusy("");
   };
@@ -2351,7 +2405,7 @@ function BodyEditor({ character, settings, onSave, onClose }) {
       referenceImage: baseUrl,
       avatarImage: nextAvatar,
       backgroundImage: bgFollowed ? nextAvatar : character.backgroundImage,
-      appearance: { ...appearance, body },
+      appearance: { ...appearance, body, baseSnapshot: baseline },
     });
   };
 
@@ -2406,6 +2460,11 @@ function BodyEditor({ character, settings, onSave, onClose }) {
           <div style={S.divider} />
 
           <label style={S.label}>Appearance</label>
+          <p style={{ fontSize: 12, color: changedKeys.length ? "var(--blue)" : "var(--text3)", margin: "0 0 4px" }}>
+            {changedKeys.length
+              ? `Regenerating the base image will change: ${describeAppearanceChanges(changedKeys)}. Everything else is held as it is.`
+              : "Matches the current base image. Change something here, then regenerate the base image to apply it."}
+          </p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
             {COLOUR_FIELDS.map(field => (
               <ColourField key={field.key} field={field} appearance={appearance} onChange={patchAppearance} />

@@ -401,7 +401,25 @@ window.ImagePrompt = {
     // the base image, never as words, which is the whole reason the base image
     // is nude. Adding them to prompt assembly as well would be a second source
     // of truth arguing with the first.
-    function buildBodyBasePrompt({ body, charDesc }) {
+    // Which appearance fields differ between the state the current base image
+    // was generated from and the state now. Compared shallowly on the scalar
+    // fields plus the tattoo object, which is all the holds key off.
+    function appearanceDiffKeys(before, after) {
+      const a = before || {}, b = after || {};
+      const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+      const changed = [];
+      for (const k of keys) {
+        if (k === "baseSnapshot" || k === "face") continue;
+        const x = a[k], y = b[k];
+        const same = (x && typeof x === "object") || (y && typeof y === "object")
+          ? JSON.stringify(x ?? null) === JSON.stringify(y ?? null)
+          : (x ?? "") === (y ?? "");
+        if (!same) changed.push(k);
+      }
+      return changed;
+    }
+
+    function buildBodyBasePrompt({ body, charDesc, changedKeys }) {
       const cfg = (CFG.appearance && CFG.appearance.body) || null;
       if (!cfg) return "";
       const values = body || {};
@@ -411,7 +429,17 @@ window.ImagePrompt = {
       // Absence stated rather than implied — left unsaid, the model is free to
       // invent tattoos, and this image is what every later generation copies.
       const skin = marks.length ? marks.join(", ") : cfg.noTattoos;
-      return [cfg.basePreamble, cfg.baseFraming, cfg.baseNudeClause, charDesc, skin, cfg.baseSuffix]
+
+      // Hold everything the edit did not touch, and only that. A hold whose
+      // fields were edited is dropped: keeping it would put "same skin tone"
+      // and "dark brown skin" in one prompt, and the reference image would win
+      // the argument, which is exactly what made an ethnicity change a no-op.
+      const changed = new Set(changedKeys || []);
+      const holds = (cfg.baseHolds || []).filter(h => !(h.keys || []).some(k => changed.has(k)));
+      const identityHeld = holds.some(h => h.identity);
+      const preamble = identityHeld ? cfg.basePreamble : cfg.basePreambleRestyled;
+
+      return [preamble, ...holds.map(h => h.phrase), cfg.baseFraming, cfg.baseNudeClause, charDesc, skin, cfg.baseSuffix]
         .filter(Boolean).join(", ");
     }
 
@@ -656,7 +684,7 @@ window.ImagePrompt = {
       HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
       appearancePhrasePreview, buildAppearancePrompt,
       buildFacePrompt, buildFaceEditPrompt, faceFieldPhrase, isFaceUnset,
-      buildBodyBasePrompt, buildAvatarPrompt, buildChatCharDesc,
+      buildBodyBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
       isUserUndressed, povSelfBody, isIntimateScene,
       beatShowsContact, detectPhysicalContact, stripViewerLimbs,
       buildPovModifiers, joinPromptParts, subjectFor, assembleImagePrompt,

@@ -628,7 +628,35 @@
         // pixels, and the face is the thing this image exists to anchor.
         baseFraming: "full body nude, standing straight facing the camera, framed from mid-thigh upwards, arms relaxed at the sides and fully visible, plain neutral grey studio background, even soft lighting, whole body in frame",
         baseNudeClause: "completely nude, no clothing of any kind, all skin visible",
-        basePreamble: "same person, same face and identity as the reference image, same hair, skin tone and colouring",
+        // Continuity line. The restyled variant is used once the identity hold
+        // below has been released, because "same face" and a new ethnicity in
+        // one prompt is a contradiction the model settles by ignoring one of
+        // them — the same trap the hair hold fell into in the face editor.
+        basePreamble: "the same person as the reference image",
+        basePreambleRestyled: "the same character as the reference image, restyled to match the description below",
+        // Everything the regeneration should NOT change, stated aspect by
+        // aspect. A hold is emitted only while every appearance field that
+        // would contradict it is unchanged, and drops out the moment one of
+        // them is edited — so changing the skin tone frees the skin and
+        // nothing else, and the rest stay pinned rather than drifting because
+        // the model had no instruction either way.
+        //
+        // Holding unchanged aspects explicitly matters as much as releasing
+        // changed ones: it is what makes a small edit a small edit.
+        baseHolds: [
+          { identity: true, phrase: "the same face, features and identity as the reference image",
+            keys: ["ethnicity", "ethnicityCustom"] },
+          { phrase: "the same hair colour and hairstyle as the reference image",
+            keys: ["hairColour", "hairColourCustom"] },
+          { phrase: "the same eye colour as the reference image",
+            keys: ["eyeColour", "eyeColourCustom"] },
+          { phrase: "the same skin tone as the reference image",
+            keys: ["skinTone", "skinToneCustom", "ethnicity", "ethnicityCustom"] },
+          { phrase: "the same body shape and proportions as the reference image",
+            keys: ["height", "build", "buildCustom", "chest", "chestCustom", "waist", "waistCustom", "hips", "hipsCustom"] },
+          { phrase: "the same tattoos, in the same places, as the reference image",
+            keys: ["body"] },
+        ],
         baseSuffix: "photorealistic, natural skin texture, sharp focus, high detail",
         // Said explicitly rather than left unsaid: an unstated absence lets the
         // model invent tattoos, and a base image is the last place you want a
