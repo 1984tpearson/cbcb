@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=8"></script>
-  <script src="image-prompt.js?v=8"></script>
+  <script src="site-config.js?v=9"></script>
+  <script src="image-prompt.js?v=9"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -360,7 +360,7 @@ const {
   HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
   appearancePhrasePreview, buildAppearancePrompt,
   buildFacePrompt, buildFaceEditPrompt, isFaceUnset,
-  buildBodyBasePrompt, buildAvatarPrompt,
+  buildBodyBasePrompt, buildAvatarPrompt, buildChatCharDesc,
   isUserUndressed, povSelfBody, isIntimateScene,
   detectPhysicalContact, stripViewerLimbs,
   buildPovModifiers, joinPromptParts, assembleImagePrompt,
@@ -3723,10 +3723,9 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     if (!customImgPrompt.trim()) return;
     setImgLoading(true); setShowCustomImgInput(false);
     try {
-      const appearanceDesc = buildAppearancePrompt(character.appearance);
-      const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
-      const ageDesc = character.age ? `${character.age} year old` : "";
-      const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
+      // Appearance deliberately absent: the base image passed as inputImage is
+      // what says how she looks. See buildChatCharDesc.
+      const charDesc = buildChatCharDesc(character);
       const styleModifiers = CFG.image.styleModifiers;
       // Ground the outfit in the tracked wardrobe state rather than leaving
       // it to the model's default — a specific custom prompt (e.g. "wearing
@@ -3794,10 +3793,9 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const prompt = extracted.scene;
       console.info(`[image] scene prompt built in ${((Date.now() - promptStartedAt) / 1000).toFixed(1)}s` +
         ` (touching: ${extracted.touching}${extracted.viewerBody ? `, viewer: ${extracted.viewerBody}` : ""})`);
-      const appearanceDesc = buildAppearancePrompt(character.appearance);
-      const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
-      const ageDesc = character.age ? `${character.age} year old` : "";
-      const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
+      // Appearance deliberately absent: the base image passed as inputImage is
+      // what says how she looks. See buildChatCharDesc.
+      const charDesc = buildChatCharDesc(character);
       const styleModifiers = CFG.image.styleModifiers;
       // Ground the outfit in the tracked wardrobe state — the scene prompt
       // from buildImagePromptFromContext only sees raw conversation text and

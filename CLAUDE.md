@@ -54,6 +54,14 @@ Two images only conflict when both feed the generator, which is why the avatar
 is display-only. `backgroundImage` follows the avatar unless deliberately set
 to something else.
 
+Chat image prompts say almost nothing about appearance — `buildChatCharDesc`
+emits age, gender and height only, because the base image carries the rest and
+saying it twice cannot make the image more like itself. The full
+`buildAppearancePrompt` still belongs in the three editors that generate a base
+image from text, in the `[APPEARANCE]` note the chat model reads, and in the
+language-model paths (`extractScene`, `inferScenarioSetup`) that read words
+rather than look at the picture.
+
 Tattoos (`appearance.body`) are decided in the body editor and reach chat
 images **only as pixels in the base image** — nothing about them enters
 `buildAppearancePrompt` or any chat prompt. Do not add them there: the base

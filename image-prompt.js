@@ -368,6 +368,33 @@ window.ImagePrompt = {
       return groupsClear && structClear;
     }
 
+    // What a chat image prompt still needs to say about the character, now that
+    // the base image passed as inputImage carries her appearance.
+    //
+    // Everything the picture shows is left out: hair, eyes, skin, build, chest,
+    // waist, hips, and the whole face block. Saying it again cannot make the
+    // image more like itself, and it is not free — a longer prompt dilutes the
+    // scene, which is the only part that changes shot to shot. Worse, makeup
+    // and hair are stored as data AND baked into the base image, so the moment
+    // those two disagree the model averages them. One source of truth, and it
+    // is the image.
+    //
+    // Three things stay, because the image does not carry them:
+    //   age    — a face reads approximately, and drifts
+    //   gender — likewise, and it is one word
+    //   height — nothing in a picture cropped at mid-thigh distinguishes 152cm
+    //            from 178cm; absolute scale has no visual referent at all
+    function buildChatCharDesc(character) {
+      if (!character) return "";
+      const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
+      const ageDesc = character.age ? `${character.age} year old` : "";
+      const a = character.appearance;
+      const heightDesc = (a && a.height != null)
+        ? fillTemplate(CFG.appearance.heightMeasurementTemplate, { cm: sliderToCm(a.height) })
+        : "";
+      return [ageDesc, genderDesc, heightDesc].filter(Boolean).join(", ");
+    }
+
     // ── Body base image & avatar ────────────────────────────────────────────
     // Both are editor-only. Nothing here is reachable from buildAppearancePrompt
     // or any chat prompt: tattoos travel into chat images entirely as pixels in
@@ -615,7 +642,7 @@ window.ImagePrompt = {
       HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
       appearancePhrasePreview, buildAppearancePrompt,
       buildFacePrompt, buildFaceEditPrompt, faceFieldPhrase, isFaceUnset,
-      buildBodyBasePrompt, buildAvatarPrompt,
+      buildBodyBasePrompt, buildAvatarPrompt, buildChatCharDesc,
       isUserUndressed, povSelfBody, isIntimateScene,
       beatShowsContact, detectPhysicalContact, stripViewerLimbs,
       buildPovModifiers, joinPromptParts, subjectFor, assembleImagePrompt,
