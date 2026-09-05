@@ -609,10 +609,15 @@
       // Lite is listed first because it is the fastest of the three; Pro is
       // the slowest. The proxy keeps its own allowlist of these ids, so adding
       // one here without adding it there will fail the run.
+      // Pro first because the app's default image model is the first entry, and
+      // it is the only one that reliably renders a POV shot: Lite substitutes a
+      // foot for anatomy it will not draw, and v4.5 does the same or loses the
+      // POV framing. Ordering these fastest-first meant a fresh browser with no
+      // saved settings silently picked the worst of the three.
       image: [
-        { id: "seedream-v5-lite-uncensored", label: "Seedream v5 Lite (Wiro) — fastest" },
-        { id: "seedream-v4-5-uncensored", label: "Seedream v4.5 (Wiro)" },
-        { id: "seedream-v5-pro-uncensored", label: "Seedream v5 Pro (Wiro) — slowest" },
+        { id: "seedream-v5-pro-uncensored", label: "Seedream v5 Pro (Wiro) — most reliable" },
+        { id: "seedream-v4-5-uncensored", label: "Seedream v4.5 (Wiro) — faster, unreliable POV" },
+        { id: "seedream-v5-lite-uncensored", label: "Seedream v5 Lite (Wiro) — fastest, poor at POV" },
       ],
       // Resolutions differ per model and "1k" is not valid on the two newer
       // ones: Lite takes auto/2k/3k, v4.5 takes ""/2k/4k. 2k is the smallest
@@ -621,7 +626,10 @@
       imageParams: {
         "seedream-v5-lite-uncensored": { resolution: "2k", aspectRatio: "9:16" },
         "seedream-v4-5-uncensored": { resolution: "2k", aspectRatio: "9:16" },
-        "seedream-v5-pro-uncensored": { resolution: "1k", aspectRatio: "9:16", outputFormat: "png" },
+        // 2k like the others. The 1k here was from a first reading of Wiro's
+        // docs where 1k looked Pro-only; 2k is accepted, and the detail this
+        // buys goes straight into the small anatomy these shots turn on.
+        "seedream-v5-pro-uncensored": { resolution: "2k", aspectRatio: "9:16", outputFormat: "png" },
       },
       vision: "mistralai/mistral-small-3.1-24b-instruct",
       reactivity: "meta-llama/llama-3.1-8b-instruct",
