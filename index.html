@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=16"></script>
-  <script src="image-prompt.js?v=16"></script>
+  <script src="site-config.js?v=17"></script>
+  <script src="image-prompt.js?v=17"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -780,11 +780,22 @@ function applyIntentionVerdicts(all, judged, updates, cfg) {
     // Steps the situation has settled — done by someone else, or made pointless
     // by what has happened. They are ticked off without her doing them, which
     // is the only way off a ladder the conversation has overtaken.
+    //
+    // At most one step leaves the ladder per turn, and it is always the one she
+    // is actually on. Unbounded, a single judgement wiped a whole ladder: shown
+    // a charged scene it decided undressing, nudity and a sex act had all been
+    // settled in one turn, none of which had happened. Groundwork that took
+    // four steps to describe does not collapse in one reply, so if a later step
+    // is genuinely moot the next turn can say so again — a real one survives
+    // being asked twice, an over-read one usually does not.
     const stepList = intentionSteps(current);
-    const moot = new Set((Array.isArray(u.moot) ? u.moot : [])
-      .map(Number).filter(n => Number.isInteger(n) && n >= 0 && n < stepList.length)
-      .map(n => stepList[n]));
-    if (step && done) moot.add(step);
+    const mootIdx = (Array.isArray(u.moot) ? u.moot : [])
+      .map(Number).filter(n => Number.isInteger(n) && n >= 0 && n < stepList.length);
+    const currentIdx = step ? stepList.indexOf(step) : -1;
+    const pick = (step && (done || mootIdx.includes(currentIdx)))
+      ? step
+      : (mootIdx.length ? stepList[Math.min(...mootIdx)] : null);
+    const moot = new Set(pick ? [pick] : []);
 
     const steps = moot.size
       ? (current.steps || []).map(x => moot.has(x) ? { ...x, done: true } : x)
@@ -794,7 +805,15 @@ function applyIntentionVerdicts(all, judged, updates, cfg) {
     // The goal itself can land while groundwork is still outstanding — you can
     // be fed the cake you meant to bake. Deliberately not the same thing as
     // being HANDED one: that settles the steps and leaves the goal to be done.
-    if (u.goalDone === true) {
+    //
+    // But not while she is still visibly partway up the ladder. A judge that
+    // called a goal achieved over three outstanding steps was reading the
+    // scene's direction rather than its events, and "achieved" is terminal —
+    // it ends the intention silently and there is no turn later that undoes
+    // it. So the steps have to be settled first, one turn at a time, by the
+    // rule above. Being fed the cake still works: whatever settled the steps
+    // settles them, and the goal lands on the turn after.
+    if (u.goalDone === true && !activeStep(next)) {
       out[idx] = { ...next, status: "achieved" };
       changed = true;
       continue;
