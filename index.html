@@ -651,6 +651,94 @@ function buildIntentionsNote(character) {
   return cfg.header + body + (shared ? `\n${shared}` : "") + pacing;
 }
 
+// What the progress judge is shown, one entry per active intention. Progress is
+// only ever awarded for the ONE thing an intention is working on now — its
+// outstanding step, or the goal once there are none left. The judge does see
+// the steps still to come, though: the reason the CHARACTER only sees one is
+// that the whole ladder makes her narrate the plan, and that does not apply to
+// a call she never reads. Without them a goal the conversation had already
+// settled could never be let off the ladder — handed a finished cake she would
+// go on privately planning a shopping trip, because buying the ingredients was
+// all she was ever asked about.
+function intentionJudgeList(intentions) {
+  return intentions.map((it, i) => {
+    const steps = intentionSteps(it);
+    const step = activeStep(it);
+    if (!step) return `${i}. GOAL: ${it.goal} (no steps outstanding)`;
+    const currentIdx = steps.indexOf(step);
+    const later = steps
+      .map((st, si) => ({ st, si }))
+      .filter(({ st, si }) => si > currentIdx && !st.done)
+      .map(({ st, si }) => `[${si}] ${st.text}`);
+    return `${i}. GOAL: ${it.goal}\n   CURRENT STEP: [${currentIdx}] ${step.text}`
+      + (later.length ? `\n   LATER STEPS: ${later.join("; ")}` : "");
+  }).join("\n");
+}
+
+// Applies the judge's verdicts. Pure, and separate from the call that produced
+// them, because the phase rules here are the whole feature: which climb a delta
+// lands on, when a step is ticked off without being done, and what may end an
+// intention. "achieved" is deliberately not the judge's to give — it reports
+// only what happened, and this decides what that completes.
+// `all` is the newest list (the panel may have edited it mid-flight); `judged`
+// is the list the judge was shown, so verdicts are matched back by id.
+function applyIntentionVerdicts(all, judged, updates, cfg) {
+  const maxDelta = cfg.maxDeltaPerTurn || 20;
+  const out = [...all];
+  let changed = false;
+  for (const u of updates) {
+    const target = judged[Number(u && u.i)];
+    if (!target) continue;
+    const idx = out.findIndex(x => x.id === target.id);
+    if (idx === -1) continue;
+    const current = out[idx];
+    const delta = Math.max(-maxDelta, Math.min(maxDelta, Number(u.delta) || 0));
+    const status = ["active", "abandoned"].includes(u.status) ? u.status : (current.status || "active");
+    const progress = Math.max(0, Math.min(100, (Number(current.progress) || 0) + delta));
+    const step = activeStep(current);
+    const done = u.done === true;
+
+    // Steps the situation has settled — done by someone else, or made pointless
+    // by what has happened. They are ticked off without her doing them, which
+    // is the only way off a ladder the conversation has overtaken.
+    const stepList = intentionSteps(current);
+    const moot = new Set((Array.isArray(u.moot) ? u.moot : [])
+      .map(Number).filter(n => Number.isInteger(n) && n >= 0 && n < stepList.length)
+      .map(n => stepList[n]));
+    if (step && done) moot.add(step);
+
+    const steps = moot.size
+      ? (current.steps || []).map(x => moot.has(x) ? { ...x, done: true } : x)
+      : current.steps;
+    const next = { ...current, steps, status };
+
+    // The goal itself can land while groundwork is still outstanding — you can
+    // be fed the cake you meant to bake. Deliberately not the same thing as
+    // being HANDED one: that settles the steps and leaves the goal to be done.
+    if (u.goalDone === true) {
+      out[idx] = { ...next, status: "achieved" };
+      changed = true;
+      continue;
+    }
+
+    // Whichever thing she was working on has been settled, so the next climb
+    // starts from zero. If that was the last step the goal becomes what she is
+    // working on — unlocked, not achieved, and still with its own nerve.
+    if (step && (moot.has(step) || !activeStep(next))) {
+      out[idx] = { ...next, progress: 0 };
+      changed = true;
+      continue;
+    }
+
+    // No steps left, so this is the goal itself — done means done.
+    const nextStatus = (!step && done) ? "achieved" : status;
+    if (steps === current.steps && progress === current.progress && nextStatus === current.status) continue;
+    out[idx] = { ...next, progress, status: nextStatus };
+    changed = true;
+  }
+  return changed ? out : null;
+}
+
 // Rolls intentions back to a snapshot taken before a reply that has since been
 // discarded. Deliberately not a wholesale replace: the panel may have added or
 // edited an intention since the snapshot, and a blunt restore would silently
@@ -2969,61 +3057,14 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     const existing = activeIntentions(currentChar);
     if (existing.length > 0) {
       try {
-        // Each line names the ONE thing that intention is working on now: the
-        // outstanding step where there is one, otherwise the goal itself. The
-        // judge never sees the rest of the ladder, so it cannot award progress
-        // on the goal for groundwork that has not happened yet.
-        const list = existing.map((it, i) => {
-          const step = activeStep(it);
-          return step
-            ? `${i}. GOAL: ${it.goal} — CURRENT STEP: ${step.text}`
-            : `${i}. GOAL: ${it.goal}`;
-        }).join("\n");
+        const list = intentionJudgeList(existing);
         const raw = await aiComplete({ model: advanceModel, messages: [{ role: "user", content:
           fillTemplate(cfg.advancePrompt, { name: currentChar.name, list, recent }) }] });
         const updates = parseJsonReply(raw);
         if (Array.isArray(updates)) {
-          const maxDelta = cfg.maxDeltaPerTurn || 20;
           commitCharacter(prev => {
-            const all = [...(prev.intentions || [])];
-            let changed = false;
-            for (const u of updates) {
-              const target = existing[Number(u && u.i)];
-              if (!target) continue;
-              const idx = all.findIndex(x => x.id === target.id);
-              if (idx === -1) continue;
-              const current = all[idx];
-              const delta = Math.max(-maxDelta, Math.min(maxDelta, Number(u.delta) || 0));
-              // "achieved" is not the judge's to give any more — it says only
-              // whether the thing it was shown has happened, and what that
-              // completes depends on which phase the goal is in.
-              const status = ["active", "abandoned"].includes(u.status) ? u.status : (current.status || "active");
-              const progress = Math.max(0, Math.min(100, (Number(current.progress) || 0) + delta));
-              const step = activeStep(current);
-              const done = u.done === true;
-
-              if (step && done) {
-                // Groundwork finished: tick it off and start the next climb
-                // from zero. If that was the last step the goal itself becomes
-                // what she is working on — it is not achieved by this, only
-                // unlocked, and still has its own nerve to climb.
-                let ticked = false;
-                all[idx] = { ...current, progress: 0, status, steps: current.steps.map(x => {
-                  if (ticked || !x || x.done || !(x.text || "").trim()) return x;
-                  ticked = true;
-                  return { ...x, done: true };
-                }) };
-                changed = true;
-                continue;
-              }
-
-              // No steps left, so this is the goal itself — done means done.
-              const nextStatus = (!step && done) ? "achieved" : status;
-              if (progress === current.progress && nextStatus === current.status) continue;
-              all[idx] = { ...current, progress, status: nextStatus };
-              changed = true;
-            }
-            return changed ? { ...prev, intentions: all } : prev;
+            const all = applyIntentionVerdicts(prev.intentions || [], existing, updates, cfg);
+            return all ? { ...prev, intentions: all } : prev;
           });
         }
       } catch (e) {
