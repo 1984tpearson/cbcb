@@ -203,7 +203,9 @@ Elena: *she leans into it*"></textarea></label>
   const IMAGE_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/image-proxy";
   const AI_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/ai-proxy";
   const ACCESS_TOKEN = "pc_8f3a9d2e7b1c4f6a0d5e9c3b7a2f1e8d";
-  const STYLE_MODIFIERS = "photorealistic, natural lighting, 50mm, sharp focus";
+  // Read from config at boot, like the app — a lab with its own copy of the
+  // style string would quietly diverge the moment the default changed.
+  let STYLE_MODIFIERS = "photorealistic, natural lighting, sharp focus";
   const STORE_KEY = "prompt_lab_state";
   const EDITED_KEY = "prompt_lab_edited_prompt";
 
@@ -570,6 +572,7 @@ Elena: *she leans into it*"></textarea></label>
       const { config } = await window.SiteConfig.loadConfig();
       CFG = config;
       IMG = window.ImagePrompt.create(CFG);
+      if (CFG.image.styleModifiers) STYLE_MODIFIERS = CFG.image.styleModifiers;
     } catch (e) {
       console.warn("Site config unavailable, using built-in defaults:", e);
     }

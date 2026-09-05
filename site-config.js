@@ -551,7 +551,12 @@
       // frame when touching or reaching for something, the way they do in a
       // first-person game; what never appears is their face, head or back,
       // since the camera cannot see itself.
-      povBase: "first person POV through the viewer's own eyes, viewer's face never visible",
+      // Deliberately short. "viewer's face never visible" was here to stop the
+      // camera seeing itself, but the model works that out from "through the
+      // viewer's own eyes" — and every clause we add to help is a clause it
+      // can render literally instead. Tested: the trimmed version behaves the
+      // same, without the face and frame tokens.
+      povBase: "first person POV through the viewer's own eyes",
       povArmsModifier: "the viewer's own hand and forearm in the foreground, entering frame from the camera",
       povArmsOwnedModifier: "the foreground hand and arm belong to the viewer, one pair only",
       // Phrased as what IS in the shot, not what is absent. "no hands or arms
@@ -563,6 +568,10 @@
       povIntimateModifier: "the viewer's own body framing the bottom of the shot",
       // Wiro/Seedream has no negative_prompt parameter, so proportion guidance
       // goes into the positive prompt instead.
+      // No lens. "50mm" was in every prompt and the model makes a better call
+      // on its own; at POV distance a stated 50mm exaggerates whatever is
+      // nearest the camera, which is exactly what we do not want.
+      styleModifiers: "photorealistic, natural lighting, sharp focus",
       proportionGuard: "realistic human proportions, two arms and two hands per person, no extra limbs",
       // Instruction sent to the extractor model that turns the recent
       // conversation into a Stable Diffusion prompt. {name}, {charDesc},

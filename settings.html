@@ -636,6 +636,9 @@
         field("Viewer is touching nothing", i + "povNoLimbs", "area"),
         field("Intimate scene", i + "povIntimateModifier", "area"),
       ]),
+      card("Style", "Appended to every image prompt. No lens is named on purpose — the model chooses better than a fixed focal length, and a stated one exaggerates whatever is closest to a POV camera.", [
+        field("Style modifiers", i + "styleModifiers", "area"),
+      ]),
       card("Guardrails", "Wiro has no negative prompt, so this goes into the positive one.", [
         field("Proportion guard", i + "proportionGuard", "area"),
       ]),

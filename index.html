@@ -3016,7 +3016,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
       const ageDesc = character.age ? `${character.age} year old` : "";
       const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-      const styleModifiers = "photorealistic, natural lighting, 50mm, sharp focus";
+      const styleModifiers = CFG.image.styleModifiers;
       // Ground the outfit in the tracked wardrobe state rather than leaving
       // it to the model's default — a specific custom prompt (e.g. "wearing
       // a red dress") will still tend to win out since it's more specific
@@ -3084,7 +3084,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
       const ageDesc = character.age ? `${character.age} year old` : "";
       const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-      const styleModifiers = "photorealistic, natural lighting, 50mm, sharp focus";
+      const styleModifiers = CFG.image.styleModifiers;
       // Ground the outfit in the tracked wardrobe state — the scene prompt
       // from buildImagePromptFromContext only sees raw conversation text and
       // has no guaranteed reference to what's actually being worn, so this
