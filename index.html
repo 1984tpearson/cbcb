@@ -1050,6 +1050,11 @@ async function sendChat({ messages, character, model, settings }) {
     : "";
 
   const st = character.staging;
+  // Last of everything in the system prompt, deliberately. It arbitrates
+  // against the coyness, honesty and intentions clauses, all of which sit
+  // earlier and all of which have their own reasons to want her nearer — and
+  // a rule placed before the thing it overrides loses, which this repo has
+  // already learned once with the intentions directive.
   const physicalityNote = buildPhysicalityNote(character);
   const stagingClause = hasStaging(st)
     ? `\n\n[STAGING — where everyone is right now]\n${[
@@ -1060,7 +1065,7 @@ async function sendChat({ messages, character, model, settings }) {
       ].filter(Boolean).join(" ")} Stay physically consistent with this — don't teleport, stand up without standing up, or forget where you both are. Move only when the scene actually calls for it, and describe the movement when you do.`
     : "";
 
-  const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + voiceNote + personaNote + nsfwClause + actionClause + agencyClause + plainClause + wardrobeClause + stagingClause + physicalityNote + memoryClause + intentionsNote;
+  const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + voiceNote + personaNote + nsfwClause + actionClause + agencyClause + plainClause + wardrobeClause + stagingClause + memoryClause + intentionsNote + physicalityNote;
 
   // Appended to the request only — never stored in the conversation — exactly
   // as the regeneration instruction is.
