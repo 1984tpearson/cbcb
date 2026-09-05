@@ -371,14 +371,21 @@
       // which is how every "None"/"Natural" default stays silent rather than
       // telling the model to render an absence.
       face: {
-        // Wrapped around the joined phrases in the image prompt.
+        // Wrapped around the joined phrases in the image prompt. A group may
+        // override it with a `template` of its own — hair is described, not
+        // worn, so "wearing long hair" would be wrong. Groups sharing a
+        // template are emitted together under one copy of it, so three groups
+        // of worn things read as one "wearing a, b, c" rather than three.
         template: "wearing {phrases}",
         // Structure phrases are appended plainly — they describe the face
         // itself rather than something worn on it.
         structureTemplate: "{phrases}",
         // Prepended to the change request when regenerating from an existing
         // base image, so the model edits the face rather than replacing it.
-        editPreamble: "same person, same face and identity as the reference image, same hair and skin tone",
+        // Note it holds identity and skin but says nothing about hair: hair is
+        // now editable, so what holds it still is the hair group's own
+        // holdWhenUnset clause, emitted only while nothing in that group is set.
+        editPreamble: "same person, same face and identity as the reference image, same skin tone and colouring",
         // Used instead when the identity anchor is deliberately loosened for a
         // bone-structure change, which img2img otherwise resists.
         editPreambleLoose: "the same person with the same hair colour, skin tone and colouring, restyled facial structure",
@@ -388,12 +395,70 @@
         // named as fixed. Without this the model returns a portrait no matter
         // what the reference was, because a prompt about a face reads as a brief
         // for a headshot.
-        editFraming: "keep the reference image's exact framing, camera distance, crop, pose, clothing and background — reproduce the same photograph and change only the face",
+        editFraming: "keep the reference image's exact framing, camera distance, crop, pose, clothing and background — reproduce the same photograph, changing only the head",
         // Appended to every face-editor generation. Deliberately says nothing
         // about composition or shot type: editFraming above is what decides
         // those, and a second opinion here would only argue with it.
         editSuffix: "photorealistic, natural lighting, sharp focus, high detail",
         groups: [
+          {
+            key: "hair",
+            label: "Hair",
+            // Described rather than worn.
+            template: "{phrases}",
+            // Emitted while every field in this group is untouched, to stop the
+            // hair drifting on an edit that was only ever about makeup. Once
+            // any field here is set the clause is dropped, because holding the
+            // hair still and restyling it in the same prompt is a contradiction
+            // the model resolves by ignoring one of them at random.
+            holdWhenUnset: "same hairstyle and hair colour as the reference image",
+            fields: [
+              { key: "length", label: "Length", options: [
+                { value: "None", phrase: "" },
+                { value: "Shaved", phrase: "shaved head" },
+                { value: "Buzz cut", phrase: "buzz cut" },
+                { value: "Pixie", phrase: "short pixie cut" },
+                { value: "Short", phrase: "short hair" },
+                { value: "Chin-length", phrase: "chin-length bob" },
+                { value: "Shoulder-length", phrase: "shoulder-length hair" },
+                { value: "Long", phrase: "long hair" },
+                { value: "Very long", phrase: "very long hair past the waist" },
+              ] },
+              { key: "texture", label: "Texture", options: [
+                { value: "None", phrase: "" },
+                { value: "Straight", phrase: "straight hair" },
+                { value: "Sleek", phrase: "sleek, glossy hair" },
+                { value: "Wavy", phrase: "wavy hair" },
+                { value: "Curly", phrase: "curly hair" },
+                { value: "Tight curls", phrase: "tightly coiled curls" },
+                { value: "Afro", phrase: "natural afro" },
+                { value: "Messy", phrase: "tousled, messy hair" },
+              ] },
+              { key: "style", label: "Worn", options: [
+                { value: "None", phrase: "" },
+                { value: "Loose", phrase: "hair worn loose" },
+                { value: "Ponytail", phrase: "hair tied back in a ponytail" },
+                { value: "High ponytail", phrase: "hair in a high ponytail" },
+                { value: "Bun", phrase: "hair in a bun" },
+                { value: "Messy bun", phrase: "hair in a loose messy bun" },
+                { value: "Braid", phrase: "hair in a single braid" },
+                { value: "Braids", phrase: "hair in braids" },
+                { value: "Half-up", phrase: "hair half up, half down" },
+                { value: "Tucked behind ears", phrase: "hair tucked behind the ears" },
+                { value: "Updo", phrase: "hair in an elegant updo" },
+              ] },
+              { key: "fringe", label: "Fringe", options: [
+                { value: "None", phrase: "" },
+                { value: "No fringe", phrase: "no fringe, hair swept back off the forehead" },
+                { value: "Blunt fringe", phrase: "a blunt fringe" },
+                { value: "Wispy fringe", phrase: "a soft wispy fringe" },
+                { value: "Side-swept", phrase: "a side-swept fringe" },
+                { value: "Curtain fringe", phrase: "a curtain fringe framing the face" },
+                { value: "Side parting", phrase: "a deep side parting" },
+                { value: "Centre parting", phrase: "a centre parting" },
+              ] },
+            ],
+          },
           {
             key: "makeup",
             label: "Makeup",

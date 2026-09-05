@@ -298,8 +298,13 @@ window.ImagePrompt = {
       const cfg = (CFG.appearance && CFG.appearance.face) || null;
       if (!face || !cfg) return "";
 
-      const worn = [];
+      // Phrases bucketed by the template that will wrap them, preserving the
+      // order the templates were first seen. Grouping this way is what lets
+      // makeup, eyewear and details share a single "wearing …" while hair,
+      // which uses a different template, stays a separate clause.
+      const buckets = new Map();
       for (const group of cfg.groups || []) {
+        const template = group.template || cfg.template;
         const values = face[group.key] || {};
         for (const field of group.fields || []) {
           const chosen = values[field.key];
@@ -309,7 +314,9 @@ window.ImagePrompt = {
           // edited after the character was saved). Fall back to the stored
           // value itself rather than dropping it silently.
           const phrase = opt ? opt.phrase : String(chosen).toLowerCase();
-          if (phrase) worn.push(phrase);
+          if (!phrase) continue;
+          if (!buckets.has(template)) buckets.set(template, []);
+          buckets.get(template).push(phrase);
         }
       }
 
@@ -323,8 +330,18 @@ window.ImagePrompt = {
 
       const parts = [];
       if (structural.length) parts.push(fillTemplate(cfg.structureTemplate, { phrases: structural.join(", ") }));
-      if (worn.length) parts.push(fillTemplate(cfg.template, { phrases: worn.join(", ") }));
-      return parts.join(", ");
+      for (const [template, phrases] of buckets) parts.push(fillTemplate(template, { phrases: phrases.join(", ") }));
+      return parts.filter(Boolean).join(", ");
+    }
+
+    // True when nothing in this group has been set — the group is still
+    // entirely on its "None" sentinel.
+    function isFaceGroupUnset(face, group, noneValue) {
+      const values = (face && face[group.key]) || {};
+      return (group.fields || []).every(field => {
+        const v = values[field.key];
+        return !v || v === noneValue;
+      });
     }
 
     // The change request sent to the image model when regenerating a base image
@@ -339,7 +356,16 @@ window.ImagePrompt = {
       const preamble = loosenIdentity ? cfg.editPreambleLoose : cfg.editPreamble;
       // With nothing set the editor is being used to re-shoot the base image
       // unchanged, so the preamble and suffix alone are the whole request.
-      return [preamble, cfg.editFraming, charDesc, facePart, cfg.editSuffix].filter(Boolean).join(", ");
+      // A group that declares holdWhenUnset gets that clause while it is
+      // untouched, and loses it the moment it is set. Hair is the case that
+      // needs it: an edit about lipstick must not restyle the hair, but an
+      // edit that IS about the hair cannot also be told to keep it unchanged —
+      // asking for both leaves the model to pick one, which it does at random.
+      const holds = (cfg.groups || [])
+        .filter(g => g.holdWhenUnset && isFaceGroupUnset(face, g, cfg.noneValue))
+        .map(g => g.holdWhenUnset);
+
+      return [preamble, cfg.editFraming, ...holds, charDesc, facePart, cfg.editSuffix].filter(Boolean).join(", ");
     }
 
     function buildAppearancePrompt(appearance) {
