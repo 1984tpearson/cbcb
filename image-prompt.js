@@ -294,6 +294,28 @@ window.ImagePrompt = {
     // untouched face has to read to the model exactly as it did before this
     // feature existed, or every existing character's images would shift the
     // first time they were regenerated.
+    // The phrase one field contributes, and the single place that decides it.
+    // Both the prompt builder and the "has this been set?" checks go through
+    // here, so a field can never count as set while contributing nothing, or
+    // vice versa — they were separate rules once and drifted apart the moment
+    // custom text arrived.
+    //
+    // A field whose value is the custom sentinel takes its phrase from the
+    // companion "<key>Custom" entry, following the same convention the
+    // appearance settings already use for hairColour/hairColourCustom.
+    function faceFieldPhrase(values, field, cfg, unsetValue) {
+      const chosen = values[field.key];
+      if (!chosen || chosen === unsetValue) return "";
+      if (chosen === cfg.customValue) return String(values[field.key + "Custom"] || "").trim();
+      // Structure fields are plain strings; grouped fields carry a phrase.
+      if (!field.options || typeof field.options[0] === "string") return chosen;
+      const opt = field.options.find(o => o.value === chosen);
+      // An unknown value is one the config no longer offers (a list was edited
+      // after the character was saved). Fall back to the stored value itself
+      // rather than dropping it silently.
+      return opt ? opt.phrase : String(chosen).toLowerCase();
+    }
+
     function buildFacePrompt(face) {
       const cfg = (CFG.appearance && CFG.appearance.face) || null;
       if (!face || !cfg) return "";
@@ -307,26 +329,17 @@ window.ImagePrompt = {
         const template = group.template || cfg.template;
         const values = face[group.key] || {};
         for (const field of group.fields || []) {
-          const chosen = values[field.key];
-          if (!chosen || chosen === cfg.noneValue) continue;
-          const opt = (field.options || []).find(o => o.value === chosen);
-          // An unknown value is one the config no longer offers (a list was
-          // edited after the character was saved). Fall back to the stored
-          // value itself rather than dropping it silently.
-          const phrase = opt ? opt.phrase : String(chosen).toLowerCase();
+          const phrase = faceFieldPhrase(values, field, cfg, cfg.noneValue);
           if (!phrase) continue;
           if (!buckets.has(template)) buckets.set(template, []);
           buckets.get(template).push(phrase);
         }
       }
 
-      const structural = [];
       const struct = face.structure || {};
-      for (const field of cfg.structure || []) {
-        const chosen = struct[field.key];
-        if (!chosen || chosen === cfg.unsetValue) continue;
-        structural.push(chosen);
-      }
+      const structural = (cfg.structure || [])
+        .map(field => faceFieldPhrase(struct, field, cfg, cfg.unsetValue))
+        .filter(Boolean);
 
       const parts = [];
       if (structural.length) parts.push(fillTemplate(cfg.structureTemplate, { phrases: structural.join(", ") }));
@@ -334,14 +347,25 @@ window.ImagePrompt = {
       return parts.filter(Boolean).join(", ");
     }
 
-    // True when nothing in this group has been set — the group is still
-    // entirely on its "None" sentinel.
-    function isFaceGroupUnset(face, group, noneValue) {
+    // True when this group contributes nothing to the prompt. Note that is not
+    // quite "every dropdown is on None": a field set to Custom with the text
+    // box left empty says nothing, so it counts as unset — otherwise it would
+    // drop the group's hold clause while adding no instruction to replace it,
+    // which is the one combination that silently lets the hair drift.
+    function isFaceGroupUnset(face, group, cfg) {
       const values = (face && face[group.key]) || {};
-      return (group.fields || []).every(field => {
-        const v = values[field.key];
-        return !v || v === noneValue;
-      });
+      return (group.fields || []).every(field => !faceFieldPhrase(values, field, cfg, cfg.noneValue));
+    }
+
+    // True when nothing on the face has been set at all.
+    function isFaceUnset(face) {
+      const cfg = (CFG.appearance && CFG.appearance.face) || null;
+      if (!cfg) return true;
+      if (!face) return true;
+      const groupsClear = (cfg.groups || []).every(group => isFaceGroupUnset(face, group, cfg));
+      const struct = face.structure || {};
+      const structClear = (cfg.structure || []).every(field => !faceFieldPhrase(struct, field, cfg, cfg.unsetValue));
+      return groupsClear && structClear;
     }
 
     // The change request sent to the image model when regenerating a base image
@@ -362,7 +386,7 @@ window.ImagePrompt = {
       // edit that IS about the hair cannot also be told to keep it unchanged —
       // asking for both leaves the model to pick one, which it does at random.
       const holds = (cfg.groups || [])
-        .filter(g => g.holdWhenUnset && isFaceGroupUnset(face, g, cfg.noneValue))
+        .filter(g => g.holdWhenUnset && isFaceGroupUnset(face, g, cfg))
         .map(g => g.holdWhenUnset);
 
       return [preamble, cfg.editFraming, ...holds, charDesc, facePart, cfg.editSuffix].filter(Boolean).join(", ");
@@ -563,7 +587,7 @@ window.ImagePrompt = {
       EMPTY_STAGING, STAGING_KEYS, hasStaging, buildStagingImageDesc,
       HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
       appearancePhrasePreview, buildAppearancePrompt,
-      buildFacePrompt, buildFaceEditPrompt,
+      buildFacePrompt, buildFaceEditPrompt, faceFieldPhrase, isFaceUnset,
       isUserUndressed, povSelfBody, isIntimateScene,
       beatShowsContact, detectPhysicalContact, stripViewerLimbs,
       buildPovModifiers, joinPromptParts, subjectFor, assembleImagePrompt,

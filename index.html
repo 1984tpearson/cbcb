@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=6"></script>
-  <script src="image-prompt.js?v=6"></script>
+  <script src="site-config.js?v=7"></script>
+  <script src="image-prompt.js?v=7"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -359,7 +359,7 @@ const {
   EMPTY_STAGING, STAGING_KEYS, hasStaging, buildStagingImageDesc,
   HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
   appearancePhrasePreview, buildAppearancePrompt,
-  buildFacePrompt, buildFaceEditPrompt,
+  buildFacePrompt, buildFaceEditPrompt, isFaceUnset,
   isUserUndressed, povSelfBody, isIntimateScene,
   detectPhysicalContact, stripViewerLimbs,
   buildPovModifiers, joinPromptParts, assembleImagePrompt,
@@ -1281,9 +1281,15 @@ function emptyFace() {
   const face = { structure: {} };
   for (const group of FACE_CFG.groups || []) {
     face[group.key] = {};
-    for (const field of group.fields || []) face[group.key][field.key] = FACE_CFG.noneValue;
+    for (const field of group.fields || []) {
+      face[group.key][field.key] = FACE_CFG.noneValue;
+      face[group.key][field.key + "Custom"] = "";
+    }
   }
-  for (const field of FACE_CFG.structure || []) face.structure[field.key] = FACE_CFG.unsetValue;
+  for (const field of FACE_CFG.structure || []) {
+    face.structure[field.key] = FACE_CFG.unsetValue;
+    face.structure[field.key + "Custom"] = "";
+  }
   return face;
 }
 
@@ -1298,21 +1304,6 @@ function normaliseFace(face) {
   }
   base.structure = { ...base.structure, ...(face.structure || {}) };
   return base;
-}
-
-// True when nothing on the face has been set — used to decide whether the
-// editor is making a change or just re-shooting the existing base image.
-function isFaceUnset(face) {
-  const f = normaliseFace(face);
-  for (const group of FACE_CFG.groups || []) {
-    for (const field of group.fields || []) {
-      if (f[group.key][field.key] !== FACE_CFG.noneValue) return false;
-    }
-  }
-  for (const field of FACE_CFG.structure || []) {
-    if (f.structure[field.key] !== FACE_CFG.unsetValue) return false;
-  }
-  return true;
 }
 
 const APPEARANCE_SLIDER_DEFS = [
@@ -2203,6 +2194,29 @@ function AppearanceSection({ appearance, onChange }) {
 // Results are kept as variants rather than overwriting: a face edit is a
 // judgement call you often want to undo two edits later, and the base image is
 // the one thing in a character that cannot be reconstructed from its settings.
+// One dropdown plus, when Custom is chosen, the free-text box that replaces
+// its phrase. Every field renders through here — grouped fields whose options
+// are { value, phrase } and structure fields whose options are plain strings —
+// so Custom cannot behave differently in one section than another.
+function FaceField({ field, value, customValue, onChange, onCustomChange, unsetValue }) {
+  const options = (field.options || []).map(o => (typeof o === "string" ? { value: o, label: o } : { value: o.value, label: o.value }));
+  const isCustom = value === FACE_CFG.customValue;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
+      <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>{field.label}</span>
+      <select style={S.select} value={value ?? unsetValue} onChange={e => onChange(e.target.value)}>
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        <option value={FACE_CFG.customValue}>{FACE_CFG.customValue}…</option>
+      </select>
+      {isCustom && (
+        <input style={{ ...S.input, marginTop: 4 }} autoFocus
+          placeholder={`Describe the ${field.label.toLowerCase()}…`}
+          value={customValue || ""} onChange={e => onCustomChange(e.target.value)} />
+      )}
+    </div>
+  );
+}
+
 function FaceEditor({ character, settings, onSave, onClose }) {
   const [face, setFace] = useState(() => normaliseFace(character.appearance && character.appearance.face));
   const [variants, setVariants] = useState(() => {
@@ -2286,7 +2300,6 @@ function FaceEditor({ character, settings, onSave, onClose }) {
     });
   };
 
-  const swatch = { display: "flex", flexDirection: "column", gap: 4, marginTop: 8 };
 
   return (
     <div style={S.overlay}>
@@ -2335,13 +2348,11 @@ function FaceEditor({ character, settings, onSave, onClose }) {
               <label style={S.label}>{group.label}</label>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
                 {(group.fields || []).map(field => (
-                  <div key={field.key} style={swatch}>
-                    <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>{field.label}</span>
-                    <select style={S.select} value={face[group.key][field.key]}
-                      onChange={e => setField(group.key, field.key, e.target.value)}>
-                      {(field.options || []).map(o => <option key={o.value} value={o.value}>{o.value}</option>)}
-                    </select>
-                  </div>
+                  <FaceField key={field.key} field={field}
+                    value={face[group.key][field.key]} unsetValue={FACE_CFG.noneValue}
+                    customValue={face[group.key][field.key + "Custom"]}
+                    onChange={v => setField(group.key, field.key, v)}
+                    onCustomChange={v => setField(group.key, field.key + "Custom", v)} />
                 ))}
               </div>
             </div>
@@ -2355,13 +2366,11 @@ function FaceEditor({ character, settings, onSave, onClose }) {
           </p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
             {(FACE_CFG.structure || []).map(field => (
-              <div key={field.key} style={swatch}>
-                <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>{field.label}</span>
-                <select style={S.select} value={face.structure[field.key]}
-                  onChange={e => setStructure(field.key, e.target.value)}>
-                  {(field.options || []).map(o => <option key={o} value={o}>{o}</option>)}
-                </select>
-              </div>
+              <FaceField key={field.key} field={field}
+                value={face.structure[field.key]} unsetValue={FACE_CFG.unsetValue}
+                customValue={face.structure[field.key + "Custom"]}
+                onChange={v => setStructure(field.key, v)}
+                onCustomChange={v => setStructure(field.key + "Custom", v)} />
             ))}
           </div>
 

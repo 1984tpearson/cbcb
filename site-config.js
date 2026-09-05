@@ -601,6 +601,11 @@
         unsetValue: "Any",
         // Options whose value means "nothing here" across the grouped fields.
         noneValue: "None",
+        // Offered on every field, and never listed in the option lists — the
+        // editor appends it. Selecting it reveals a text box whose contents go
+        // into the prompt verbatim, so a list can stay short without becoming a
+        // limit. Stored in a companion "<key>Custom" entry.
+        customValue: "Custom",
       },
     },
 
