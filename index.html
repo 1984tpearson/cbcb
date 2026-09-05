@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=13"></script>
-  <script src="image-prompt.js?v=13"></script>
+  <script src="site-config.js?v=14"></script>
+  <script src="image-prompt.js?v=14"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -2772,8 +2772,9 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const [vibe, setVibe] = useState("");
   const [vibeLoading, setVibeLoading] = useState(false);
   const [imgPrompt, setImgPrompt] = useState("");
+  // Two generations per click now, so the button says which one is running.
+  const [imgStage, setImgStage] = useState("");
   const [imgLoading, setImgLoading] = useState(false);
-  const [clothed, setClothed] = useState(true);
   const [showCustomImgInput, setShowCustomImgInput] = useState(false);
   const [customImgPrompt, setCustomImgPrompt] = useState("");
   const [error, setError] = useState("");
@@ -2782,7 +2783,8 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const [analysing, setAnalysing] = useState(false);
   const [appearanceNote, setAppearanceNote] = useState("");
   const [suggestedAge, setSuggestedAge] = useState(null);
-  const [generatedImages, setGeneratedImages] = useState(form.referenceImage ? [form.referenceImage] : []);
+  const [generatedImages, setGeneratedImages] = useState(
+    form.referenceImage ? [{ base: form.referenceImage, avatar: form.avatarImage || null }] : []);
   const fileRef = useRef();
 
   const handleVibeGenerate = async () => {
@@ -2870,24 +2872,51 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       const genderDesc = form.gender === "Custom" ? (form.customGender || "") : (form.gender || "");
       const ageDesc = form.age ? `${form.age} year old` : "";
       const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-      const baseDesc = imgPrompt.trim() ? imgPrompt.trim() : (form.name ? form.name : "person");
-      const fullPrompt = charDesc ? `${baseDesc}, ${charDesc}` : baseDesc;
-      const clothingClause = clothed ? "fully clothed, wearing an outfit appropriate to the setting" : "nude";
-      // Only on this screen: each click of Regen should offer a genuinely
-      // different face to pick from. Chat images deliberately do not do this
-      // — they pass the chosen reference image instead, and need the face to
-      // stay put.
-      // ...unless the face editor has actually specified a face. A random
-      // variation on top of a deliberately-set face shape is two descriptions
-      // of the same features fighting each other, and the random one usually
-      // wins.
+
+      // Each click of Regen should offer a genuinely different face to pick
+      // from. Chat images deliberately do not do this — they pass the chosen
+      // base image instead, and need the face to stay put. Skipped once the
+      // face editor has specified a face, since a random face shape on top of
+      // a chosen one is two descriptions of the same features competing.
       const faceVariation = isFaceUnset(form.appearance && form.appearance.face) ? pickFaceVariation() : "";
-      const stylePrompt = `standing, ${fullPrompt}${faceVariation ? `, ${faceVariation}` : ""}, ${clothingClause}, photorealistic, natural lighting, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
-      const seed = Math.floor(Math.random() * 2147483647);
-      const url = await generateImageWiro({ prompt: stylePrompt, model: settings.imageModel, seed });
-      setGeneratedImages(prev => [url, ...prev]);
-      setForm(f => ({ ...f, referenceImage: url, backgroundImage: url }));
+      const extra = [imgPrompt.trim(), faceVariation].filter(Boolean).join(", ");
+      const body = normaliseBody(form.appearance && form.appearance.body);
+
+      // Built by the same function the body editor uses, so there is one
+      // definition of what a base image is rather than this screen keeping a
+      // private one. anchored: false because on a first generation there is no
+      // reference image for the hold clauses to talk about.
+      setImgStage("base");
+      const base = await generateImageWiro({
+        prompt: buildBodyBasePrompt({ body, charDesc, anchored: false, extra }),
+        model: settings.imageModel,
+        seed: Math.floor(Math.random() * 2147483647),
+      });
+
+      // And the avatar, anchored to the base so it is a portrait of the person
+      // just generated. A character needs both from the moment it exists: the
+      // base is never displayed, so without this the card would show the nude.
+      setImgStage("avatar");
+      const avatar = await generateImageWiro({
+        prompt: buildAvatarPrompt({ charDesc }),
+        model: settings.imageModel,
+        initImage: base,
+        seed: Math.floor(Math.random() * 2147483647),
+      });
+
+      setGeneratedImages(prev => [{ base, avatar }, ...prev]);
+      setForm(f => ({
+        ...f,
+        referenceImage: base,
+        avatarImage: avatar,
+        backgroundImage: avatar,
+        // The base image now matches these settings, so the body editor opens
+        // showing nothing outstanding rather than reading the whole appearance
+        // as an unapplied change.
+        appearance: { ...f.appearance, baseSnapshot: snapshotOf(f.appearance || {}, body) },
+      }));
     } catch (e) { setError(e.message); }
+    setImgStage("");
     setImgLoading(false);
   };
 
@@ -3011,15 +3040,23 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
           <label style={S.label}>Reference / Background Image</label>
           {generatedImages.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 8 }}>
-              {generatedImages.map((url, i) => (
+              {generatedImages.map((pair, i) => (
                 <div key={i} style={{ position: "relative" }}>
-                  <img src={url} alt={`generated ${i}`} style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 8, background: "var(--bg3)", display: "block", border: form.referenceImage === url ? "3px solid var(--pink)" : "3px solid transparent", cursor: "pointer" }}
-                    onClick={() => setForm(f => ({ ...f, referenceImage: url, backgroundImage: url }))} />
-                  {form.referenceImage === url && (
+                  <img src={pair.base} alt={`generated ${i}`} style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 8, background: "var(--bg3)", display: "block", border: form.referenceImage === pair.base ? "3px solid var(--pink)" : "3px solid transparent", cursor: "pointer" }}
+                    onClick={() => setForm(f => ({ ...f, referenceImage: pair.base, avatarImage: pair.avatar, backgroundImage: pair.avatar || pair.base }))} />
+                  {form.referenceImage === pair.base && (
                     <span style={{ position: "absolute", top: 8, left: 8, background: "var(--pink)", color: "white", fontSize: 10, fontWeight: 800, padding: "3px 8px", borderRadius: 10, letterSpacing: "0.05em" }}>SELECTED</span>
                   )}
                 </div>
               ))}
+            </div>
+          )}
+          {form.avatarImage && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <img src={form.avatarImage} alt="avatar" style={{ width: 52, height: 52, borderRadius: "50%", objectFit: "cover", background: "var(--bg3)" }} />
+              <p style={{ fontSize: 11, color: "var(--text3)", margin: 0 }}>
+                Avatar — what the app displays. The image above is the base image: it anchors every chat generation and is never shown.
+              </p>
             </div>
           )}
           {!generatedImages.length && characterAvatar(form) && (
@@ -3042,11 +3079,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input style={{ ...S.input, flex: 1, marginBottom: 0 }} placeholder="Optional — leave blank to use appearance settings"
               value={imgPrompt} onChange={e => setImgPrompt(e.target.value)} />
-            <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text4)", whiteSpace: "nowrap" }}>
-              <input type="checkbox" checked={clothed} onChange={e => setClothed(e.target.checked)} />
-              Clothed
-            </label>
-            <button style={S.btnPrimary} onClick={handleGenerateImage} disabled={imgLoading}>{imgLoading ? "Generating…" : form.referenceImage ? "↺ Regen" : "Gen Image"}</button>
+            <button style={S.btnPrimary} onClick={handleGenerateImage} disabled={imgLoading}>{imgLoading ? (imgStage === "avatar" ? "Avatar…" : "Base image…") : form.referenceImage ? "↺ Regen" : "Gen Image"}</button>
           </div>
 
           {error && <p style={S.error}>{error}</p>}

@@ -419,7 +419,7 @@ window.ImagePrompt = {
       return changed;
     }
 
-    function buildBodyBasePrompt({ body, charDesc, changedKeys }) {
+    function buildBodyBasePrompt({ body, charDesc, changedKeys, anchored = true, extra }) {
       const cfg = (CFG.appearance && CFG.appearance.body) || null;
       if (!cfg) return "";
       const values = body || {};
@@ -434,12 +434,19 @@ window.ImagePrompt = {
       // fields were edited is dropped: keeping it would put "same skin tone"
       // and "dark brown skin" in one prompt, and the reference image would win
       // the argument, which is exactly what made an ethnicity change a no-op.
-      const changed = new Set(changedKeys || []);
-      const holds = (cfg.baseHolds || []).filter(h => !(h.keys || []).some(k => changed.has(k)));
-      const identityHeld = holds.some(h => h.identity);
-      const preamble = identityHeld ? cfg.basePreamble : cfg.basePreambleRestyled;
+      // With no reference image there is nothing to hold to: "the same person
+      // as the reference image" in a first generation names something that does
+      // not exist, and every hold clause is a promise about a picture nobody
+      // has seen. The description is the whole brief in that case.
+      const anchor = [];
+      if (anchored) {
+        const changed = new Set(changedKeys || []);
+        const holds = (cfg.baseHolds || []).filter(h => !(h.keys || []).some(k => changed.has(k)));
+        anchor.push(holds.some(h => h.identity) ? cfg.basePreamble : cfg.basePreambleRestyled);
+        anchor.push(...holds.map(h => h.phrase));
+      }
 
-      return [preamble, ...holds.map(h => h.phrase), cfg.baseFraming, cfg.baseNudeClause, charDesc, skin, cfg.baseSuffix]
+      return [...anchor, cfg.baseFraming, cfg.baseNudeClause, charDesc, skin, extra, cfg.baseSuffix]
         .filter(Boolean).join(", ");
     }
 
