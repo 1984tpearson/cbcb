@@ -7,8 +7,13 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
-  <script src="site-config.js"></script>
-  <script src="image-prompt.js"></script>
+  <!-- Versioned so a browser holding an older copy cannot pair it with a newer
+       index.html. That mismatch is silent and looks like an app bug: the page
+       loads, and only the feature whose helper is missing from the cached file
+       fails — which is exactly how the face editor first showed up as a blank
+       screen. Bump BOTH when either file changes. -->
+  <script src="site-config.js?v=2"></script>
+  <script src="image-prompt.js?v=2"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -4196,7 +4201,30 @@ const S = {
   regenBtns: { display:"flex", gap:8 },
 };
 
-window._mountApp = function() { ReactDOM.createRoot(document.getElementById("app-root")).render(<App />); };
+// A component that throws used to unmount the entire tree, leaving a blank
+// page with the reason only in a console the phone does not show. This keeps
+// the failure on screen and names it, which is the difference between "the app
+// is broken" and a diagnosis.
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error("App error:", error, info); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div style={{ padding: 24, fontFamily: "system-ui, sans-serif", color: "var(--text)" }}>
+        <h2 style={{ color: "var(--pink)", fontSize: 17 }}>Something broke</h2>
+        <p style={{ fontSize: 14 }}>{String(this.state.error && this.state.error.message)}</p>
+        <p style={{ fontSize: 13, color: "var(--text3)" }}>
+          If this followed an update, the browser may still be holding an older copy of the app's scripts — reload the page.
+        </p>
+        <button style={S.btnPrimary} onClick={() => location.reload()}>Reload</button>
+      </div>
+    );
+  }
+}
+
+window._mountApp = function() { ReactDOM.createRoot(document.getElementById("app-root")).render(<ErrorBoundary><App /></ErrorBoundary>); };
 
 </script>
 
