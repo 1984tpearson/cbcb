@@ -3439,6 +3439,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   const [showPersonality, setShowPersonality] = useState(false);
   const [showFaceEditor, setShowFaceEditor] = useState(false);
   const [showBodyEditor, setShowBodyEditor] = useState(false);
+  const [showRestartAsk, setShowRestartAsk] = useState(false);
   const [openingScenarios, setOpeningScenarios] = useState(null);
   const [openingLoading, setOpeningLoading] = useState(false);
   const [seenScenarioLabels, setSeenScenarioLabels] = useState([]);
@@ -3522,8 +3523,24 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
     setBgImage(updatedChar.backgroundImage);
   };
 
-  const handleRestart = () => {
-    if (!confirm("Start a new conversation? The current chat will be preserved.")) return;
+  const handleRestart = () => setShowRestartAsk(true);
+
+  // `remember` decides what survives into the new scene. Everything reset here
+  // unconditionally — the reactive sliders, the outfits, the staging — was
+  // always reset; intentions never were, and they live on the character rather
+  // than the chat, so a goal's ladder came into a brand new conversation still
+  // ticked off from the last one. Undressing that happened in a scene three
+  // chats ago counted as groundwork already done here.
+  //
+  // Auto-formed goals are dropped outright when starting fresh: they were
+  // invented for a conversation that is over. Hand-written ones are kept,
+  // because they are character definition rather than something she picked up
+  // — but their progress and their steps go back to nothing, since the
+  // groundwork was laid in a scene that no longer exists. The hand-written
+  // memory fields are left alone either way; they are authored, not
+  // accumulated, and are edited in the character panel.
+  const doRestart = (remember) => {
+    setShowRestartAsk(false);
     const newSessionId = `${character.id}_${Date.now()}`;
     const updatedChar = commitCharacter(prev => {
       // Reset reactive sliders back to character defaults
@@ -3533,7 +3550,17 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       resetSliders.likesUser = characterDefaults.likesUser ?? DEFAULT_SLIDERS.likesUser;
       resetSliders.attractionToUser = characterDefaults.attractionToUser ?? DEFAULT_SLIDERS.attractionToUser;
       resetSliders.horniness = characterDefaults.horniness ?? DEFAULT_SLIDERS.horniness;
-      return { ...prev, currentSessionId: newSessionId, sliders: resetSliders, charOutfit: null, userOutfit: null, staging: null };
+      const intentions = remember
+        ? prev.intentions
+        : (prev.intentions || [])
+            .filter(i => i && i.source !== "auto")
+            .map(i => ({
+              ...i,
+              progress: 0,
+              status: "active",
+              steps: (i.steps || []).map(st => ({ ...st, done: false })),
+            }));
+      return { ...prev, currentSessionId: newSessionId, sliders: resetSliders, charOutfit: null, userOutfit: null, staging: null, intentions };
     });
     setMessages([]);
     setMessagesLoaded(false);
@@ -4561,6 +4588,40 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         <BodyEditor character={character} settings={settings}
           onSave={c => { commitCharacter(c); setShowBodyEditor(false); }}
           onClose={() => setShowBodyEditor(false)} />
+      )}
+
+      {/* Starting a new scene asks rather than assumes. Carrying everything over
+          is right when the new conversation is the next evening of the same
+          story, and wrong when it is a different story with the same person —
+          and only you know which this is. */}
+      {showRestartAsk && (
+        <div style={S.overlay}>
+          <div style={{ ...S.modal, maxWidth: 420 }}>
+            <div style={S.modalHeader}>
+              <span style={S.modalTitle}>Start a new scene</span>
+              <button style={S.iconBtn} onClick={() => setShowRestartAsk(false)}>✕</button>
+            </div>
+            <div style={S.modalBody}>
+              <p style={{ margin: 0, fontSize: 13, color: "var(--text2)", lineHeight: 1.55 }}>
+                The current chat is kept either way. Where you both are, what you are
+                wearing and how {character.name} feels about you all reset.
+              </p>
+              <p style={{ margin: "10px 0 0", fontSize: 13, color: "var(--text2)", lineHeight: 1.55 }}>
+                What about what she is working toward? Her goals carry their groundwork
+                with them — steps she has already taken stay ticked off unless you clear them.
+              </p>
+              <p style={{ margin: "10px 0 0", fontSize: 11, color: "var(--text4)", lineHeight: 1.55 }}>
+                Starting fresh drops the goals she invented herself and puts the ones you
+                wrote back to the beginning. Anything you typed into her memory is untouched.
+              </p>
+            </div>
+            <div style={{ ...S.modalFooter, flexWrap: "wrap" }}>
+              <button style={S.iconBtnLight} onClick={() => setShowRestartAsk(false)}>Cancel</button>
+              <button style={S.btnSecondary} onClick={() => doRestart(true)}>Carry it over</button>
+              <button style={S.btnPrimary} onClick={() => doRestart(false)}>Start fresh</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
