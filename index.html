@@ -354,6 +354,7 @@ const {
   EMPTY_STAGING, STAGING_KEYS, hasStaging, buildStagingImageDesc,
   HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
   appearancePhrasePreview, buildAppearancePrompt,
+  buildFacePrompt, buildFaceEditPrompt,
   isUserUndressed, povSelfBody, isIntimateScene,
   detectPhysicalContact, stripViewerLimbs,
   buildPovModifiers, joinPromptParts, assembleImagePrompt,
@@ -1259,7 +1260,55 @@ const DEFAULT_APPEARANCE = {
   chest: 50,
   waist: 50,
   hips: 50,
+  // Set by the face editor. Absent on every character created before it
+  // existed, and buildFacePrompt emits nothing for an untouched one, so an
+  // old character's prompts are byte-identical until the face is deliberately
+  // changed.
+  face: null,
 };
+
+const FACE_CFG = (CFG.appearance && CFG.appearance.face) || { groups: [], structure: [], noneValue: "None", unsetValue: "Any" };
+
+// A face with every field on its "nothing set" sentinel. Built from the config
+// rather than written out, so adding a field to site-config.js is all it takes
+// to have it appear in the editor.
+function emptyFace() {
+  const face = { structure: {} };
+  for (const group of FACE_CFG.groups || []) {
+    face[group.key] = {};
+    for (const field of group.fields || []) face[group.key][field.key] = FACE_CFG.noneValue;
+  }
+  for (const field of FACE_CFG.structure || []) face.structure[field.key] = FACE_CFG.unsetValue;
+  return face;
+}
+
+// Fill in anything a stored face is missing. A face saved before a field was
+// added to the config has no value for it, and an undefined value would render
+// the dropdown blank rather than on its sentinel.
+function normaliseFace(face) {
+  const base = emptyFace();
+  if (!face) return base;
+  for (const group of FACE_CFG.groups || []) {
+    base[group.key] = { ...base[group.key], ...(face[group.key] || {}) };
+  }
+  base.structure = { ...base.structure, ...(face.structure || {}) };
+  return base;
+}
+
+// True when nothing on the face has been set — used to decide whether the
+// editor is making a change or just re-shooting the existing base image.
+function isFaceUnset(face) {
+  const f = normaliseFace(face);
+  for (const group of FACE_CFG.groups || []) {
+    for (const field of group.fields || []) {
+      if (f[group.key][field.key] !== FACE_CFG.noneValue) return false;
+    }
+  }
+  for (const field of FACE_CFG.structure || []) {
+    if (f.structure[field.key] !== FACE_CFG.unsetValue) return false;
+  }
+  return true;
+}
 
 const APPEARANCE_SLIDER_DEFS = [
   { key: "height",  label: "Height", left: `${HEIGHT_CM_MIN} cm`, right: `${HEIGHT_CM_MAX} cm`, displayFn: v => `${sliderToCm(v)} cm` },
@@ -2134,6 +2183,220 @@ function AppearanceSection({ appearance, onChange }) {
   );
 }
 
+// ─── FACE EDITOR ──────────────────────────────────────────────────────────────
+// Changes the face on an existing character — makeup, eyewear and details
+// primarily, facial structure when asked — and re-shoots the base image that
+// every chat generation uses as its identity anchor.
+//
+// The reference image is passed back in as initImage, so the result is an edit
+// of the existing face rather than a fresh person. That is exactly what makeup
+// and glasses want, and exactly what a bone-structure change fights: the anchor
+// holds the old structure in place. Hence the "reshape" toggle, which swaps in
+// a preamble that asks for the same colouring on a restyled face instead of the
+// same face outright.
+//
+// Results are kept as variants rather than overwriting: a face edit is a
+// judgement call you often want to undo two edits later, and the base image is
+// the one thing in a character that cannot be reconstructed from its settings.
+function FaceEditor({ character, settings, onSave, onClose }) {
+  const [face, setFace] = useState(() => normaliseFace(character.appearance && character.appearance.face));
+  const [variants, setVariants] = useState(() => {
+    const existing = character.faceVariants || [];
+    if (existing.length || !character.referenceImage) return existing;
+    // Seed from the current base image so the face they started with is always
+    // one click away, even on a character that predates this editor.
+    return [{ id: "original", url: character.referenceImage, face: null, label: "Original", date: Date.now() }];
+  });
+  const [activeUrl, setActiveUrl] = useState(character.referenceImage || null);
+  const [loosenIdentity, setLoosenIdentity] = useState(false);
+  const [extraPrompt, setExtraPrompt] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const setField = (groupKey, fieldKey, value) =>
+    setFace(f => ({ ...f, [groupKey]: { ...f[groupKey], [fieldKey]: value } }));
+  const setStructure = (fieldKey, value) =>
+    setFace(f => ({ ...f, structure: { ...f.structure, [fieldKey]: value } }));
+
+  const promptPreview = buildFacePrompt(face);
+
+  const handleReset = () => setFace(emptyFace());
+
+  const handleGenerate = async () => {
+    if (!character.referenceImage) { setError("This character has no base image yet — generate one in the character editor first."); return; }
+    setLoading(true); setError("");
+    try {
+      // charDesc without the face: the face half is what the edit prompt is
+      // spelling out in full, and repeating it either side of the reference
+      // image only dilutes it.
+      const appearanceDesc = buildAppearancePrompt({ ...(character.appearance || {}), face: null });
+      const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
+      const ageDesc = character.age ? `${character.age} year old` : "";
+      const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
+      const prompt = [
+        buildFaceEditPrompt({ face, charDesc, loosenIdentity }),
+        extraPrompt.trim(),
+      ].filter(Boolean).join(", ");
+      const url = await generateImageWiro({
+        prompt,
+        model: settings.imageModel,
+        // Anchored to the image currently selected, not to the character's
+        // saved one — so successive edits stack on what you are looking at.
+        initImage: activeUrl || character.referenceImage,
+        seed: Math.floor(Math.random() * 2147483647),
+      });
+      const label = isFaceUnset(face) ? "Re-shot" : (promptPreview.slice(0, 40) || "Edited");
+      setVariants(v => [{ id: `${Date.now()}`, url, face: normaliseFace(face), label, date: Date.now() }, ...v]);
+      setActiveUrl(url);
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  };
+
+  // Selecting a stored variant restores the face settings that produced it, so
+  // the controls never describe something other than the image on screen.
+  const handlePickVariant = (v) => {
+    setActiveUrl(v.url);
+    if (v.face) setFace(normaliseFace(v.face));
+  };
+
+  const handleDeleteVariant = (id) => {
+    const remaining = variants.filter(v => v.id !== id);
+    const removed = variants.find(v => v.id === id);
+    setVariants(remaining);
+    if (removed && removed.url === activeUrl) setActiveUrl(remaining.length ? remaining[0].url : character.referenceImage);
+  };
+
+  const handleApply = () => {
+    // backgroundImage follows the reference image only where it was already
+    // tracking it — a background deliberately set to something else is not
+    // this editor's to overwrite.
+    const followsRef = character.backgroundImage === character.referenceImage;
+    onSave({
+      ...character,
+      referenceImage: activeUrl || character.referenceImage,
+      backgroundImage: followsRef ? (activeUrl || character.referenceImage) : character.backgroundImage,
+      appearance: { ...(character.appearance || {}), face },
+      faceVariants: variants.slice(0, 12),
+    });
+  };
+
+  const swatch = { display: "flex", flexDirection: "column", gap: 4, marginTop: 8 };
+
+  return (
+    <div style={S.overlay}>
+      <div style={{ ...S.modal, maxWidth: 560 }}>
+        <div style={S.modalHeader}>
+          <span style={S.modalTitle}>Face — {character.name}</span>
+          <button style={S.iconBtn} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalBody}>
+
+          {/* Current base image + stored variants */}
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <div style={{ width: 150, flexShrink: 0 }}>
+              {activeUrl
+                ? <img src={activeUrl} alt="base" style={{ width: "100%", borderRadius: 10, display: "block", background: "var(--bg3)" }} />
+                : <div style={{ width: "100%", height: 150, borderRadius: 10, background: "var(--bg3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "var(--text3)" }}>No base image</div>}
+              <p style={{ fontSize: 11, color: "var(--text3)", margin: "4px 0 0" }}>Current base image</p>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <label style={{ ...S.label, marginTop: 0 }}>Variants</label>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {variants.map(v => (
+                  <div key={v.id} style={{ position: "relative" }}>
+                    <img src={v.url} alt={v.label} title={v.label}
+                      onClick={() => handlePickVariant(v)}
+                      style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, cursor: "pointer", background: "var(--bg3)", border: v.url === activeUrl ? "2px solid var(--pink)" : "2px solid transparent" }} />
+                    {v.id !== "original" && (
+                      <button onClick={() => handleDeleteVariant(v.id)} title="Remove variant"
+                        style={{ position: "absolute", top: -6, right: -6, width: 18, height: 18, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 11, lineHeight: "18px", padding: 0, cursor: "pointer" }}>✕</button>
+                    )}
+                  </div>
+                ))}
+                {!variants.length && <span style={{ fontSize: 12, color: "var(--text3)" }}>None yet.</span>}
+              </div>
+            </div>
+          </div>
+
+          <div style={S.divider} />
+
+          {/* Makeup / eyewear / details, straight off the config */}
+          {(FACE_CFG.groups || []).map(group => (
+            <div key={group.key}>
+              <label style={S.label}>{group.label}</label>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
+                {(group.fields || []).map(field => (
+                  <div key={field.key} style={swatch}>
+                    <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>{field.label}</span>
+                    <select style={S.select} value={face[group.key][field.key]}
+                      onChange={e => setField(group.key, field.key, e.target.value)}>
+                      {(field.options || []).map(o => <option key={o.value} value={o.value}>{o.value}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          <div style={S.divider} />
+
+          <label style={S.label}>Face structure</label>
+          <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 4px" }}>
+            Left on “{FACE_CFG.unsetValue}”, a trait is not mentioned at all and stays as it is.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
+            {(FACE_CFG.structure || []).map(field => (
+              <div key={field.key} style={swatch}>
+                <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>{field.label}</span>
+                <select style={S.select} value={face.structure[field.key]}
+                  onChange={e => setStructure(field.key, e.target.value)}>
+                  {(field.options || []).map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+
+          <label style={{ ...S.label, display: "flex", alignItems: "center", gap: 8, textTransform: "none", letterSpacing: 0, fontSize: 13 }}>
+            <input type="checkbox" checked={loosenIdentity} onChange={e => setLoosenIdentity(e.target.checked)} />
+            Allow the bone structure to change
+          </label>
+          <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 4px" }}>
+            Off, the reference image holds the face still and structure changes barely register — which is what you want for
+            makeup and glasses. On, the face is allowed to be reshaped, and the likeness will drift.
+          </p>
+
+          <label style={S.label}>Extra instruction (optional)</label>
+          <input style={S.input} placeholder="e.g. smiling, hair tied back" value={extraPrompt}
+            onChange={e => setExtraPrompt(e.target.value)} />
+
+          {promptPreview && (
+            <p style={{ fontSize: 12, color: "var(--text3)", margin: "8px 0 0", fontStyle: "italic" }}>
+              → {promptPreview}
+            </p>
+          )}
+
+          {error && <p style={{ color: "#c05060", fontSize: 13, marginTop: 8 }}>{error}</p>}
+
+          <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+            <button style={S.btnPrimary} onClick={handleGenerate} disabled={loading}>
+              {loading ? "Generating…" : "Generate face"}
+            </button>
+            <button style={S.btnSecondary} onClick={handleReset} disabled={loading}>Clear</button>
+            <div style={{ flex: 1 }} />
+            <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
+            <button style={S.btnPrimary} onClick={handleApply} disabled={loading}>Save</button>
+          </div>
+          <p style={{ fontSize: 12, color: "var(--text3)", margin: "8px 0 0" }}>
+            Saving sets the selected image as the base image used to anchor every chat generation, and applies these face
+            settings to the character's description.
+          </p>
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── CHARACTER FORM ───────────────────────────────────────────────────────────
 function CharacterForm({ character, onSave, onCancel, settings }) {
   const safeCharacter = character || null;
@@ -2252,8 +2515,12 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       // different face to pick from. Chat images deliberately do not do this
       // — they pass the chosen reference image instead, and need the face to
       // stay put.
-      const faceVariation = pickFaceVariation();
-      const stylePrompt = `standing, ${fullPrompt}, ${faceVariation}, ${clothingClause}, photorealistic, natural lighting, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
+      // ...unless the face editor has actually specified a face. A random
+      // variation on top of a deliberately-set face shape is two descriptions
+      // of the same features fighting each other, and the random one usually
+      // wins.
+      const faceVariation = isFaceUnset(form.appearance && form.appearance.face) ? pickFaceVariation() : "";
+      const stylePrompt = `standing, ${fullPrompt}${faceVariation ? `, ${faceVariation}` : ""}, ${clothingClause}, photorealistic, natural lighting, Canon EOS, 50mm, bokeh background, sharp focus, high detail`;
       const seed = Math.floor(Math.random() * 2147483647);
       const url = await generateImageWiro({ prompt: stylePrompt, model: settings.imageModel, seed });
       setGeneratedImages(prev => [url, ...prev]);
@@ -2432,7 +2699,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
 }
 
 // ─── CHARACTER CARD ───────────────────────────────────────────────────────────
-function CharacterCard({ character, onSelect, onEdit, onDelete, discreetMode }) {
+function CharacterCard({ character, onSelect, onEdit, onEditFace, onDelete, discreetMode }) {
   const [hover, setHover] = useState(false);
   const genderLabel = character.gender === "Custom" ? (character.customGender || "Custom") : character.gender;
 
@@ -2454,6 +2721,7 @@ function CharacterCard({ character, onSelect, onEdit, onDelete, discreetMode }) 
         </div>
         <div onClick={e => e.stopPropagation()} style={{ display: "flex", gap: 4 }}>
           <button style={{ background: "none", border: "none", color: "#8e8e93", fontSize: 15, cursor: "pointer", padding: "4px 6px" }} onClick={() => onEdit(character)} title="Edit">✎</button>
+          <button style={{ background: "none", border: "none", color: "#8e8e93", fontSize: 15, cursor: "pointer", padding: "4px 6px" }} onClick={() => onEditFace(character)} title="Edit face">☺</button>
           <button style={{ background: "none", border: "none", color: "#ff3b30", fontSize: 15, cursor: "pointer", padding: "4px 6px" }} onClick={() => onDelete(character.id)} title="Delete">✕</button>
         </div>
       </div>
@@ -2479,6 +2747,7 @@ function CharacterCard({ character, onSelect, onEdit, onDelete, discreetMode }) 
       </div>
       <div style={S.characterActions} onClick={e => e.stopPropagation()}>
         <button style={S.iconBtn} onClick={() => onEdit(character)} title="Edit">✎</button>
+        <button style={S.iconBtn} onClick={() => onEditFace(character)} title="Edit face">☺</button>
         <button style={{ ...S.iconBtn, color: "#c05060" }} onClick={() => onDelete(character.id)} title="Delete">✕</button>
       </div>
     </div>
@@ -3718,6 +3987,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showCharForm, setShowCharForm] = useState(false);
   const [editingChar, setEditingChar] = useState(null);
+  const [faceChar, setFaceChar] = useState(null);
   const [discreetMode, setDiscreetMode] = useState(() => storage.get("personachat_discreet", false));
 
   useEffect(() => { storage.set("personachat_settings", settings); }, [settings]);
@@ -3815,7 +4085,7 @@ function App() {
           <div style={discreetMode ? { display: "flex", flexDirection: "column", borderTop: "1px solid #e0e0e0" } : S.characterGrid}>
             {characters.map(c => (
               <CharacterCard key={c.id} character={c} onSelect={setActiveChar}
-                onEdit={c => { setEditingChar(c); setShowCharForm(true); }} onDelete={deleteCharacter}
+                onEdit={c => { setEditingChar(c); setShowCharForm(true); }} onEditFace={setFaceChar} onDelete={deleteCharacter}
                 discreetMode={discreetMode} />
             ))}
           </div>
@@ -3823,6 +4093,11 @@ function App() {
       </main>
       {showSettings && <SettingsPanel settings={settings} onSave={setSettings} onClose={() => setShowSettings(false)} />}
       {showCharForm && <CharacterForm character={editingChar} settings={settings} onSave={saveCharacter} onCancel={() => { setShowCharForm(false); setEditingChar(null); }} />}
+      {faceChar && (
+        <FaceEditor character={faceChar} settings={settings}
+          onSave={c => { saveCharacter(c); setFaceChar(null); }}
+          onClose={() => setFaceChar(null)} />
+      )}
     </div>
   );
 }

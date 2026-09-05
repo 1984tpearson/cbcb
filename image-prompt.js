@@ -283,6 +283,65 @@ window.ImagePrompt = {
       return pools.map(pool => pool[Math.floor(Math.random() * pool.length)]).join(", ");
     }
 
+    // The face editor's settings, turned into prompt text. Structure traits
+    // describe the face itself and are emitted plainly; makeup, eyewear and
+    // details are things worn on it, so they go through the "wearing {…}"
+    // template. Both halves come back from one call because every caller wants
+    // them in the same place, and returning them separately only ever produced
+    // the same join at each site.
+    //
+    // Anything sitting on its "None"/"Any" sentinel emits nothing at all — an
+    // untouched face has to read to the model exactly as it did before this
+    // feature existed, or every existing character's images would shift the
+    // first time they were regenerated.
+    function buildFacePrompt(face) {
+      const cfg = (CFG.appearance && CFG.appearance.face) || null;
+      if (!face || !cfg) return "";
+
+      const worn = [];
+      for (const group of cfg.groups || []) {
+        const values = face[group.key] || {};
+        for (const field of group.fields || []) {
+          const chosen = values[field.key];
+          if (!chosen || chosen === cfg.noneValue) continue;
+          const opt = (field.options || []).find(o => o.value === chosen);
+          // An unknown value is one the config no longer offers (a list was
+          // edited after the character was saved). Fall back to the stored
+          // value itself rather than dropping it silently.
+          const phrase = opt ? opt.phrase : String(chosen).toLowerCase();
+          if (phrase) worn.push(phrase);
+        }
+      }
+
+      const structural = [];
+      const struct = face.structure || {};
+      for (const field of cfg.structure || []) {
+        const chosen = struct[field.key];
+        if (!chosen || chosen === cfg.unsetValue) continue;
+        structural.push(chosen);
+      }
+
+      const parts = [];
+      if (structural.length) parts.push(fillTemplate(cfg.structureTemplate, { phrases: structural.join(", ") }));
+      if (worn.length) parts.push(fillTemplate(cfg.template, { phrases: worn.join(", ") }));
+      return parts.join(", ");
+    }
+
+    // The change request sent to the image model when regenerating a base image
+    // from the face editor. The reference image carries the identity, so this
+    // says what the face should now look like rather than re-describing the
+    // whole character — re-stating hair, build and colouring alongside an
+    // inputImage pulls the result toward a fresh generation instead of an edit.
+    function buildFaceEditPrompt({ face, charDesc, loosenIdentity }) {
+      const cfg = (CFG.appearance && CFG.appearance.face) || null;
+      if (!cfg) return "";
+      const facePart = buildFacePrompt(face);
+      const preamble = loosenIdentity ? cfg.editPreambleLoose : cfg.editPreamble;
+      // With nothing set the editor is being used to re-shoot the base image
+      // unchanged, so the preamble and suffix alone are the whole request.
+      return [preamble, charDesc, facePart, cfg.editSuffix].filter(Boolean).join(", ");
+    }
+
     function buildAppearancePrompt(appearance) {
       if (!appearance) return "";
       const a = appearance;
@@ -346,6 +405,11 @@ window.ImagePrompt = {
         const hipsPhrase = phraseFor(cfg.hipsTiers, hips);
         if (hipsPhrase) parts.push(hipsPhrase);
       }
+
+      // Face last: hair/eyes/skin and the body silhouette establish who this
+      // is, and makeup and eyewear are modifiers on top of that.
+      const facePart = buildFacePrompt(a.face);
+      if (facePart) parts.push(facePart);
 
       return parts.filter(Boolean).length > 0 ? parts.filter(Boolean).join(", ") : "";
     }
@@ -473,6 +537,7 @@ window.ImagePrompt = {
       EMPTY_STAGING, STAGING_KEYS, hasStaging, buildStagingImageDesc,
       HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
       appearancePhrasePreview, buildAppearancePrompt,
+      buildFacePrompt, buildFaceEditPrompt,
       isUserUndressed, povSelfBody, isIntimateScene,
       beatShowsContact, detectPhysicalContact, stripViewerLimbs,
       buildPovModifiers, joinPromptParts, subjectFor, assembleImagePrompt,

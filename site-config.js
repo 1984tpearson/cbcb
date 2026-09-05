@@ -361,6 +361,173 @@
       // every time over-specifies the face and starts producing the same
       // composite again.
       faceVariationPoolCount: 4,
+
+      // ── Face editor ────────────────────────────────────────────────────────
+      // Everything the face editor offers, table-driven so the modal is just a
+      // renderer. Each group lists its fields; each field is a list of
+      // { value, phrase } — `value` is what is stored on the character and
+      // shown in the dropdown, `phrase` is what reaches the image model. An
+      // empty `phrase` means the option contributes nothing to the prompt,
+      // which is how every "None"/"Natural" default stays silent rather than
+      // telling the model to render an absence.
+      face: {
+        // Wrapped around the joined phrases in the image prompt.
+        template: "wearing {phrases}",
+        // Structure phrases are appended plainly — they describe the face
+        // itself rather than something worn on it.
+        structureTemplate: "{phrases}",
+        // Prepended to the change request when regenerating from an existing
+        // base image, so the model edits the face rather than replacing it.
+        editPreamble: "same person, same face and identity as the reference image, same hair and skin tone",
+        // Used instead when the identity anchor is deliberately loosened for a
+        // bone-structure change, which img2img otherwise resists.
+        editPreambleLoose: "the same person with the same hair colour, skin tone and colouring, restyled facial structure",
+        // Appended to every face-editor generation.
+        editSuffix: "head and shoulders visible, flattering natural light, photorealistic, sharp focus on the face, high detail",
+        groups: [
+          {
+            key: "makeup",
+            label: "Makeup",
+            fields: [
+              { key: "style", label: "Overall", options: [
+                { value: "None", phrase: "" },
+                { value: "Bare face", phrase: "no makeup, bare skin" },
+                { value: "Natural", phrase: "soft natural everyday makeup" },
+                { value: "Everyday", phrase: "light everyday makeup" },
+                { value: "Polished", phrase: "polished, well-blended makeup" },
+                { value: "Glam", phrase: "full glam makeup, flawless base, contoured" },
+                { value: "Smoky", phrase: "smoky eye makeup" },
+                { value: "Bold", phrase: "bold, high-contrast makeup" },
+                { value: "Goth", phrase: "dark gothic makeup, pale base" },
+                { value: "Editorial", phrase: "editorial high-fashion makeup" },
+              ] },
+              { key: "lips", label: "Lips", options: [
+                { value: "None", phrase: "" },
+                { value: "Nude", phrase: "nude lipstick" },
+                { value: "Soft pink", phrase: "soft pink lipstick" },
+                { value: "Rose", phrase: "rose lipstick" },
+                { value: "Berry", phrase: "berry lipstick" },
+                { value: "Classic red", phrase: "classic red lipstick" },
+                { value: "Deep red", phrase: "deep red lipstick" },
+                { value: "Plum", phrase: "plum lipstick" },
+                { value: "Black", phrase: "black lipstick" },
+                { value: "Glossy", phrase: "clear lip gloss, glossy lips" },
+              ] },
+              { key: "eyes", label: "Eye makeup", options: [
+                { value: "None", phrase: "" },
+                { value: "Subtle liner", phrase: "subtle eyeliner" },
+                { value: "Winged liner", phrase: "winged eyeliner" },
+                { value: "Heavy liner", phrase: "heavy black eyeliner" },
+                { value: "Smoky", phrase: "smoky shadow around the eyes" },
+                { value: "Shimmer", phrase: "shimmering eyeshadow" },
+                { value: "Warm tones", phrase: "warm-toned eyeshadow" },
+                { value: "Cool tones", phrase: "cool-toned eyeshadow" },
+                { value: "Graphic", phrase: "graphic liner" },
+              ] },
+              { key: "lashes", label: "Lashes", options: [
+                { value: "None", phrase: "" },
+                { value: "Natural", phrase: "natural lashes" },
+                { value: "Defined", phrase: "defined mascara" },
+                { value: "Long", phrase: "long lashes" },
+                { value: "Dramatic", phrase: "dramatic false lashes" },
+              ] },
+              { key: "cheeks", label: "Cheeks", options: [
+                { value: "None", phrase: "" },
+                { value: "Soft blush", phrase: "soft blush" },
+                { value: "Flushed", phrase: "flushed cheeks" },
+                { value: "Contoured", phrase: "contoured cheekbones" },
+                { value: "Highlighted", phrase: "highlighter on the cheekbones" },
+                { value: "Dewy", phrase: "dewy, luminous skin" },
+                { value: "Matte", phrase: "matte complexion" },
+              ] },
+              { key: "brows", label: "Brows", options: [
+                { value: "None", phrase: "" },
+                { value: "Natural", phrase: "natural eyebrows" },
+                { value: "Groomed", phrase: "neatly groomed eyebrows" },
+                { value: "Thick", phrase: "thick full eyebrows" },
+                { value: "Thin", phrase: "thin arched eyebrows" },
+                { value: "Straight", phrase: "straight eyebrows" },
+                { value: "Sharp arch", phrase: "sharply arched eyebrows" },
+              ] },
+            ],
+          },
+          {
+            key: "eyewear",
+            label: "Eyewear",
+            fields: [
+              { key: "type", label: "Type", options: [
+                { value: "None", phrase: "" },
+                { value: "Glasses", phrase: "glasses" },
+                { value: "Round glasses", phrase: "round wire glasses" },
+                { value: "Square glasses", phrase: "square-framed glasses" },
+                { value: "Cat-eye glasses", phrase: "cat-eye glasses" },
+                { value: "Rimless glasses", phrase: "rimless glasses" },
+                { value: "Oversized glasses", phrase: "oversized glasses" },
+                { value: "Reading glasses", phrase: "reading glasses low on the nose" },
+                { value: "Sunglasses", phrase: "sunglasses" },
+                { value: "Aviators", phrase: "aviator sunglasses" },
+                { value: "Wayfarers", phrase: "wayfarer sunglasses" },
+              ] },
+              { key: "frame", label: "Frames", options: [
+                { value: "None", phrase: "" },
+                { value: "Black", phrase: "black frames" },
+                { value: "Tortoiseshell", phrase: "tortoiseshell frames" },
+                { value: "Gold wire", phrase: "thin gold wire frames" },
+                { value: "Silver wire", phrase: "thin silver wire frames" },
+                { value: "Clear", phrase: "clear acetate frames" },
+                { value: "Red", phrase: "red frames" },
+                { value: "Tinted lenses", phrase: "lightly tinted lenses" },
+              ] },
+            ],
+          },
+          {
+            key: "extras",
+            label: "Details",
+            fields: [
+              { key: "freckles", label: "Freckles", options: [
+                { value: "None", phrase: "" },
+                { value: "Light", phrase: "light freckles across the nose" },
+                { value: "Heavy", phrase: "heavy freckles across the cheeks and nose" },
+              ] },
+              { key: "mark", label: "Mark", options: [
+                { value: "None", phrase: "" },
+                { value: "Beauty mark", phrase: "a small beauty mark above the lip" },
+                { value: "Cheek mole", phrase: "a small mole on one cheek" },
+                { value: "Brow scar", phrase: "a small scar through one eyebrow" },
+                { value: "Dimples", phrase: "dimples" },
+              ] },
+              { key: "piercing", label: "Piercing", options: [
+                { value: "None", phrase: "" },
+                { value: "Nose stud", phrase: "a small nose stud" },
+                { value: "Nose ring", phrase: "a nose ring" },
+                { value: "Septum", phrase: "a septum ring" },
+                { value: "Eyebrow", phrase: "an eyebrow piercing" },
+                { value: "Lip", phrase: "a lip piercing" },
+                { value: "Earrings", phrase: "earrings" },
+                { value: "Multiple ear", phrase: "multiple ear piercings" },
+              ] },
+            ],
+          },
+        ],
+        // Facial structure. Sourced from the same trait vocabulary as
+        // faceVariationPools so a face picked at random and a face set by hand
+        // describe themselves the same way to the model. Each field's "Any"
+        // option leaves that trait unspecified, which is what an existing
+        // character starts on so nothing about their face changes until it is
+        // deliberately set.
+        structure: [
+          { key: "shape",      label: "Face shape",  options: ["Any", "oval face", "round face", "heart-shaped face", "square jawline", "angular face", "soft rounded features", "long narrow face", "wide cheekbones"] },
+          { key: "cheekbones", label: "Cheeks",      options: ["Any", "high cheekbones", "subtle cheekbones", "full cheeks", "hollow cheeks", "broad forehead", "narrow forehead"] },
+          { key: "nose",       label: "Nose",        options: ["Any", "small straight nose", "slightly upturned nose", "narrow nose", "broader nose", "aquiline nose", "rounded nose tip"] },
+          { key: "mouth",      label: "Mouth",       options: ["Any", "full lips", "thin lips", "wide mouth", "small mouth", "cupid's bow lips", "asymmetric smile"] },
+          { key: "eyeShape",   label: "Eye shape",   options: ["Any", "close-set eyes", "wide-set eyes", "deep-set eyes", "almond-shaped eyes", "hooded eyelids", "large round eyes"] },
+          { key: "skinDetail", label: "Skin",        options: ["Any", "clear unblemished skin", "faint laugh lines", "light freckles across the nose", "weathered skin", "soft youthful skin"] },
+        ],
+        // The sentinel meaning "leave this trait alone".
+        unsetValue: "Any",
+        // Options whose value means "nothing here" across the grouped fields.
+        noneValue: "None",
+      },
     },
 
     // ── Age-appropriate voice ────────────────────────────────────────────────
