@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=5"></script>
-  <script src="image-prompt.js?v=5"></script>
+  <script src="site-config.js?v=6"></script>
+  <script src="image-prompt.js?v=6"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -2217,6 +2217,7 @@ function FaceEditor({ character, settings, onSave, onClose }) {
   const [extraPrompt, setExtraPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [lightbox, setLightbox] = useState(false);
 
   const setField = (groupKey, fieldKey, value) =>
     setFace(f => ({ ...f, [groupKey]: { ...f[groupKey], [fieldKey]: value } }));
@@ -2300,9 +2301,12 @@ function FaceEditor({ character, settings, onSave, onClose }) {
           <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
             <div style={{ width: 150, flexShrink: 0 }}>
               {activeUrl
-                ? <img src={activeUrl} alt="base" style={{ width: "100%", borderRadius: 10, display: "block", background: "var(--bg3)" }} />
+                ? <img src={activeUrl} alt="base" title="Tap to enlarge" onClick={() => setLightbox(true)}
+                    style={{ width: "100%", borderRadius: 10, display: "block", background: "var(--bg3)", cursor: "zoom-in" }} />
                 : <div style={{ width: "100%", height: 150, borderRadius: 10, background: "var(--bg3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "var(--text3)" }}>No base image</div>}
-              <p style={{ fontSize: 11, color: "var(--text3)", margin: "4px 0 0" }}>Current base image</p>
+              <p style={{ fontSize: 11, color: "var(--text3)", margin: "4px 0 0" }}>
+                Current base image{activeUrl ? " — tap to enlarge" : ""}
+              </p>
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <label style={{ ...S.label, marginTop: 0 }}>Variants</label>
@@ -2398,6 +2402,19 @@ function FaceEditor({ character, settings, onSave, onClose }) {
 
         </div>
       </div>
+
+      {/* Above the modal's own overlay (z-index 100) rather than inside the
+          scrolling body, so the image gets the whole viewport — the thumbnail
+          is too small to judge a face on, which is the only thing this screen
+          asks you to do. */}
+      {lightbox && activeUrl && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          onClick={() => setLightbox(false)}>
+          <img src={activeUrl} alt="expanded" style={{ maxWidth: "100%", maxHeight: "90vh", borderRadius: 12, objectFit: "contain", boxShadow: "0 8px 40px rgba(0,0,0,0.8)" }} />
+          <button style={{ position: "absolute", top: 20, right: 20, background: "rgba(255,255,255,0.15)", border: "none", color: "white", borderRadius: "50%", width: 40, height: 40, fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+            onClick={() => setLightbox(false)}>✕</button>
+        </div>
+      )}
     </div>
   );
 }
