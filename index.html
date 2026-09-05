@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=14"></script>
-  <script src="image-prompt.js?v=14"></script>
+  <script src="site-config.js?v=15"></script>
+  <script src="image-prompt.js?v=15"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -1025,7 +1025,98 @@ function sanitizeReply(text) {
     .trim();
 }
 
-async function generateImageWiro({ prompt, model, initImage, resolution, aspectRatio, outputFormat, seed }) {
+// A generation Wiro is already running, remembered across reloads.
+//
+// Wiro does the work on its own servers, but nothing collects the result
+// except this page: the proxy used to wait and return the image, and its
+// wall-clock limit meant any slow generation came back 504 while Wiro
+// finished and billed it anyway. Moving the wait here fixed that and
+// introduced this — close the tab and the task id went with it, so the image
+// was generated, paid for, and unreachable.
+//
+// Recording the id means a later visit can still collect it.
+const PENDING_IMAGES_KEY = "personachat_pending_images";
+const readPendingImages = () => storage.get(PENDING_IMAGES_KEY, []);
+const writePendingImages = (list) => storage.set(PENDING_IMAGES_KEY, list.slice(0, 20));
+const addPendingImage = (entry) => writePendingImages([entry, ...readPendingImages().filter(p => p.taskId !== entry.taskId)]);
+const dropPendingImage = (taskId) => writePendingImages(readPendingImages().filter(p => p.taskId !== taskId));
+
+// setTimeout, but a backgrounded tab that comes back does not have to wait out
+// the rest of a timer the browser froze. Returning to the app polls at once.
+function sleepUnlessVisible(ms) {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      resolve();
+    };
+    const onVisible = () => { if (!document.hidden) finish(); };
+    const timer = setTimeout(finish, ms);
+    document.addEventListener("visibilitychange", onVisible);
+  });
+}
+
+// Poll quickly at first — a fast generation used to sit finished for a full
+// 2s before anyone asked. Then ease off so a slow one is not hammered.
+const POLL_SCHEDULE_MS = [900, 900, 1200, 1500, 2000];
+const MAX_POLLS = 160;
+
+async function pollWiroTask({ taskId, outputFormat, modelId, startedAt, maxPolls = MAX_POLLS }) {
+  for (let attempt = 0; attempt < maxPolls; attempt++) {
+    await sleepUnlessVisible(POLL_SCHEDULE_MS[Math.min(attempt, POLL_SCHEDULE_MS.length - 1)]);
+    let statusRes;
+    try {
+      statusRes = await fetch(IMAGE_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "status", taskId, outputFormat }),
+      });
+    } catch {
+      continue; // transient network blip — the task is still running
+    }
+    if (statusRes.status === 202) continue; // still generating
+    if (!statusRes.ok) {
+      const err = await statusRes.text().catch(() => "");
+      throw new Error(`Wiro error: ${statusRes.status} ${err}`);
+    }
+    const done = await statusRes.json();
+    // Attribute the wait: Wiro's queue and generation times against our own
+    // round trip. Without this "it's slow" is unattributable — the fix for a
+    // long queue is a different model, the fix for our own overhead is code.
+    const t = (done && done.timing) || {};
+    console.info(
+      `[image] ${modelId} total ${((Date.now() - (startedAt || Date.now())) / 1000).toFixed(1)}s` +
+      ` = queued ${t.queuedSeconds ?? "?"}s + generating ${t.generatingSeconds ?? "?"}s` +
+      ` + postprocess ${t.postprocessSeconds ?? "?"}s + our overhead`
+    );
+    return (done && done.imageUrl) || null;
+  }
+  return null;
+}
+
+// Copy to Supabase Storage for persistence — Wiro's CDN is not somewhere to
+// keep a gallery. The upload function fetches the URL itself, so the bytes
+// never touch the browser: they used to come down through the proxy, get
+// base64'd (a third larger, and slow on a phone) and be posted back up.
+async function persistWiroImage(imageUrl) {
+  try {
+    const uploadRes = await fetch(UPLOAD_IMAGE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceUrl: imageUrl, token: ACCESS_TOKEN, filename: `img_${Date.now()}_${Math.random().toString(36).slice(2)}` }),
+    });
+    if (uploadRes.ok) {
+      const { url } = await uploadRes.json();
+      if (url) return url;
+    }
+  } catch {}
+  return imageUrl;
+}
+
+async function generateImageWiro({ prompt, model, initImage, resolution, aspectRatio, outputFormat, seed, track }) {
   const modelId = resolveImageModel(model);
   const params = DEZGO_MODEL_PARAMS[modelId] || DEZGO_MODEL_PARAMS[DEZGO_MODELS[0].id];
 
@@ -1079,62 +1170,60 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
   const { taskId } = await submitRes.json();
   if (!taskId) throw new Error("Wiro error: no task id returned");
 
-  // Poll quickly at first — a fast generation used to sit finished for a full
-  // 2s before anyone asked. Then ease off so a slow one is not hammered.
-  const POLL_SCHEDULE_MS = [900, 900, 1200, 1500, 2000];
-  const MAX_POLLS = 160;
-  let imageUrl = null;
-  for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
-    const wait = POLL_SCHEDULE_MS[Math.min(attempt, POLL_SCHEDULE_MS.length - 1)];
-    await new Promise(res => setTimeout(res, wait));
-    let statusRes;
-    try {
-      statusRes = await fetch(IMAGE_PROXY_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "status", taskId, outputFormat: body.outputFormat }),
-      });
-    } catch {
-      continue; // transient network blip — the task is still running
-    }
-    if (statusRes.status === 202) continue; // still generating
-    if (!statusRes.ok) {
-      const err = await statusRes.text().catch(() => "");
-      throw new Error(`Wiro error: ${statusRes.status} ${err}`);
-    }
-    const done = await statusRes.json();
-    imageUrl = done && done.imageUrl;
-    // Attribute the wait: Wiro's queue and generation times against our own
-    // round trip. Without this "it's slow" is unattributable — the fix for a
-    // long queue is a different model, the fix for our own overhead is code.
-    const t = (done && done.timing) || {};
-    console.info(
-      `[image] ${modelId} total ${((Date.now() - startedAt) / 1000).toFixed(1)}s` +
-      ` = queued ${t.queuedSeconds ?? "?"}s + generating ${t.generatingSeconds ?? "?"}s` +
-      ` + postprocess ${t.postprocessSeconds ?? "?"}s + our overhead`
-    );
-    break;
+  // Recorded before the first poll, so a tab closed mid-generation still
+  // leaves a trail. `track` says whose gallery to put it in if this page never
+  // comes back to collect it.
+  if (track && track.characterId) {
+    addPendingImage({ taskId, outputFormat: body.outputFormat || null, modelId, startedAt, ...track });
   }
-  if (!imageUrl) throw new Error(`Wiro error: generation did not finish in time (task ${taskId})`);
 
-  // Copy to Supabase Storage for persistence — Wiro's CDN is not somewhere to
-  // keep a gallery. The upload function fetches the URL itself, so the bytes
-  // never touch the browser: they used to come down through the proxy, get
-  // base64'd (a third larger, and slow on a phone) and be posted back up.
+  let imageUrl;
   try {
-    const uploadRes = await fetch(UPLOAD_IMAGE_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sourceUrl: imageUrl, token: ACCESS_TOKEN, filename: `img_${Date.now()}_${Math.random().toString(36).slice(2)}` }),
-    });
-    if (uploadRes.ok) {
-      const { url } = await uploadRes.json();
-      if (url) return url;
-    }
-  } catch {}
+    imageUrl = await pollWiroTask({ taskId, outputFormat: body.outputFormat, modelId, startedAt });
+  } catch (e) {
+    dropPendingImage(taskId);
+    throw e;
+  }
+  if (!imageUrl) {
+    // Left recorded on purpose: it did not finish inside this page's patience,
+    // which is exactly the case a later visit should pick up.
+    throw new Error(`Wiro error: generation did not finish in time (task ${taskId})`);
+  }
+  dropPendingImage(taskId);
+  return persistWiroImage(imageUrl);
+}
 
-  // Fallback: the Wiro URL still renders, it just is not permanent.
-  return imageUrl;
+// Collect anything Wiro finished while the app was closed. Results go to the
+// character's gallery: the screen that asked for the image is long gone, and
+// the gallery is the one place a picture is useful without it.
+async function collectPendingImages({ onCollected } = {}) {
+  const pending = readPendingImages();
+  if (!pending.length) return 0;
+  let collected = 0;
+  for (const p of pending) {
+    // A short patience here — this is a check for something already finished,
+    // not a wait for something still running.
+    let imageUrl = null;
+    try {
+      imageUrl = await pollWiroTask({ ...p, maxPolls: 2 });
+    } catch {
+      dropPendingImage(p.taskId); // Wiro no longer knows about it
+      continue;
+    }
+    if (!imageUrl) continue; // still going — leave it for next time
+    dropPendingImage(p.taskId);
+    try {
+      const url = await persistWiroImage(imageUrl);
+      const gallery = await dataApi.getGallery(p.characterId);
+      const next = [{ url, prompt: p.label || "Recovered generation", date: Date.now() }, ...gallery].slice(0, 20);
+      await dataApi.saveGallery(p.characterId, next);
+      collected += 1;
+      if (onCollected) onCollected({ ...p, url });
+    } catch (e) {
+      console.warn("Could not file a recovered image:", e);
+    }
+  }
+  return collected;
 }
 
 // Wardrobe tracking only runs when the recent turns actually talk about
@@ -3947,6 +4036,9 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         // Reference image anchors identity — Wiro handles the consistency,
         // so there's no seed juggling needed the way Dezgo's img2img required.
         initImage: character.referenceImage,
+        // Chat images are the ones worth recovering: they are the ones you set
+        // going and then put the phone down.
+        track: { characterId: character.id, label: customImgPrompt },
       });
       setMessages(m => [...m, { role: "image", content: url, prompt: customImgPrompt }]);
       const newGallery2 = [{ url, prompt: customImgPrompt, date: Date.now() }, ...gallery].slice(0, 20);
@@ -4016,6 +4108,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         prompt: fullImgPrompt,
         model: settings.imageModel,
         initImage: character.referenceImage,
+        track: { characterId: character.id, label: prompt },
       });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);
       const newGallery3 = [{ url, prompt, date: Date.now() }, ...gallery].slice(0, 20);
