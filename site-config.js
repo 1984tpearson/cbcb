@@ -649,6 +649,8 @@
           "extras.freckles": 0.65,
           "extras.mark": 0.7,
           "extras.piercing": 0.7,
+          // Interesting light is the point of the setting, so it is usually on.
+          "avatar.lighting": 0.2,
         },
         // Within a field, not every option is equally likely in life. An even
         // draw across eight lengths shaves or buzzes one character in five,
@@ -766,8 +768,38 @@
         // is free to be a flattering clothed portrait with no consequences for
         // what gets generated in chat.
         avatarPreamble: "same person, same face and identity as the reference image",
-        avatarFraming: "head and shoulders portrait, fully clothed in an everyday top, neutral background",
-        avatarSuffix: "photorealistic, natural lighting, sharp focus, high detail",
+        avatarFraming: "head and shoulders portrait, fully clothed",
+        // The outfit used to be baked into the framing as "an everyday top",
+        // which is why every avatar looked the same. It is its own clause now,
+        // filled from the character or, failing that, by asking the language
+        // model what this particular person would be wearing.
+        avatarOutfitTemplate: "wearing {outfit}",
+        avatarOutfitFallback: "an everyday top",
+        avatarOutfitPrompt: "Here is a character:\n\n{desc}\n\nName one outfit they would plausibly be photographed in — the kind of thing that says who they are. A nurse in scrubs, a runner in running kit, a barrister in court dress. Reply with the clothing only, as a short noun phrase of at most eight words, no name, no sentence, no full stop. Examples: \"green surgical scrubs and a lanyard\", \"a worn leather jacket over a band tee\".",
+        avatarLightingFallback: "natural lighting",
+        avatarBackground: "background that suits them, softly out of focus",
+        avatarSuffix: "photorealistic, sharp focus, high detail",
+        // Avatar-only settings. Kept apart from the appearance fields because
+        // they describe the photograph rather than the person: the same
+        // character can be shot in daylight or neon without being any
+        // different underneath.
+        avatarFields: [
+          { key: "lighting", label: "Lighting", options: [
+            { value: "None", phrase: "" },
+            { value: "Soft daylight", phrase: "soft natural daylight from a window" },
+            { value: "Golden hour", phrase: "warm golden hour sunlight, long soft shadows" },
+            { value: "Overcast", phrase: "flat soft overcast daylight" },
+            { value: "Studio", phrase: "clean studio lighting, soft key light" },
+            { value: "Low key", phrase: "low key lighting, deep shadows, one soft source" },
+            { value: "Rim light", phrase: "rim lighting separating her from a dark background" },
+            { value: "Backlit", phrase: "backlit by a bright window, soft halo through the hair" },
+            { value: "Neon", phrase: "neon city light, magenta and cyan on the skin" },
+            { value: "Candlelight", phrase: "warm candlelight, soft flickering glow" },
+            { value: "Hard sun", phrase: "hard midday sunlight, crisp shadows" },
+            { value: "Firelight", phrase: "firelight from below, warm amber glow" },
+            { value: "Streetlight", phrase: "sodium streetlight at night, warm pool of light" },
+          ] },
+        ],
       },
     },
 

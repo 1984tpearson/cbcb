@@ -460,11 +460,23 @@ window.ImagePrompt = {
         .filter(Boolean).join(", ");
     }
 
-    function buildAvatarPrompt({ charDesc }) {
+    // avatar is { lighting, lightingCustom, outfit } — how this photograph is
+    // taken rather than what she looks like, which is why it lives apart from
+    // appearance and never reaches a base image.
+    function buildAvatarPrompt({ charDesc, avatar, extra }) {
       const cfg = (CFG.appearance && CFG.appearance.body) || null;
       if (!cfg) return "";
-      return [cfg.avatarPreamble, cfg.avatarFraming, charDesc, cfg.avatarSuffix]
-        .filter(Boolean).join(", ");
+      const a = avatar || {};
+      const outfit = String(a.outfit || "").trim() || cfg.avatarOutfitFallback;
+      const lighting = (cfg.avatarFields || [])
+        .map(field => faceFieldPhrase(a, field, cfg, cfg.noneValue))
+        .filter(Boolean)
+        .join(", ") || cfg.avatarLightingFallback;
+      return [
+        cfg.avatarPreamble, cfg.avatarFraming,
+        outfit ? fillTemplate(cfg.avatarOutfitTemplate, { outfit }) : "",
+        lighting, cfg.avatarBackground, charDesc, extra, cfg.avatarSuffix,
+      ].filter(Boolean).join(", ");
     }
 
     // The change request sent to the image model when regenerating a base image

@@ -62,6 +62,11 @@ image from text, in the `[APPEARANCE]` note the chat model reads, and in the
 language-model paths (`extractScene`, `inferScenarioSetup`) that read words
 rather than look at the picture.
 
+`appearance.avatar` (outfit, lighting) describes the *photograph*, not the
+person, so it reaches `buildAvatarPrompt` only and never a base image. An empty
+outfit is filled by asking the language model what this character would wear —
+written back into the box so it is visible and editable, not decided invisibly.
+
 Tattoos (`appearance.body`) are decided in the body editor and reach chat
 images **only as pixels in the base image** — nothing about them enters
 `buildAppearancePrompt` or any chat prompt. Do not add them there: the base

@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=21"></script>
-  <script src="image-prompt.js?v=21"></script>
+  <script src="site-config.js?v=22"></script>
+  <script src="image-prompt.js?v=22"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -1477,6 +1477,19 @@ const characterAvatar = (c) => (c && (c.avatarImage || c.referenceImage)) || nul
 
 const BODY_CFG = (CFG.appearance && CFG.appearance.body) || { fields: [], noneValue: "None", customValue: "Custom" };
 
+// How the avatar photograph is taken — lighting, and the outfit. Separate from
+// appearance because the same character can be shot in daylight or neon
+// without being any different underneath, and none of it ever reaches a base
+// image.
+function normaliseAvatar(avatar) {
+  const out = { outfit: "" };
+  for (const field of BODY_CFG.avatarFields || []) {
+    out[field.key] = BODY_CFG.noneValue;
+    out[field.key + "Custom"] = "";
+  }
+  return { ...out, ...(avatar || {}) };
+}
+
 // Same shape as normaliseFace: fill in fields a stored body predates, so a
 // dropdown never renders blank instead of on its sentinel.
 function normaliseBody(body) {
@@ -1563,7 +1576,7 @@ function randomiseAppearance(parsed, current) {
     chest: isTouched("chest") ? c.chest : rand(20, 80),
     waist: isTouched("waist") ? c.waist : rand(20, 70),
     hips: isTouched("hips") ? c.hips : rand(25, 75),
-    ...randomiseFaceAndBody(c.face, c.body),
+    ...randomiseFaceAndBody(c.face, c.body, c.avatar),
   };
 }
 
@@ -1574,7 +1587,7 @@ function randomiseAppearance(parsed, current) {
 // Weighted, not uniform — see CFG.appearance.randomise. An even draw over
 // fourteen tattoo options tattoos nine characters in ten, and a vibe generator
 // that gives everyone sleeves is not describing anyone.
-function randomiseFaceAndBody(currentFace, currentBody) {
+function randomiseFaceAndBody(currentFace, currentBody, currentAvatar) {
   const cfg = CFG.appearance.randomise || {};
   const skip = new Set(cfg.skipGroups || []);
   const requires = cfg.requires || {};
@@ -1628,6 +1641,7 @@ function randomiseFaceAndBody(currentFace, currentBody) {
     return out;
   };
 
+  const avatar = normaliseAvatar(currentAvatar);
   const face = normaliseFace(currentFace);
   const nextFace = { ...face };
   for (const group of FACE_CFG.groups || []) {
@@ -1638,7 +1652,39 @@ function randomiseFaceAndBody(currentFace, currentBody) {
   return {
     face: nextFace,
     body: skip.has("body") ? body : fillGroup(body, BODY_CFG.fields, "body", BODY_CFG.noneValue),
+    // The outfit is not drawn from a list — it is written to fit the persona,
+    // which is a job for the language model, not a dice roll. Left as-is here.
+    avatar: fillGroup(avatar, BODY_CFG.avatarFields, "avatar", BODY_CFG.noneValue),
   };
+}
+
+// What this particular person would be photographed in. Every avatar wearing
+// "an everyday top" was the honest consequence of the prompt saying exactly
+// that — the model had nothing else to go on, so it obliged. The persona is
+// right there and knows perfectly well that a nurse wears scrubs.
+//
+// Returns "" on any failure: an avatar in a generic top is a worse picture,
+// not a broken one, so this must never be the thing that stops a generation.
+async function suggestAvatarOutfit({ character, model }) {
+  const cfg = (CFG.appearance.body || {});
+  if (!cfg.avatarOutfitPrompt) return "";
+  const desc = [
+    character.name ? `Name: ${character.name}` : "",
+    character.age ? `Age: ${character.age}` : "",
+    character.gender ? `Gender: ${character.gender === "Custom" ? (character.customGender || "") : character.gender}` : "",
+    character.relationship ? `Relationship to the viewer: ${character.relationship}` : "",
+    character.persona ? `Personality and background: ${character.persona}` : "",
+  ].filter(Boolean).join("\n");
+  if (!desc.trim()) return "";
+  try {
+    const content = await aiComplete({
+      model,
+      messages: [{ role: "user", content: fillTemplate(cfg.avatarOutfitPrompt, { desc }) }],
+    });
+    // A language model asked for a noun phrase will sometimes wrap it in a
+    // sentence or quotes anyway, so take the first line and strip the trimming.
+    return String(content || "").split("\n")[0].replace(/^["'\s]+|["'.\s]+$/g, "").slice(0, 120);
+  } catch { return ""; }
 }
 
 async function autoGenerateCharacter({ vibe, model, constraints = {} }) {
@@ -2738,7 +2784,8 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
     return [{ id: "original", url: character.referenceImage, label: "Original", date: Date.now() }];
   });
   const [extraPrompt, setExtraPrompt] = useState("");
-  const [avatarPrompt, setAvatarPrompt] = useState("");
+  const [avatar, setAvatar] = useState(() => normaliseAvatar(character.appearance && character.appearance.avatar));
+  const patchAvatar = (patch) => setAvatar(a => ({ ...a, ...patch }));
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [lightbox, setLightbox] = useState(null);
@@ -2833,8 +2880,16 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
     if (!baseUrl) { setError("Generate a base image first — the avatar is a portrait of it."); return; }
     setBusy("avatar"); setError("");
     try {
+      // Asked for only when the box is empty, and written back into it, so the
+      // suggestion is visible and editable rather than an invisible decision
+      // made on your behalf every time.
+      let next = avatar;
+      if (!String(avatar.outfit || "").trim()) {
+        const outfit = await suggestAvatarOutfit({ character, model: settings.selectedModel });
+        if (outfit) { next = { ...avatar, outfit }; setAvatar(next); }
+      }
       const url = await generateImageWiro({
-        prompt: [buildAvatarPrompt({ charDesc: charDesc() }), avatarPrompt.trim()].filter(Boolean).join(", "),
+        prompt: buildAvatarPrompt({ charDesc: charDesc(), avatar: next }),
         model: settings.imageModel,
         // Anchored to the base rather than the old avatar, so it is a portrait
         // of whoever the base image says she is now.
@@ -2878,7 +2933,7 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
       referenceImage: baseUrl,
       avatarImage: nextAvatar,
       backgroundImage: bgFollowed ? nextAvatar : character.backgroundImage,
-      appearance: { ...appearance, face, body, baseSnapshot: baseline },
+      appearance: { ...appearance, face, body, avatar, baseSnapshot: baseline },
       faceVariants: variants.slice(0, 12),
     });
   };
@@ -2961,8 +3016,29 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
                   does not have to follow every base image.
                 </p>
               </div>
-              <input style={{ ...S.input, marginTop: 8 }} placeholder="Avatar instruction (optional) — e.g. in a leather jacket, smiling"
-                value={avatarPrompt} onChange={e => setAvatarPrompt(e.target.value)} />
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>Outfit</span>
+                  <input style={{ ...S.input, marginTop: 4 }} placeholder="Left blank, the AI picks something that suits her"
+                    value={avatar.outfit || ""} onChange={e => patchAvatar({ outfit: e.target.value })} />
+                </div>
+                <button style={S.btnSecondary} disabled={!!busy}
+                  onClick={async () => {
+                    setBusy("outfit");
+                    const outfit = await suggestAvatarOutfit({ character, model: settings.selectedModel });
+                    if (outfit) patchAvatar({ outfit });
+                    setBusy("");
+                  }}>{busy === "outfit" ? "…" : "Suggest"}</button>
+              </div>
+              <div style={grid}>
+                {(BODY_CFG.avatarFields || []).map(field => (
+                  <FaceField key={field.key} field={field}
+                    value={avatar[field.key]} unsetValue={BODY_CFG.noneValue}
+                    customValue={avatar[field.key + "Custom"]}
+                    onChange={v => patchAvatar({ [field.key]: v })}
+                    onCustomChange={v => patchAvatar({ [field.key + "Custom"]: v })} />
+                ))}
+              </div>
               <button style={{ ...S.btnSecondary, marginTop: 8 }} onClick={generateAvatar} disabled={!!busy}>
                 {busy === "avatar" ? "Generating…" : avatarUrl ? "↺ Regenerate avatar" : "Generate avatar"}
               </button>
@@ -3026,6 +3102,11 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const patchBody = (patch) => setForm(f => ({
     ...f, appearance: { ...f.appearance, body: { ...normaliseBody(f.appearance && f.appearance.body), ...patch } },
   }));
+  const formAvatar = normaliseAvatar(form.appearance && form.appearance.avatar);
+  const patchAvatar = (patch) => setForm(f => ({
+    ...f, appearance: { ...f.appearance, avatar: { ...normaliseAvatar(f.appearance && f.appearance.avatar), ...patch } },
+  }));
+  const [suggesting, setSuggesting] = useState(false);
   const [analysing, setAnalysing] = useState(false);
   const [appearanceNote, setAppearanceNote] = useState("");
   const [suggestedAge, setSuggestedAge] = useState(null);
@@ -3143,8 +3224,13 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       // just generated. A character needs both from the moment it exists: the
       // base is never displayed, so without this the card would show the nude.
       setImgStage("avatar");
+      let avatarCfg = normaliseAvatar(form.appearance && form.appearance.avatar);
+      if (!String(avatarCfg.outfit || "").trim()) {
+        const outfit = await suggestAvatarOutfit({ character: form, model: settings.selectedModel });
+        if (outfit) { avatarCfg = { ...avatarCfg, outfit }; patchAvatar({ outfit }); }
+      }
       const avatar = await generateImageWiro({
-        prompt: buildAvatarPrompt({ charDesc }),
+        prompt: buildAvatarPrompt({ charDesc, avatar: avatarCfg }),
         model: settings.imageModel,
         initImage: base,
         seed: Math.floor(Math.random() * 2147483647),
@@ -3330,6 +3416,35 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
             <input style={{ ...S.input, flex: 1, marginBottom: 0 }} placeholder="Optional — leave blank to use appearance settings"
               value={imgPrompt} onChange={e => setImgPrompt(e.target.value)} />
             <button style={S.btnPrimary} onClick={handleGenerateImage} disabled={imgLoading}>{imgLoading ? (imgStage === "avatar" ? "Avatar…" : "Base image…") : form.referenceImage ? "↺ Regen" : "Gen Image"}</button>
+          </div>
+
+          <div style={S.divider} />
+          <label style={{ ...S.label, marginTop: 0 }}>Avatar</label>
+          <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 4px" }}>
+            The clothed portrait the app displays. Leave the outfit blank and the AI picks something that suits her.
+          </p>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <div style={{ flex: 1 }}>
+              <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>Outfit</span>
+              <input style={{ ...S.input, marginTop: 4 }} placeholder="e.g. green surgical scrubs"
+                value={formAvatar.outfit || ""} onChange={e => patchAvatar({ outfit: e.target.value })} />
+            </div>
+            <button style={S.btnSecondary} disabled={imgLoading || suggesting}
+              onClick={async () => {
+                setSuggesting(true);
+                const outfit = await suggestAvatarOutfit({ character: form, model: settings.selectedModel });
+                if (outfit) patchAvatar({ outfit });
+                setSuggesting(false);
+              }}>{suggesting ? "…" : "Suggest"}</button>
+          </div>
+          <div style={grid}>
+            {(BODY_CFG.avatarFields || []).map(field => (
+              <FaceField key={field.key} field={field}
+                value={formAvatar[field.key]} unsetValue={BODY_CFG.noneValue}
+                customValue={formAvatar[field.key + "Custom"]}
+                onChange={v => patchAvatar({ [field.key]: v })}
+                onCustomChange={v => patchAvatar({ [field.key + "Custom"]: v })} />
+            ))}
           </div>
 
           {error && <p style={S.error}>{error}</p>}
