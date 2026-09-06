@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=22"></script>
-  <script src="image-prompt.js?v=22"></script>
+  <script src="site-config.js?v=23"></script>
+  <script src="image-prompt.js?v=23"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -3129,14 +3129,24 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
         persona: form.persona.trim() || null,
       };
       const result = await autoGenerateCharacter({ vibe, model: settings.selectedModel, constraints });
-      setForm(f => ({
-        ...f,
-        name: f.name.trim() || result.name,
-        persona: f.persona.trim() || result.persona,
-        age: f.age || result.age || "",
-        maritalStatus: f.maritalStatus !== "Single" ? f.maritalStatus : (result.maritalStatus || "Single"),
-        appearance: randomiseAppearance(result.appearance, f.appearance),
-      }));
+      const merged = {
+        ...form,
+        name: form.name.trim() || result.name,
+        persona: form.persona.trim() || result.persona,
+        age: form.age || result.age || "",
+        maritalStatus: form.maritalStatus !== "Single" ? form.maritalStatus : (result.maritalStatus || "Single"),
+        appearance: randomiseAppearance(result.appearance, form.appearance),
+      };
+
+      // Asked after the persona exists rather than alongside it: the whole
+      // point is that the outfit follows from who she turned out to be, and a
+      // request sent in parallel would be answering about an empty character.
+      // Skipped if an outfit is already there, like every other field here.
+      if (!String(merged.appearance.avatar.outfit || "").trim()) {
+        const outfit = await suggestAvatarOutfit({ character: merged, model: settings.selectedModel });
+        if (outfit) merged.appearance = { ...merged.appearance, avatar: { ...merged.appearance.avatar, outfit } };
+      }
+      setForm(merged);
     } catch (e) { setError("Failed to generate character. Try again."); }
     setVibeLoading(false);
   };
