@@ -3111,6 +3111,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const [imgPrompt, setImgPrompt] = useState("");
   // Two generations per click now, so the button says which one is running.
   const [imgStage, setImgStage] = useState("");
+  const [saving, setSaving] = useState(false);
   const [imgLoading, setImgLoading] = useState(false);
   const [showCustomImgInput, setShowCustomImgInput] = useState(false);
   const [customImgPrompt, setCustomImgPrompt] = useState("");
@@ -3262,28 +3263,21 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
         seed: Math.floor(Math.random() * 2147483647),
       });
 
-      // And the avatar, anchored to the base so it is a portrait of the person
-      // just generated. A character needs both from the moment it exists: the
-      // base is never displayed, so without this the card would show the nude.
-      setImgStage("avatar");
-      let avatarCfg = normaliseAvatar(form.appearance && form.appearance.avatar);
-      if (!String(avatarCfg.outfit || "").trim()) {
-        const outfit = await suggestAvatarOutfit({ character: form, model: settings.selectedModel });
-        if (outfit) { avatarCfg = { ...avatarCfg, outfit }; patchAvatar({ outfit }); }
-      }
-      const avatar = await generateImageWiro({
-        prompt: buildAvatarPrompt({ charDesc, avatar: avatarCfg }),
-        model: settings.imageModel,
-        initImage: base,
-        seed: Math.floor(Math.random() * 2147483647),
-      });
-
-      setGeneratedImages(prev => [{ base, avatar }, ...prev]);
+      // The avatar is NOT generated here. Every click of Regen used to make two
+      // images, and picking a face you liked out of three tries cost three
+      // avatars you never looked at. It is made once, deliberately: from the
+      // Avatar button, or from Save if the character is about to be created
+      // without one.
+      setGeneratedImages(prev => [{ base, avatar: null }, ...prev]);
       setForm(f => ({
         ...f,
         referenceImage: base,
-        avatarImage: avatar,
-        backgroundImage: avatar,
+        // The avatar belongs to the old base image, not this one, so it stops
+        // being this character's portrait the moment the base is replaced.
+        // Cleared rather than kept: a clothed portrait of a different face is
+        // worse than none, and none is what makes Save generate one.
+        avatarImage: null,
+        backgroundImage: null,
         // The base image now matches these settings, so the body editor opens
         // showing nothing outstanding rather than reading the whole appearance
         // as an unapplied change.
@@ -3292,6 +3286,65 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
     } catch (e) { setError(e.message); }
     setImgStage("");
     setImgLoading(false);
+  };
+
+  // The clothed portrait, anchored to the base image so it is a portrait of
+  // that person rather than a fresh one. Returns the finished form so Save can
+  // use it directly — setForm would not have landed by the time onSave ran.
+  const generateAvatarFor = async (base) => {
+    const genderDesc = form.gender === "Custom" ? (form.customGender || "") : (form.gender || "");
+    const ageDesc = form.age ? `${form.age} year old` : "";
+    const charDesc = [ageDesc, genderDesc, buildAppearancePrompt(form.appearance, { measurements: false })].filter(Boolean).join(", ");
+
+    let avatarCfg = normaliseAvatar(form.appearance && form.appearance.avatar);
+    // An empty outfit is filled by asking what she would wear, and written back
+    // into the box so it is visible and editable rather than decided invisibly.
+    if (!String(avatarCfg.outfit || "").trim()) {
+      const outfit = await suggestAvatarOutfit({ character: form, model: settings.selectedModel });
+      if (outfit) { avatarCfg = { ...avatarCfg, outfit }; patchAvatar({ outfit }); }
+    }
+    const avatar = await generateImageWiro({
+      prompt: buildAvatarPrompt({ charDesc, avatar: avatarCfg }),
+      model: settings.imageModel,
+      initImage: base,
+      seed: Math.floor(Math.random() * 2147483647),
+    });
+    setGeneratedImages(prev => prev.map(pair => (pair.base === base ? { ...pair, avatar } : pair)));
+    return avatar;
+  };
+
+  const handleGenerateAvatar = async () => {
+    if (!form.referenceImage) { setError("Generate a base image first — the avatar is a portrait of it."); return; }
+    setImgLoading(true); setImgStage("avatar"); setError("");
+    try {
+      const avatar = await generateAvatarFor(form.referenceImage);
+      setForm(f => ({ ...f, avatarImage: avatar, backgroundImage: f.backgroundImage || avatar }));
+    } catch (e) { setError(e.message); }
+    setImgStage("");
+    setImgLoading(false);
+  };
+
+  // Saving a character that has a base image but no portrait makes the portrait
+  // first. The base image is never displayed, so a character saved without one
+  // would show the nude on its own card.
+  const handleSaveCharacter = async () => {
+    if (!form.name.trim()) return;
+    if (form.referenceImage && !form.avatarImage) {
+      setSaving(true); setImgStage("avatar"); setError("");
+      try {
+        const avatar = await generateAvatarFor(form.referenceImage);
+        setSaving(false); setImgStage("");
+        onSave(withAppearanceOrigin({ ...form, avatarImage: avatar, backgroundImage: form.backgroundImage || avatar }));
+        return;
+      } catch (e) {
+        // Saved anyway: a character with no portrait is recoverable from the
+        // appearance editor, and losing everything else typed in because an
+        // image call failed is not.
+        setError(`${e.message} — saved without an avatar.`);
+        setSaving(false); setImgStage("");
+      }
+    }
+    onSave(withAppearanceOrigin(form));
   };
 
   return (
@@ -3464,13 +3517,16 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input style={{ ...S.input, flex: 1, marginBottom: 0 }} placeholder="Optional — leave blank to use appearance settings"
               value={imgPrompt} onChange={e => setImgPrompt(e.target.value)} />
-            <button style={S.btnPrimary} onClick={handleGenerateImage} disabled={imgLoading}>{imgLoading ? (imgStage === "avatar" ? "Avatar…" : "Base image…") : form.referenceImage ? "↺ Regen" : "Gen Image"}</button>
+            <button style={S.btnPrimary} onClick={handleGenerateImage} disabled={imgLoading}>{imgLoading && imgStage === "base" ? "Base image…" : form.referenceImage ? "↺ Regen" : "Gen Image"}</button>
           </div>
 
           <div style={S.divider} />
           <label style={{ ...S.label, marginTop: 0 }}>Avatar</label>
           <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 4px" }}>
             The clothed portrait the app displays. Leave the outfit blank and the AI picks something that suits her.
+            {form.avatarImage
+              ? " Regenerating the base image clears it, since it is a portrait of that image."
+              : " One is generated when you save if you have not made one here."}
           </p>
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
             <div style={{ flex: 1 }}>
@@ -3495,6 +3551,10 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
                 onCustomChange={v => patchAvatar({ [field.key + "Custom"]: v })} />
             ))}
           </div>
+          <button style={{ ...S.btnSecondary, marginTop: 10, width: "100%", textAlign: "center" }}
+            onClick={handleGenerateAvatar} disabled={imgLoading || saving || !form.referenceImage}>
+            {imgLoading && imgStage === "avatar" ? "Avatar…" : form.avatarImage ? "↺ Regenerate avatar" : "Generate avatar"}
+          </button>
 
           {error && <p style={S.error}>{error}</p>}
             </div>
@@ -3502,7 +3562,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onCancel}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { if (form.name.trim()) onSave(withAppearanceOrigin(form)); }} disabled={!form.name.trim()}>Save Character</button>
+          <button style={S.btnPrimary} onClick={handleSaveCharacter} disabled={!form.name.trim() || imgLoading || saving}>{saving ? "Avatar…" : "Save Character"}</button>
         </div>
       </div>
     </div>
