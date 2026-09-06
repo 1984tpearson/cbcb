@@ -310,40 +310,52 @@
       // mapping is linear, so each step is half a centimetre.
       heightCmMin: 145,
       heightCmMax: 195,
+      // These phrases are read by an image model, and it moves on concrete
+      // physical description, not on mild adjectives. The earlier wording
+      // ("stocky build", "full waist", "wide hips") was polite enough that
+      // opposite ends of a slider produced near-identical figures — the model
+      // fell back on its own default body in both cases. Each tier now says
+      // what the body actually looks like, in the words a photograph would be
+      // described in. These same strings are the dropdown labels in the body
+      // editor, on purpose: a menu entry can never promise something different
+      // from what the prompt asks for.
       heightTiers: [
-        { max: 25,  phrase: "short stature" },
-        { max: 45,  phrase: "petite frame" },
+        { max: 25,  phrase: "very short, well below average height" },
+        { max: 45,  phrase: "short and small-framed" },
         { max: 54,  phrase: "average height", skipInPrompt: true },
-        { max: 74,  phrase: "above average height" },
-        { max: 100, phrase: "tall" },
+        { max: 74,  phrase: "tall, above average height" },
+        { max: 100, phrase: "very tall, towering, long limbs" },
       ],
       buildTiers: [
-        { max: 20,  phrase: "slim build" },
-        { max: 40,  phrase: "slender build" },
-        { max: 59,  phrase: "athletic build" },
-        { max: 79,  phrase: "full figure" },
-        { max: 100, phrase: "stocky build" },
+        { max: 20,  phrase: "very thin and delicate, narrow shoulders and a slight frame" },
+        { max: 40,  phrase: "slim and lean, light build" },
+        { max: 59,  phrase: "athletic and toned, firm and fit" },
+        { max: 79,  phrase: "full-figured and soft, noticeably heavier than average" },
+        { max: 100, phrase: "large and heavily built, thick torso and limbs, broad and heavy" },
       ],
-      // Evenly-spaced buckets across the slider range.
-      chestCups: ["A", "B", "C", "D", "DD"],
-      chestTemplate: "{cup} cup breasts",
+      // Evenly-spaced buckets across the slider range. Written out in full
+      // rather than as bare cup letters: "A cup breasts" and "DD cup breasts"
+      // differ by one token the model barely weighs, while "small" and "very
+      // large, heavy" are things it can actually draw. chestTemplate is left as
+      // a bare passthrough so the wording lives in one place.
+      chestCups: [
+        "very small breasts, almost flat chested, A cup",
+        "small breasts, B cup",
+        "medium sized breasts, full C cup",
+        "large breasts, heavy D cup",
+        "very large heavy breasts, DD cup",
+      ],
+      chestTemplate: "{cup}",
       waistTiers: [
-        { max: 30,  phrase: "narrow waist" },
+        { max: 30,  phrase: "a very narrow waist and flat stomach, sharply defined" },
         { max: 69,  phrase: "average waist", skipInPrompt: true },
-        { max: 100, phrase: "full waist" },
+        { max: 100, phrase: "a thick waist and soft rounded stomach, little waist definition" },
       ],
       hipsTiers: [
-        { max: 30,  phrase: "narrow hips" },
+        { max: 30,  phrase: "narrow straight hips, barely wider than the waist" },
         { max: 69,  phrase: "average hips", skipInPrompt: true },
-        { max: 100, phrase: "wide hips" },
+        { max: 100, phrase: "wide flaring hips, broad across the hips and thighs" },
       ],
-      // Combined phrases used when two sliders point the same direction at the
-      // extremes — stacking two separate modifiers reads as more extreme than
-      // either was meant to be, and was pushing generations toward caricature
-      // proportions.
-      combinedShortSlim: "short, slender frame",
-      combinedSlenderWaistline: "slender waistline",
-      combinedCurvyWaistline: "curvier waistline",
       heightMeasurementTemplate: "{cm} cm tall",
       // Facial structure traits, randomised per generation. Without these the
       // model lands on the same default face nearly every time; seed changes
@@ -723,22 +735,36 @@
         //
         // Holding unchanged aspects explicitly matters as much as releasing
         // changed ones: it is what makes a small edit a small edit.
+        // Releasing a hold is not the same as asking for a change, which is what
+        // made a chest edit a no-op: dropping "the same body shape" left a
+        // prompt that never mentioned a change at all, so the reference image
+        // passed as inputImage — a whole photograph — outvoted the one word
+        // that had moved. Every released hold now names itself here, and the
+        // resulting clause leads the prompt, ahead of the continuity preamble.
+        baseChangeTemplate: "{aspects} must be changed to match the description below, and deliberately drawn differently from the reference image",
+        baseChangeJoin: " and ",
         baseHolds: [
           // face.structure is here for the same reason ethnicity is: reshaping
           // the face is the one face-editor change that cannot happen while the
           // identity hold stands. Makeup, eyewear and details are additive —
           // they contradict nothing, so they release nothing.
           { identity: true, phrase: "the same face, features and identity as the reference image",
+            change: "the face and features",
             keys: ["ethnicity", "ethnicityCustom", "face.structure"] },
           { phrase: "the same hair colour and hairstyle as the reference image",
+            change: "the hair colour and hairstyle",
             keys: ["hairColour", "hairColourCustom", "face.hair"] },
           { phrase: "the same eye colour as the reference image",
+            change: "the eye colour",
             keys: ["eyeColour", "eyeColourCustom"] },
           { phrase: "the same skin tone as the reference image",
+            change: "the skin tone",
             keys: ["skinTone", "skinToneCustom", "ethnicity", "ethnicityCustom"] },
           { phrase: "the same body shape and proportions as the reference image",
+            change: "the body shape, breast size and proportions",
             keys: ["height", "build", "buildCustom", "chest", "chestCustom", "waist", "waistCustom", "hips", "hipsCustom"] },
           { phrase: "the same tattoos, in the same places, as the reference image",
+            change: "the tattoos",
             keys: ["body"] },
         ],
         baseSuffix: "photorealistic, natural skin texture, sharp focus, high detail",
@@ -1091,7 +1117,11 @@
       // on its own; at POV distance a stated 50mm exaggerates whatever is
       // nearest the camera, which is exactly what we do not want.
       styleModifiers: "photorealistic, natural lighting, sharp focus",
-      proportionGuard: "realistic human proportions, two arms and two hands per person, no extra limbs",
+      // "realistic human proportions" used to lead this line and was working
+      // against the body sliders — it is an instruction to draw the model's own
+      // default figure, and it sat at the very end of the prompt where it had
+      // the last word. What is actually needed here is the limb guard.
+      proportionGuard: "two arms and two hands per person, no extra limbs, anatomically coherent",
       // Instruction sent to the extractor model that turns the recent
       // conversation into a Stable Diffusion prompt. {name}, {charDesc},
       // {recent}, {actNote} and {ownBodyRule} are substituted in.

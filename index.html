@@ -2853,7 +2853,9 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
   const charDesc = () => {
     const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
     const ageDesc = character.age ? `${character.age} year old` : "";
-    return [ageDesc, genderDesc, buildAppearancePrompt(full())].filter(Boolean).join(", ");
+    // Image path: the centimetre figure is left out, since the base image is
+    // cropped at mid-thigh and a number has nothing to be measured against.
+    return [ageDesc, genderDesc, buildAppearancePrompt(full(), { measurements: false })].filter(Boolean).join(", ");
   };
 
   const generateBase = async () => {
@@ -3205,7 +3207,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const handleGenerateImage = async () => {
     setImgLoading(true); setError("");
     try {
-      const appearanceDesc = buildAppearancePrompt(form.appearance);
+      const appearanceDesc = buildAppearancePrompt(form.appearance, { measurements: false });
       const genderDesc = form.gender === "Custom" ? (form.customGender || "") : (form.gender || "");
       const ageDesc = form.age ? `${form.age} year old` : "";
       const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");

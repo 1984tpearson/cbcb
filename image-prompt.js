@@ -446,6 +446,14 @@ window.ImagePrompt = {
       return changed;
     }
 
+    // "a, b and c" — the change clause reads as a sentence, so a bare comma
+    // list would run into the rest of the clause.
+    function joinList(items, join) {
+      const sep = join || " and ";
+      if (items.length <= 1) return items[0] || "";
+      return items.slice(0, -1).join(", ") + sep + items[items.length - 1];
+    }
+
     function buildBodyBasePrompt({ body, charDesc, changedKeys, anchored = true, extra }) {
       const cfg = (CFG.appearance && CFG.appearance.body) || null;
       if (!cfg) return "";
@@ -465,10 +473,22 @@ window.ImagePrompt = {
       // as the reference image" in a first generation names something that does
       // not exist, and every hold clause is a promise about a picture nobody
       // has seen. The description is the whole brief in that case.
+      //
+      // A released hold also has to become a stated change. Dropping "the same
+      // body shape" only stops the prompt contradicting the edit; it does not
+      // ask for anything, and against a whole reference image passed as
+      // inputImage a silent prompt loses — which is why a chest edit came back
+      // pixel-identical. The change clause goes first, ahead of the continuity
+      // preamble, so the edit is the first thing read rather than the last.
       const anchor = [];
       if (anchored) {
         const changed = new Set(changedKeys || []);
+        const released = (cfg.baseHolds || []).filter(h => (h.keys || []).some(k => changed.has(k)));
         const holds = (cfg.baseHolds || []).filter(h => !(h.keys || []).some(k => changed.has(k)));
+        const aspects = released.map(h => h.change).filter(Boolean);
+        if (aspects.length && cfg.baseChangeTemplate) {
+          anchor.push(fillTemplate(cfg.baseChangeTemplate, { aspects: joinList(aspects, cfg.baseChangeJoin) }));
+        }
         anchor.push(holds.some(h => h.identity) ? cfg.basePreamble : cfg.basePreambleRestyled);
         anchor.push(...holds.map(h => h.phrase));
       }
@@ -520,7 +540,13 @@ window.ImagePrompt = {
       return [preamble, cfg.editFraming, ...holds, charDesc, facePart, cfg.editSuffix].filter(Boolean).join(", ");
     }
 
-    function buildAppearancePrompt(appearance) {
+    // `measurements` controls the height in centimetres. Words-only readers —
+    // the [APPEARANCE] note, the scene extractor, the scenario setup — get it,
+    // because a number is exactly the kind of thing a language model uses. The
+    // image paths do not: nothing in a frame cropped at mid-thigh gives 195 cm
+    // a referent, so the figure was spending prompt attention to say nothing,
+    // in a prompt whose body description was already being outweighed.
+    function buildAppearancePrompt(appearance, { measurements = true } = {}) {
       if (!appearance) return "";
       const a = appearance;
       const cfg = CFG.appearance;
@@ -532,9 +558,6 @@ window.ImagePrompt = {
 
       const ethnicity = a.ethnicity === "Custom" ? a.ethnicityCustom : a.ethnicity;
       if (ethnicity) parts.push(ethnicity.toLowerCase());
-      if (hair) parts.push(`${hair.toLowerCase()} hair`);
-      if (eyes) parts.push(`${eyes.toLowerCase()} eyes`);
-      if (skin) parts.push(`${skin.toLowerCase()} skin`);
 
       const h = a.height ?? 50;
       const b = a.build ?? 50;
@@ -553,53 +576,41 @@ window.ImagePrompt = {
         return tier && !tier.skipInPrompt ? tier.phrase : null;
       };
 
-      // Height + build combined into one phrase when both land at the extreme
-      // low end, instead of stacking two separate "very short" / "very slim"
-      // modifiers — that combination is what was pushing generations toward
-      // caricature proportions (tiny torso, stretched limbs) rather than a
-      // proportionally short, slim figure.
-      const heightCm = fillTemplate(cfg.heightMeasurementTemplate, { cm: sliderToCm(h) });
-      const buildCustom = custom("build");
-      // The combined phrase exists to stop two extreme tier phrases stacking
-      // into caricature. A custom build is one phrase already, so there is
-      // nothing to combine and the author's own words win.
-      if (!buildCustom && h <= 25 && b <= 20) {
-        parts.push(`${heightCm}, ${cfg.combinedShortSlim}`);
-      } else {
-        parts.push(heightCm);
-        const heightPhrase = phraseFor(cfg.heightTiers, h);
-        if (heightPhrase) parts.push(heightPhrase);
-        const buildPhrase = buildCustom || phraseFor(cfg.buildTiers, b);
-        if (buildPhrase) parts.push(buildPhrase);
+      // The whole silhouette in one run, immediately after the ethnicity and
+      // ahead of hair, eyes and skin. It used to sit behind the colouring, so
+      // the part of the description that was being ignored was also the part
+      // buried deepest in the prompt.
+      //
+      // The extreme tiers no longer combine into a single softened phrase.
+      // "short, slender frame" and "curvier waistline" were what a maxed-out
+      // slider produced, which is how both ends of the scale ended up looking
+      // the same: they were guards against caricature written when the tier
+      // phrases stacked two vague modifiers, and the phrases they were
+      // guarding against no longer exist.
+      if (measurements) {
+        parts.push(fillTemplate(cfg.heightMeasurementTemplate, { cm: sliderToCm(h) }));
       }
+      const heightPhrase = phraseFor(cfg.heightTiers, h);
+      if (heightPhrase) parts.push(heightPhrase);
+      const buildPhrase = custom("build") || phraseFor(cfg.buildTiers, b);
+      if (buildPhrase) parts.push(buildPhrase);
 
       const chest = a.chest ?? 50;
       parts.push(custom("chest") || appearancePhrasePreview("chest", chest));
 
       const waist = a.waist ?? 50;
       const hips = a.hips ?? 50;
-      const waistCustom = custom("waist");
-      const hipsCustom = custom("hips");
+      const waistPhrase = custom("waist") || phraseFor(cfg.waistTiers, waist);
+      if (waistPhrase) parts.push(waistPhrase);
+      const hipsPhrase = custom("hips") || phraseFor(cfg.hipsTiers, hips);
+      if (hipsPhrase) parts.push(hipsPhrase);
 
-      // Waist + hips combined when both point the same direction — "narrow
-      // waist, narrow hips" as two separate phrases reads as more extreme than
-      // either was meant to be individually, since they're largely describing
-      // the same silhouette.
-      // Same reasoning as build: combining is a fix for two stacked tier
-      // phrases, so it steps aside as soon as either side is spelled out.
-      if (!waistCustom && !hipsCustom && waist <= 30 && hips <= 30) {
-        parts.push(cfg.combinedSlenderWaistline);
-      } else if (!waistCustom && !hipsCustom && waist >= 70 && hips >= 70) {
-        parts.push(cfg.combinedCurvyWaistline);
-      } else {
-        const waistPhrase = waistCustom || phraseFor(cfg.waistTiers, waist);
-        if (waistPhrase) parts.push(waistPhrase);
-        const hipsPhrase = hipsCustom || phraseFor(cfg.hipsTiers, hips);
-        if (hipsPhrase) parts.push(hipsPhrase);
-      }
+      if (hair) parts.push(`${hair.toLowerCase()} hair`);
+      if (eyes) parts.push(`${eyes.toLowerCase()} eyes`);
+      if (skin) parts.push(`${skin.toLowerCase()} skin`);
 
-      // Face last: hair/eyes/skin and the body silhouette establish who this
-      // is, and makeup and eyewear are modifiers on top of that.
+      // Face last: the silhouette and colouring establish who this is, and
+      // makeup and eyewear are modifiers on top of that.
       const facePart = buildFacePrompt(a.face);
       if (facePart) parts.push(facePart);
 

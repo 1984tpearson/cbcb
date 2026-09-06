@@ -507,12 +507,6 @@
       ]),
       card("Waist", null, [tierEditor(a + "waistTiers", { preview: false, textKey: "phrase", textLabel: "Phrase" })]),
       card("Hips", null, [tierEditor(a + "hipsTiers", { preview: false, textKey: "phrase", textLabel: "Phrase" })]),
-      card("Combined phrases",
-        "Used instead of two separate phrases when both sliders sit at the same extreme — stacking them reads as more extreme than either was meant to be.", [
-        field("Short + slim", a + "combinedShortSlim", "text"),
-        field("Narrow waist + narrow hips", a + "combinedSlenderWaistline", "text"),
-        field("Full waist + wide hips", a + "combinedCurvyWaistline", "text"),
-      ]),
       card("Face variation",
         "One trait is taken from each of a random handful of these pools per image. Without them the model returns the same face nearly every time; taking every pool at once over-specifies it and does the same thing again.", [
         field("Pools used per image", a + "faceVariationPoolCount", "number"),

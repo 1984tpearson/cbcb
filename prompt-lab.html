@@ -517,7 +517,7 @@ Elena: *she leans into it*"></textarea></label>
   // in a lab and wrong in the app. These are the actual saved values.
   function applyCharacter(c) {
     if (!c) return;
-    const appearanceDesc = IMG.buildAppearancePrompt(c.appearance);
+    const appearanceDesc = IMG.buildAppearancePrompt(c.appearance, { measurements: false });
     const gender = c.gender === "Custom" ? (c.customGender || "") : (c.gender || "");
     const age = c.age ? `${c.age} year old` : "";
     const staging = c.staging || {};
