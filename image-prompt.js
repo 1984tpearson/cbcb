@@ -1,14 +1,14 @@
 // PersonaChat — IMAGE PROMPT ASSEMBLY
-// Framework-free, like site-config.js, so both the app and prompt-lab.html can
-// load it as a plain script. Everything here is pure: state in, prompt string
-// out, no React, no network, no DOM.
+// Framework-free, like site-config.js, and loaded as a plain script.
+// Everything here is pure: state in, prompt string out, no React, no network,
+// no DOM.
 //
 // It lives outside index.html because the whole file used to be inline in the
 // app source, which meant the only way to see what a change did to a prompt
 // was to play the game and generate an image. Every prompt regression this
-// project has had came from tuning blind that way. Now prompt-lab.html loads
-// this same code and shows the finished prompt for any scene state instantly,
-// so a change can be diffed across cases before it costs a generation.
+// project has had came from tuning blind that way. Kept separate and pure, a
+// change can be diffed across cases in a few lines of script before it costs
+// a generation.
 //
 // create(CFG) rather than top-level consts: the config is fetched at runtime,
 // so nothing here can read CFG until the caller hands it over.

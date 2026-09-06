@@ -350,9 +350,9 @@ const AI_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/ai-p
 const IMAGE_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/image-proxy";
 const UPLOAD_IMAGE_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/upload-image";
 
-// Prompt assembly lives in image-prompt.js so prompt-lab.html can load the
-// same code and show what any change does to a finished prompt without
-// generating an image. Destructured back into the names the app already uses.
+// Prompt assembly lives in image-prompt.js, framework-free and pure, so what
+// any change does to a finished prompt can be seen without playing the game
+// and generating an image. Destructured back into the names the app uses.
 const IMG = window.ImagePrompt.create(CFG);
 const {
   ACTION_TEXT_RE, extractActionText,
@@ -1397,9 +1397,8 @@ function cleanOutfitUpdate(value) {
 // gate — without it the tracker never even looked.
 const MOVEMENT_RE = /\b(walk|walks|walked|walking|go|goes|went|going|come|comes|came|coming|move|moves|moved|moving|head|heads|headed|heading|enter|enters|entered|entering|leave|leaves|left|leaving|step|steps|stepped|stepping|sit|sits|sat|sitting|stand|stands|stood|standing|lie|lies|lay|lying|follow|follows|followed|following|inside|outside|upstairs|downstairs|bedroom|kitchen|bathroom|living room|hallway|garden|car|couch|sofa|bed|table)\b/i;
 
-// Thin wrapper: the extraction itself lives in image-prompt.js so prompt-lab
-// can run the real thing rather than a copy of it. aiComplete is injected
-// because the module is framework- and network-free by design.
+// Thin wrapper: the extraction itself lives in image-prompt.js. aiComplete is
+// injected because that module is framework- and network-free by design.
 async function buildImagePromptFromContext({ messages, character, model }) {
   return IMG.extractScene({ messages, character, model, aiComplete });
 }
@@ -4765,9 +4764,9 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // has no guaranteed reference to what's actually being worn, so this
       // is the more reliable source. Appearance + wardrobe go FIRST so SD
       // weights them highest, scene context after.
-      // Assembly lives in image-prompt.js so prompt-lab.html builds the
-      // prompt through this exact call — a lab that reimplements it would
-      // eventually be lying about what the app sends.
+      // Assembly lives in image-prompt.js, and every caller goes through this
+      // one call: a second implementation of it would drift, and then be
+      // lying about what the app actually sends.
       const { prompt: fullImgPrompt } = assembleImagePrompt({
         scenePrompt: prompt,
         charDesc,
