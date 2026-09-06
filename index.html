@@ -3858,9 +3858,29 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
 }
 
 // ─── CHARACTER CARD ───────────────────────────────────────────────────────────
-function CharacterCard({ character, onSelect, onEdit, onEditAppearance, onDelete, discreetMode }) {
+// What the card shows under the name: the last thing said in the chat, kept on
+// the character by the chat window so the list needs no per-character chat
+// fetch. Characters with no conversation yet fall back to their persona.
+function characterPreview(character) {
+  return character.lastMessage || character.persona || "";
+}
+
+function CharacterCard({ character, onSelect, onEdit, onEditAppearance, onDelete, discreetMode, gridMode }) {
   const [hover, setHover] = useState(false);
-  const genderLabel = character.gender === "Custom" ? (character.customGender || "Custom") : character.gender;
+  const preview = characterPreview(character);
+
+  if (gridMode) {
+    return (
+      <div style={{ ...S.gridTile, ...(hover ? { transform: "scale(1.03)" } : {}) }}
+        onClick={() => onSelect(character)} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+        title={character.name}>
+        {characterAvatar(character)
+          ? <img src={characterAvatar(character)} alt={character.name} style={S.gridTileImg} />
+          : <div style={S.gridTileFallback}>{character.name[0]?.toUpperCase()}</div>}
+        <span style={S.gridTileName}>{character.name}</span>
+      </div>
+    );
+  }
 
   if (discreetMode) {
     return (
@@ -3875,7 +3895,7 @@ function CharacterCard({ character, onSelect, onEdit, onEditAppearance, onDelete
         <div style={{ flex: 1, minWidth: 0 }}>
           <span style={{ fontSize: 16, fontWeight: 600, color: "#000", display: "block" }}>{character.name}</span>
           <span style={{ fontSize: 13, color: "#8e8e93", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>
-            {character.persona.slice(0, 60)}{character.persona.length > 60 ? "…" : ""}
+            {preview}
           </span>
         </div>
         <div onClick={e => e.stopPropagation()} style={{ display: "flex", gap: 4 }}>
@@ -3897,12 +3917,7 @@ function CharacterCard({ character, onSelect, onEdit, onEditAppearance, onDelete
       </div>
       <div style={S.characterInfo}>
         <span style={S.characterName}>{character.name}</span>
-        <span style={S.characterMeta}>
-          {character.gender && <span style={S.genderBadge}>{genderLabel}</span>}
-          {character.nsfw && <span style={S.nsfwBadge}>NSFW</span>}
-          {character.autoImage && <span style={S.autoBadge}>AUTO IMG</span>}
-        </span>
-        <p style={S.characterPersona}>{character.persona.slice(0, 80)}{character.persona.length > 80 ? "…" : ""}</p>
+        <p style={S.characterPersona}>{preview}</p>
       </div>
       <div style={S.characterActions} onClick={e => e.stopPropagation()}>
         <button style={S.iconBtn} onClick={() => onEdit(character)} title="Edit">✎</button>
@@ -4092,6 +4107,16 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
     dataApi.saveChatSession(sessionId, messages).catch(e => setError(e.message));
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // The character list previews the last thing said, so the snippet rides on
+  // the character rather than making the list fetch every chat. Committing only
+  // on a change means opening a chat and reading it back writes nothing.
+  useEffect(() => {
+    if (!messagesLoaded) return;
+    const last = [...messages].reverse().find(m => m.role !== "image" && typeof m.content === "string" && m.content.trim());
+    const snippet = last ? last.content.trim().replace(/\s+/g, " ").slice(0, 160) : "";
+    if (snippet && snippet !== characterRef.current.lastMessage) commitCharacter({ lastMessage: snippet });
+  }, [messages, messagesLoaded]);
 
   useEffect(() => {
     if (!messagesLoaded) return;
@@ -5262,9 +5287,11 @@ function App() {
   const [editingChar, setEditingChar] = useState(null);
   const [appearanceChar, setAppearanceChar] = useState(null);
   const [discreetMode, setDiscreetMode] = useState(() => storage.get("personachat_discreet", false));
+  const [gridMode, setGridMode] = useState(() => storage.get("personachat_gridmode", false));
 
   useEffect(() => { storage.set("personachat_settings", settings); }, [settings]);
   useEffect(() => { storage.set("personachat_discreet", discreetMode); }, [discreetMode]);
+  useEffect(() => { storage.set("personachat_gridmode", gridMode); }, [gridMode]);
   const toggleDiscreet = () => setDiscreetMode(v => !v);
 
   useEffect(() => {
@@ -5331,6 +5358,7 @@ function App() {
           : <div style={S.logo}>PERSONA</div>
         }
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button className="discreet-toggle" title={gridMode ? "List view" : "Grid view"} onClick={() => setGridMode(v => !v)}>{gridMode ? "☰" : "▦"}</button>
           <button className="discreet-toggle" title={discreetMode ? "Exit discreet mode" : "Discreet mode"} onClick={toggleDiscreet}>{discreetMode ? "👁" : "👁"}</button>
           {discreetMode
             ? <button className="discreet-settings-btn" onClick={() => setShowSettings(true)}>⚙</button>
@@ -5363,11 +5391,11 @@ function App() {
             <button style={S.btnPrimary} onClick={() => setShowCharForm(true)}>Create Character</button>
           </div>
         ) : (
-          <div style={discreetMode ? { display: "flex", flexDirection: "column", borderTop: "1px solid #e0e0e0" } : S.characterGrid}>
+          <div style={gridMode ? S.avatarGrid : discreetMode ? { display: "flex", flexDirection: "column", borderTop: "1px solid #e0e0e0" } : S.characterGrid}>
             {orderedCharacters.map(c => (
               <CharacterCard key={c.id} character={c} onSelect={setActiveChar}
                 onEdit={c => { setEditingChar(c); setShowCharForm(true); }} onEditAppearance={setAppearanceChar} onDelete={deleteCharacter}
-                discreetMode={discreetMode} />
+                discreetMode={discreetMode} gridMode={gridMode} />
             ))}
           </div>
         )}
@@ -5395,6 +5423,11 @@ const S = {
   sectionHeader: { display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18 },
   sectionTitle: { fontSize:20, fontWeight:800, color:"var(--text)", margin:0 },
   characterGrid: { display:"flex", flexDirection:"column", gap:12 },
+  avatarGrid: { display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:12 },
+  gridTile: { position:"relative", aspectRatio:"3 / 4", borderRadius:14, overflow:"hidden", cursor:"pointer", background:"var(--bg3)", border:"1px solid var(--border)", boxShadow:"0 2px 8px var(--shadow)", transition:"transform 0.18s" },
+  gridTileImg: { width:"100%", height:"100%", objectFit:"cover", display:"block" },
+  gridTileFallback: { width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", fontSize:34, fontWeight:800, color:"var(--pink)" },
+  gridTileName: { position:"absolute", left:0, right:0, bottom:0, padding:"18px 8px 6px", fontSize:12, fontWeight:700, color:"#fff", textAlign:"center", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", background:"linear-gradient(to top, rgba(0,0,0,0.7), transparent)" },
   characterCard: { display:"flex", alignItems:"center", gap:14, background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:16, padding:"14px 18px", cursor:"pointer", transition:"all 0.18s", boxShadow:"0 2px 8px var(--shadow)" },
   characterAvatar: { width:56, height:56, borderRadius:"50%", overflow:"hidden", background:"var(--bg3)", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", border:"3px solid var(--pink-light)" },
   avatarImg: { width:"100%", height:"100%", objectFit:"cover" },
