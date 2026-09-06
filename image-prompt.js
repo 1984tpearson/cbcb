@@ -463,7 +463,11 @@ window.ImagePrompt = {
         .filter(Boolean);
       // Absence stated rather than implied — left unsaid, the model is free to
       // invent tattoos, and this image is what every later generation copies.
-      const skin = marks.length ? marks.join(", ") : cfg.noTattoos;
+      // Unless the field is left unset, which is a different statement: there
+      // the reference image is the record of what ink she has, and "clean
+      // unmarked skin" would delete it.
+      const unset = (cfg.fields || []).some(f => values[f.key] === cfg.unsetValue);
+      const skin = marks.length ? marks.join(", ") : (unset ? "" : cfg.noTattoos);
 
       // Hold everything the edit did not touch, and only that. A hold whose
       // fields were edited is dropped: keeping it would put "same skin tone"
@@ -588,8 +592,13 @@ window.ImagePrompt = {
       const ethnicity = a.ethnicity === "Custom" ? a.ethnicityCustom : a.ethnicity;
       if (ethnicity) parts.push(ethnicity.toLowerCase());
 
-      const h = a.height ?? 50;
-      const b = a.build ?? 50;
+      // null means "leave as it is": the field is not described at all, so the
+      // hold covering it survives a regeneration and nothing in the prompt
+      // argues with the base image about it. An uploaded photograph starts
+      // with every one of these unset, because there the picture is the only
+      // account of her there has ever been.
+      const h = a.height;
+      const b = a.build;
 
       // Free text typed against one of the body fields, following the same
       // "<key>Custom" convention hair/eye/skin already use. When present it
@@ -616,22 +625,20 @@ window.ImagePrompt = {
       // the same: they were guards against caricature written when the tier
       // phrases stacked two vague modifiers, and the phrases they were
       // guarding against no longer exist.
-      if (measurements) {
-        parts.push(fillTemplate(cfg.heightMeasurementTemplate, { cm: sliderToCm(h) }));
+      if (h != null) {
+        if (measurements) parts.push(fillTemplate(cfg.heightMeasurementTemplate, { cm: sliderToCm(h) }));
+        const heightPhrase = phraseFor(cfg.heightTiers, h);
+        if (heightPhrase) parts.push(heightPhrase);
       }
-      const heightPhrase = phraseFor(cfg.heightTiers, h);
-      if (heightPhrase) parts.push(heightPhrase);
-      const buildPhrase = custom("build") || phraseFor(cfg.buildTiers, b);
+      const buildPhrase = custom("build") || (b != null ? phraseFor(cfg.buildTiers, b) : null);
       if (buildPhrase) parts.push(buildPhrase);
 
-      const chest = a.chest ?? 50;
-      parts.push(custom("chest") || appearancePhrasePreview("chest", chest));
+      const chestPhrase = custom("chest") || (a.chest != null ? appearancePhrasePreview("chest", a.chest) : null);
+      if (chestPhrase) parts.push(chestPhrase);
 
-      const waist = a.waist ?? 50;
-      const hips = a.hips ?? 50;
-      const waistPhrase = custom("waist") || phraseFor(cfg.waistTiers, waist);
+      const waistPhrase = custom("waist") || (a.waist != null ? phraseFor(cfg.waistTiers, a.waist) : null);
       if (waistPhrase) parts.push(waistPhrase);
-      const hipsPhrase = custom("hips") || phraseFor(cfg.hipsTiers, hips);
+      const hipsPhrase = custom("hips") || (a.hips != null ? phraseFor(cfg.hipsTiers, a.hips) : null);
       if (hipsPhrase) parts.push(hipsPhrase);
 
       if (hair) parts.push(`${hair.toLowerCase()} hair`);

@@ -1438,6 +1438,22 @@ function pickCharacterTraits(constraints = {}) {
   };
 }
 
+// What "described by the picture alone" looks like: every field that would
+// otherwise emit a phrase, saying nothing. Applied to a character built from
+// an uploaded photograph.
+const UNSET_APPEARANCE = {
+  hairColour: "", hairColourCustom: "",
+  eyeColour: "", eyeColourCustom: "",
+  skinTone: "", skinToneCustom: "",
+  ethnicity: "", ethnicityCustom: "",
+  height: null, build: null, buildCustom: "",
+  // The tattoo field too: the photograph is the only record of her ink.
+  body: { tattoos: "Any", tattoosCustom: "" },
+  chest: null, chestCustom: "",
+  waist: null, waistCustom: "",
+  hips: null, hipsCustom: "",
+};
+
 const DEFAULT_APPEARANCE = {
   hairColour: "Brown",
   hairColourCustom: "",
@@ -2523,13 +2539,18 @@ const BODY_SHAPE_FIELDS = [
 // A numeric appearance field shown as a dropdown. The selected option is
 // whichever band the stored number falls in, so a value set by the slider in
 // the character form — or by the vibe generator — still shows correctly here.
+const UNSET_CHOICE = () => CFG.appearance.unsetLabel;
+
 function ShapeField({ field, appearance, onChange }) {
   const customKey = field.key + "Custom";
   const customText = appearance[customKey] || "";
-  const n = appearance[field.key] ?? 50;
+  const n = appearance[field.key];
   // Bands are contiguous, so the first whose midpoint band contains n wins;
-  // falling back to the last covers a value above every midpoint.
-  const current = customText ? "Custom" : (appearancePhrasePreview(field.key, n) || field.choices[0].value);
+  // falling back to the last covers a value above every midpoint. null is the
+  // deliberate "leave as it is" — a field that says nothing about her in any
+  // prompt, rather than one quietly sitting in the middle band saying
+  // "average" every time an image is generated.
+  const current = customText ? "Custom" : (n == null ? UNSET_CHOICE() : (appearancePhrasePreview(field.key, n) || field.choices[0].value));
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
       <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>{field.label}</span>
@@ -2537,11 +2558,13 @@ function ShapeField({ field, appearance, onChange }) {
         onChange={e => {
           const v = e.target.value;
           if (v === "Custom") { onChange({ [customKey]: customText || " " }); return; }
+          if (v === UNSET_CHOICE()) { onChange({ [field.key]: null, [customKey]: "" }); return; }
           const choice = field.choices.find(c => c.value === v);
           // Clearing the custom text is what makes the preset take effect —
           // left behind it would keep overriding the band just chosen.
           onChange({ [field.key]: choice ? choice.n : 50, [customKey]: "" });
         }}>
+        <option value={UNSET_CHOICE()}>{UNSET_CHOICE()}</option>
         {field.choices.map(c => <option key={c.value} value={c.value}>{c.value}</option>)}
         <option value="Custom">Custom…</option>
       </select>
@@ -2565,11 +2588,15 @@ function ShapeField({ field, appearance, onChange }) {
 // it sits on Face, next to the structure fields it shares an identity hold
 // with.
 const COLOUR_FIELDS = [
+  // Every one of them can be left unset, which was always possible for the
+  // prompt — an empty colour is simply not mentioned — but only ethnicity
+  // offered it in the menu. The other three forced a colour on a character
+  // whose photograph already answers the question.
   { key: "ethnicity", label: "Ethnicity", options: ETHNICITIES, blank: "Not specified", tab: "Face", characterTab: true },
-  { key: "hairColour", label: "Hair colour", options: HAIR_COLOURS, tab: "Hair" },
-  { key: "eyeColour", label: "Eye colour", options: EYE_COLOURS, tab: "Face" },
+  { key: "hairColour", label: "Hair colour", options: HAIR_COLOURS, blank: true, tab: "Hair" },
+  { key: "eyeColour", label: "Eye colour", options: EYE_COLOURS, blank: true, tab: "Face" },
   // Skin tone stays on Body: it is the whole body's skin, not the face's.
-  { key: "skinTone", label: "Skin tone", options: SKIN_TONES, tab: "Body" },
+  { key: "skinTone", label: "Skin tone", options: SKIN_TONES, blank: true, tab: "Body" },
 ];
 const colourFieldsFor = (tab, hasCharacterTab) => COLOUR_FIELDS.filter(f =>
   (hasCharacterTab && f.characterTab) ? false : f.tab === tab);
@@ -2582,7 +2609,7 @@ function ColourField({ field, appearance, onChange }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
       <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>{field.label}</span>
       <select style={S.select} value={value} onChange={e => onChange({ [field.key]: e.target.value })}>
-        {field.blank && <option value="">{field.blank}</option>}
+        {field.blank && <option value="">{field.blank === true ? CFG.appearance.unsetLabel : field.blank}</option>}
         {field.options.map(o => <option key={o} value={o}>{o}</option>)}
       </select>
       {value === "Custom" && (
@@ -2742,8 +2769,12 @@ function AppearanceTabFields({ tab, face, onFace, appearance, onAppearance, body
         {/* Height stays a slider: it is the one appearance value still sent with
             every chat image, and it is sent in centimetres, which a band would
             round away. */}
+        {/* The slider has no null position, so "leave as it is" is the OFF
+            toggle SliderRow already carries for the personality sliders. */}
         <div style={{ marginTop: 12 }}>
           <SliderRow def={APPEARANCE_SLIDER_DEFS[0]} value={appearance.height ?? 50}
+            off={appearance.height == null}
+            onToggleOff={off => onAppearance({ height: off ? null : 50 })}
             onChange={v => onAppearance({ height: v })} />
         </div>
       </div>
@@ -3350,6 +3381,11 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
         });
         setGeneratedImages(prev => [{ base, avatar: null }, ...prev]);
         describedFrom = base;
+        // Every shape and colour field is set to "leave as it is". The photo
+        // is the only account of how she looks, and a field left at its
+        // default is not neutral — it puts "medium skin, athletic, C cup" into
+        // every regeneration, arguing with the picture next to it. Unset says
+        // nothing, which is the truthful thing to say here.
         setForm(f => ({
           ...f,
           referenceImage: base,
@@ -3358,7 +3394,10 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
           // The base image came from the photograph rather than from these
           // settings, so the appearance editor would otherwise open reading
           // every field as an unapplied change waiting to be regenerated.
-          appearance: { ...f.appearance, baseSnapshot: snapshotOf(f.appearance || {}, normaliseBody(f.appearance && f.appearance.body)) },
+          appearance: (() => {
+            const next = { ...f.appearance, ...UNSET_APPEARANCE };
+            return { ...next, baseSnapshot: snapshotOf(next, normaliseBody(next.body)) };
+          })(),
         }));
         setAppearanceNote("Base image generated from your photo. The appearance settings below are not used for it — the photo describes her — but they still feed what the chat model reads about her.");
       } catch (err) {

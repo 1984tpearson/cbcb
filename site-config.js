@@ -357,6 +357,13 @@
         { max: 100, phrase: "wide flaring hips, broad across the hips and thighs" },
       ],
       heightMeasurementTemplate: "{cm} cm tall",
+      // Shown as the first option on every body and colour field, and as the
+      // off state of the height slider. A field left here is not described at
+      // all: no phrase in any prompt, and no diff against the base image, so
+      // the hold that covers it survives a regeneration. It is what the app
+      // always did for a field you had not touched — the difference is that
+      // now you can see which fields those are, and say so deliberately.
+      unsetLabel: "Leave as it is",
       // Facial structure traits, randomised per generation. Without these the
       // model lands on the same default face nearly every time; seed changes
       // alone do not move identity much. All ethnicity-neutral so they vary the
@@ -786,8 +793,14 @@
         // model invent tattoos, and a base image is the last place you want a
         // detail arriving by accident.
         noTattoos: "clean unmarked skin, no tattoos",
+        // "Leave as it is" for the tattoo field, and the only value that stops
+        // the absence being stated. A base image generated from a photograph
+        // must not be told "clean unmarked skin" — that erases whatever ink
+        // the photograph shows, which is the one place tattoos are recorded.
+        unsetValue: "Any",
         fields: [
           { key: "tattoos", label: "Tattoos", options: [
+            { value: "Any", phrase: "" },
             { value: "None", phrase: "clean unmarked skin, no tattoos" },
             { value: "One small tattoo", phrase: "a single small tattoo" },
             { value: "One arm", phrase: "tattoos on one arm" },
