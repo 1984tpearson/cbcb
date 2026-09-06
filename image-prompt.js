@@ -408,6 +408,16 @@ window.ImagePrompt = {
       const a = before || {}, b = after || {};
       const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
       const changed = [];
+      // The face is compared one group at a time and reported as "face.hair",
+      // "face.structure" and so on, because the holds care which part moved: a
+      // restyle contradicts the hair hold, a new jaw contradicts the identity
+      // hold, and lipstick contradicts nothing at all.
+      if ((a.face || b.face) && JSON.stringify(a.face ?? null) !== JSON.stringify(b.face ?? null)) {
+        const fa = a.face || {}, fb = b.face || {};
+        for (const g of new Set([...Object.keys(fa), ...Object.keys(fb)])) {
+          if (JSON.stringify(fa[g] ?? null) !== JSON.stringify(fb[g] ?? null)) changed.push("face." + g);
+        }
+      }
       for (const k of keys) {
         if (k === "baseSnapshot" || k === "face") continue;
         const x = a[k], y = b[k];

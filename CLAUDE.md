@@ -69,6 +69,22 @@ image is already the source of truth, and a second one would argue with it.
 
 ## Layout
 
+## One set of appearance fields, two screens
+
+`CharacterForm` (create) and `AppearanceEditor` (alter) show the same tabs —
+Face, Hair, Body, Tattoos — rendered by `AppearanceTabFields` off
+`CFG.appearance.face` and `CFG.appearance.body`. Which tab a group sits on is
+its `tab` key in the config, so a field is placed once and appears in both.
+The generator adds a Character tab and an Images tab that creates both images;
+the editor's Images tab regenerates the base, keeps the old ones as variants,
+and refreshes the avatar only when asked.
+
+Regenerating changes what differs from `appearance.baseSnapshot` and holds
+everything else, per `CFG.appearance.body.baseHolds`. Face edits take part:
+`appearanceDiffKeys` reports them as `face.hair`, `face.structure` and so on,
+because a restyle contradicts the hair hold and a new jaw contradicts the
+identity hold, while makeup contradicts nothing.
+
 - `index.html` — the whole app: React + Babel compiled at runtime from the
   `#app-source` script by `bootApp()`, which loads the config first because
   the app source reads it at its top level. PIN-gated behind a decoy page.

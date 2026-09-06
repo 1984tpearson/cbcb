@@ -404,6 +404,7 @@
           {
             key: "hair",
             label: "Hair",
+            tab: "Hair",
             // Described rather than worn.
             template: "{phrases}",
             // Emitted while every field in this group is untouched, to stop the
@@ -462,6 +463,7 @@
           {
             key: "makeup",
             label: "Makeup",
+            tab: "Face",
             fields: [
               { key: "style", label: "Overall", options: [
                 { value: "None", phrase: "" },
@@ -535,6 +537,7 @@
           {
             key: "eyewear",
             label: "Eyewear",
+            tab: "Face",
             fields: [
               { key: "type", label: "Type", options: [
                 { value: "None", phrase: "" },
@@ -564,6 +567,7 @@
           {
             key: "extras",
             label: "Details",
+            tab: "Face",
             fields: [
               { key: "freckles", label: "Freckles", options: [
                 { value: "None", phrase: "" },
@@ -596,6 +600,7 @@
         // option leaves that trait unspecified, which is what an existing
         // character starts on so nothing about their face changes until it is
         // deliberately set.
+        structureTab: "Face",
         structure: [
           { key: "shape",      label: "Face shape",  options: ["Any", "oval face", "round face", "heart-shaped face", "square jawline", "angular face", "soft rounded features", "long narrow face", "wide cheekbones"] },
           { key: "cheekbones", label: "Cheeks",      options: ["Any", "high cheekbones", "subtle cheekbones", "full cheeks", "hollow cheeks", "broad forehead", "narrow forehead"] },
@@ -644,10 +649,14 @@
         // Holding unchanged aspects explicitly matters as much as releasing
         // changed ones: it is what makes a small edit a small edit.
         baseHolds: [
+          // face.structure is here for the same reason ethnicity is: reshaping
+          // the face is the one face-editor change that cannot happen while the
+          // identity hold stands. Makeup, eyewear and details are additive —
+          // they contradict nothing, so they release nothing.
           { identity: true, phrase: "the same face, features and identity as the reference image",
-            keys: ["ethnicity", "ethnicityCustom"] },
+            keys: ["ethnicity", "ethnicityCustom", "face.structure"] },
           { phrase: "the same hair colour and hairstyle as the reference image",
-            keys: ["hairColour", "hairColourCustom"] },
+            keys: ["hairColour", "hairColourCustom", "face.hair"] },
           { phrase: "the same eye colour as the reference image",
             keys: ["eyeColour", "eyeColourCustom"] },
           { phrase: "the same skin tone as the reference image",
