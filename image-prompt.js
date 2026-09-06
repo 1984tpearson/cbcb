@@ -510,7 +510,7 @@ window.ImagePrompt = {
     function buildUploadBasePrompt({ extra } = {}) {
       const cfg = (CFG.appearance && CFG.appearance.body) || null;
       if (!cfg) return "";
-      return [cfg.uploadPreamble, cfg.uploadHold, cfg.baseFraming, cfg.baseNudeClause, extra, cfg.baseSuffix]
+      return [cfg.uploadPreamble, cfg.uploadHold, cfg.uploadColour, cfg.baseFraming, cfg.baseNudeClause, extra, cfg.baseSuffix]
         .filter(Boolean).join(", ");
     }
 

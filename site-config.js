@@ -774,7 +774,14 @@
         // the actual person, and where the two disagree the words would pull
         // the result away from the face that was uploaded.
         uploadPreamble: "the exact same person as the reference photograph, photographed again as a plain full-body reference photo",
-        uploadHold: "keep their face, hair, skin tone, body shape, proportions, breast size and any tattoos or marks exactly as they are in the photograph, changing only the pose, framing, clothing and background",
+        uploadHold: "keep their face, hair, body shape, proportions, breast size and any tattoos or marks exactly as they are in the photograph, changing only the pose, framing, clothing and background",
+        // Said separately from the hold above, and the hold no longer mentions
+        // skin tone, because the two were contradicting each other on a black
+        // and white photograph: "keep the skin tone exactly as it is" means
+        // grey, and grey is what came back. Colouring is the one thing a
+        // monochrome reference genuinely cannot supply, so it is asked for
+        // outright rather than held.
+        uploadColour: "a full colour photograph with natural realistic colouring — if the reference photograph is black and white, greyscale or heavily filtered, render them in plausible natural colour, with lifelike skin tone, hair colour and eye colour, never in greyscale",
         // Said explicitly rather than left unsaid: an unstated absence lets the
         // model invent tattoos, and a base image is the last place you want a
         // detail arriving by accident.
