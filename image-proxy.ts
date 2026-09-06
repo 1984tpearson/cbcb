@@ -63,15 +63,30 @@ function json(body: unknown, status = 200) {
 }
 
 // Ask Wiro about one task. Returns the task record, or null if the response
-// was unusable (transient hiccup — the caller decides whether to retry).
+// was unusable (transient hiccup — the caller decides whether to retry), plus
+// whether Wiro is rate limiting us.
+//
+// The throttle flag exists because this used to read the body and nothing
+// else: a 429 has no tasklist, so it came back as null, which the status
+// action reads as "no record yet, still pending". Being throttled was
+// therefore indistinguishable from generating — the browser kept polling
+// once a second at the exact moment it was being told to stop, and the wait
+// was attributed to Wiro being slow, because nothing anywhere said otherwise.
 async function fetchTask(taskId: string, apiKey: string) {
   const detailRes = await fetch(WIRO_TASK_DETAIL_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
     body: JSON.stringify({ taskid: taskId }),
   });
+  if (detailRes.status === 429) {
+    // Retry-After is seconds or an HTTP date; only the numeric form is worth
+    // honouring here, and an absent or unparseable one just means "back off".
+    const header = Number(detailRes.headers.get('retry-after'));
+    return { task: null, throttled: true, retryAfterSeconds: header > 0 ? header : null };
+  }
   const detailJson = await detailRes.json().catch(() => null);
-  return (detailJson?.tasklist?.[0] as Record<string, unknown> | undefined) || null;
+  const task = (detailJson?.tasklist?.[0] as Record<string, unknown> | undefined) || null;
+  return { task, throttled: false, retryAfterSeconds: null };
 }
 
 // The finished task's image URL, or an error response. Handing back the URL
@@ -170,15 +185,24 @@ Deno.serve(async (req: Request) => {
       return new Response('taskId is required', { status: 400, headers: corsHeaders() });
     }
 
-    let task: Record<string, unknown> | null;
+    let detail: { task: Record<string, unknown> | null; throttled: boolean; retryAfterSeconds: number | null };
     try {
-      task = await fetchTask(taskId, apiKey);
+      detail = await fetchTask(taskId, apiKey);
     } catch (e) {
       return new Response(`Wiro task detail request failed: ${e instanceof Error ? e.message : String(e)}`, {
         status: 502,
         headers: corsHeaders(),
       });
     }
+
+    // Still 202 — the task IS still running, and failing the generation over a
+    // rate limit would throw away an image Wiro is going to finish and bill
+    // for. But it is now labelled, so the client can back off instead of
+    // adding to the traffic that caused it.
+    if (detail.throttled) {
+      return json({ status: 'pending', taskId, throttled: true, retryAfterSeconds: detail.retryAfterSeconds }, 202);
+    }
+    const task = detail.task;
 
     // No usable record yet. Treat as pending rather than an error — the task
     // may simply not be visible yet, and the client will ask again.
@@ -290,7 +314,11 @@ Deno.serve(async (req: Request) => {
   for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
     await sleep(POLL_INTERVAL_MS);
     try {
-      const task = await fetchTask(taskId, apiKey);
+      const { task, throttled, retryAfterSeconds } = await fetchTask(taskId, apiKey);
+      if (throttled) {
+        await sleep(Math.max(POLL_INTERVAL_MS, (retryAfterSeconds || 5) * 1000));
+        continue;
+      }
       if (!task) continue;
       if (TERMINAL_STATUSES.includes(String(task.status))) {
         finalTask = task;

@@ -1163,12 +1163,23 @@ function sleepUnlessVisible(ms) {
 
 // Poll quickly at first — a fast generation used to sit finished for a full
 // 2s before anyone asked. Then ease off so a slow one is not hammered.
-const POLL_SCHEDULE_MS = [900, 900, 1200, 1500, 2000];
+// Quick at the start, because a fast generation should not wait on a slow
+// schedule, then easing off: past a dozen polls this is a slow one, and a
+// check every two seconds for another minute is just traffic against a rate
+// limit we share with the generations themselves.
+const POLL_SCHEDULE_MS = [900, 900, 1200, 1500, 2000, 2000, 2000, 2000, 2500, 2500, 3000, 3000, 4000];
+// Where a poll goes when Wiro says it is rate limiting us, unless it sends a
+// Retry-After of its own. Backing off is the only useful response: polling
+// harder cannot make the image arrive sooner, and it is what caused this.
+const THROTTLE_BACKOFF_MS = [4000, 8000, 12000, 20000];
 const MAX_POLLS = 160;
 
 async function pollWiroTask({ taskId, outputFormat, modelId, startedAt, maxPolls = MAX_POLLS }) {
+  let throttled = 0;
+  let nextWaitMs = null;
   for (let attempt = 0; attempt < maxPolls; attempt++) {
-    await sleepUnlessVisible(POLL_SCHEDULE_MS[Math.min(attempt, POLL_SCHEDULE_MS.length - 1)]);
+    await sleepUnlessVisible(nextWaitMs ?? POLL_SCHEDULE_MS[Math.min(attempt, POLL_SCHEDULE_MS.length - 1)]);
+    nextWaitMs = null;
     let statusRes;
     try {
       statusRes = await fetch(IMAGE_PROXY_URL, {
@@ -1179,7 +1190,20 @@ async function pollWiroTask({ taskId, outputFormat, modelId, startedAt, maxPolls
     } catch {
       continue; // transient network blip — the task is still running
     }
-    if (statusRes.status === 202) continue; // still generating
+    if (statusRes.status === 202) {
+      // Still generating — but read the body, because it also says whether
+      // Wiro is rate limiting us. Throttled polls are not progress: they are
+      // this client competing with its own generations for the project's
+      // request budget, and the answer is to ask less often.
+      const pending = await statusRes.json().catch(() => null);
+      if (pending && pending.throttled) {
+        nextWaitMs = (pending.retryAfterSeconds > 0)
+          ? pending.retryAfterSeconds * 1000
+          : THROTTLE_BACKOFF_MS[Math.min(throttled, THROTTLE_BACKOFF_MS.length - 1)];
+        throttled++;
+      }
+      continue;
+    }
     if (!statusRes.ok) {
       const err = await statusRes.text().catch(() => "");
       throw new Error(`Wiro error: ${statusRes.status} ${err}`);
@@ -1192,7 +1216,8 @@ async function pollWiroTask({ taskId, outputFormat, modelId, startedAt, maxPolls
     console.info(
       `[image] ${modelId} total ${((Date.now() - (startedAt || Date.now())) / 1000).toFixed(1)}s` +
       ` = queued ${t.queuedSeconds ?? "?"}s + generating ${t.generatingSeconds ?? "?"}s` +
-      ` + postprocess ${t.postprocessSeconds ?? "?"}s + our overhead`
+      ` + postprocess ${t.postprocessSeconds ?? "?"}s + our overhead` +
+      (throttled ? ` — RATE LIMITED on ${throttled} poll${throttled === 1 ? "" : "s"}` : "")
     );
     return (done && done.imageUrl) || null;
   }
