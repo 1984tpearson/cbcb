@@ -1145,10 +1145,11 @@
       imageParams: {
         "seedream-v5-lite-uncensored": { resolution: "2k", aspectRatio: "9:16" },
         "seedream-v4-5-uncensored": { resolution: "2k", aspectRatio: "9:16" },
-        // 2k like the others. The 1k here was from a first reading of Wiro's
-        // docs where 1k looked Pro-only; 2k is accepted, and the detail this
-        // buys goes straight into the small anatomy these shots turn on.
-        "seedream-v5-pro-uncensored": { resolution: "2k", aspectRatio: "9:16", outputFormat: "png" },
+        // 1k, which only Pro accepts. 2k costs double a 1k generation and the
+        // extra detail was not visible in the finished images, so the money was
+        // going nowhere. Lite and v4.5 stay at 2k because 1k is not a valid
+        // resolution on either.
+        "seedream-v5-pro-uncensored": { resolution: "1k", aspectRatio: "9:16", outputFormat: "png" },
       },
       vision: "mistralai/mistral-small-3.1-24b-instruct",
       reactivity: "meta-llama/llama-3.1-8b-instruct",
