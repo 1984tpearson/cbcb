@@ -3311,7 +3311,7 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
 function CharacterForm({ character, onSave, onCancel, settings }) {
   const safeCharacter = character || null;
   const [form, setForm] = useState(() => safeCharacter ? { ...safeCharacter } : {
-    id: Date.now().toString(), name: "", persona: "", nsfw: false,
+    id: Date.now().toString(), lastUsedAt: Date.now(), name: "", persona: "", nsfw: false,
     referenceImage: null, backgroundImage: null, autoImage: false,
     gender: "Female", customGender: "", sliders: { ...DEFAULT_SLIDERS }, disabledSliders: [],
     age: "", maritalStatus: "", relationship: "", relationshipCustom: "",
@@ -5301,6 +5301,22 @@ function App() {
     dataApi.deleteCharacter(id).catch(e => setLoadError(e.message));
   };
 
+  // The list is ordered by last use — most recent first. Nothing is recorded
+  // for characters made before lastUsedAt existed, so fall back to the id,
+  // which is the Date.now() of their creation. get_characters returns rows in
+  // whatever order Postgres hands them back, so without this the list shuffles.
+  const lastUsedOf = (c) => c.lastUsedAt || Number(c.id) || 0;
+  const orderedCharacters = [...characters].sort((a, b) => lastUsedOf(b) - lastUsedOf(a));
+
+  const openCharacter = (char) => {
+    const stamped = { ...char, lastUsedAt: Date.now() };
+    const next = charactersRef.current.map(c => c.id === stamped.id ? stamped : c);
+    charactersRef.current = next;
+    setCharacters(next);
+    persistCharacter(stamped, next);
+    setActiveChar(stamped);
+  };
+
   const updateCharacter = (char) => {
     const next = charactersRef.current.map(c => c.id === char.id ? char : c);
     charactersRef.current = next;
@@ -5353,8 +5369,8 @@ function App() {
           </div>
         ) : (
           <div style={discreetMode ? { display: "flex", flexDirection: "column", borderTop: "1px solid #e0e0e0" } : S.characterGrid}>
-            {characters.map(c => (
-              <CharacterCard key={c.id} character={c} onSelect={setActiveChar}
+            {orderedCharacters.map(c => (
+              <CharacterCard key={c.id} character={c} onSelect={openCharacter}
                 onEdit={c => { setEditingChar(c); setShowCharForm(true); }} onEditAppearance={setAppearanceChar} onDelete={deleteCharacter}
                 discreetMode={discreetMode} />
             ))}
