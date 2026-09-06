@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=19"></script>
-  <script src="image-prompt.js?v=19"></script>
+  <script src="site-config.js?v=20"></script>
+  <script src="image-prompt.js?v=20"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -1563,6 +1563,79 @@ function randomiseAppearance(parsed, current) {
     chest: isTouched("chest") ? c.chest : rand(20, 80),
     waist: isTouched("waist") ? c.waist : rand(20, 70),
     hips: isTouched("hips") ? c.hips : rand(25, 75),
+    ...randomiseFaceAndBody(c.face, c.body),
+  };
+}
+
+// The face and tattoo fields, filled in on the same terms as everything else
+// above: anything already moved off its "nothing" option is a choice the user
+// made and is left exactly as it is.
+//
+// Weighted, not uniform — see CFG.appearance.randomise. An even draw over
+// fourteen tattoo options tattoos nine characters in ten, and a vibe generator
+// that gives everyone sleeves is not describing anyone.
+function randomiseFaceAndBody(currentFace, currentBody) {
+  const cfg = CFG.appearance.randomise || {};
+  const skip = new Set(cfg.skipGroups || []);
+  const requires = cfg.requires || {};
+  const skipWhen = cfg.skipWhen || {};
+  const noneChance = key => (cfg.noneChance && cfg.noneChance[key] !== undefined)
+    ? cfg.noneChance[key] : (cfg.defaultNoneChance ?? 0.45);
+  // Weighted draw. An unlisted option weighs 1, so a field with no weights
+  // behaves exactly as an even pick.
+  const weights = cfg.optionWeights || {};
+  const pickWeighted = (options, key) => {
+    const w = weights[key] || {};
+    const weighted = options.map(o => ({ o, w: w[o.value] !== undefined ? w[o.value] : 1 }));
+    const total = weighted.reduce((sum, x) => sum + x.w, 0);
+    if (total <= 0) return options[0];
+    let r = Math.random() * total;
+    for (const x of weighted) { r -= x.w; if (r <= 0) return x.o; }
+    return weighted[weighted.length - 1].o;
+  };
+
+  // Tracks which fields ended up with a value, so a dependent field knows
+  // whether its parent is there — set by the user or drawn just now, either
+  // counts.
+  const filled = new Set();
+  // The value each field ended up with, for skipWhen to read.
+  const chosen = {};
+
+  const fillGroup = (values, fields, prefix, sentinel) => {
+    const out = { ...values };
+    for (const field of fields || []) {
+      const key = `${prefix}.${field.key}`;
+      if (out[field.key] !== sentinel) { filled.add(key); chosen[key] = out[field.key]; continue; }
+      if (requires[key] && !filled.has(requires[key])) continue;
+      // Blocked by what another field already says. Checked against `chosen`
+      // rather than the field's own group, so it sees values set by the user
+      // as well as ones drawn a moment ago.
+      const blocked = skipWhen[key] && Object.entries(skipWhen[key])
+        .some(([otherKey, values]) => values.includes(chosen[otherKey]));
+      if (blocked) continue;
+      if (Math.random() < noneChance(key)) continue;
+      // Never draw Custom: it is a prompt for text nobody has typed, so it
+      // would read as an empty phrase rather than a choice.
+      const options = (field.options || [])
+        .filter(o => o.value !== sentinel && o.value !== FACE_CFG.customValue && o.phrase);
+      if (!options.length) continue;
+      out[field.key] = pickWeighted(options, key).value;
+      filled.add(key);
+      chosen[key] = out[field.key];
+    }
+    return out;
+  };
+
+  const face = normaliseFace(currentFace);
+  const nextFace = { ...face };
+  for (const group of FACE_CFG.groups || []) {
+    if (skip.has(group.key)) continue;
+    nextFace[group.key] = fillGroup(face[group.key], group.fields, group.key, FACE_CFG.noneValue);
+  }
+  const body = normaliseBody(currentBody);
+  return {
+    face: nextFace,
+    body: skip.has("body") ? body : fillGroup(body, BODY_CFG.fields, "body", BODY_CFG.noneValue),
   };
 }
 

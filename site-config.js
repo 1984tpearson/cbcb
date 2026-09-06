@@ -620,6 +620,71 @@
         customValue: "Custom",
       },
 
+      // ── Vibe randomising ────────────────────────────────────────────────────
+      // What "generate from a vibe" fills in, for the fields that have a
+      // "nothing here" option. Picking uniformly would be wrong: fourteen
+      // tattoo options and an even draw means nine characters in ten come out
+      // tattooed, and most people are not. So each field says how often it
+      // should be left alone, and the draw only happens the rest of the time.
+      randomise: {
+        defaultNoneChance: 0.45,
+        noneChance: {
+          // Makeup: most characters wear some, few wear all of it.
+          "makeup.style": 0.3,
+          "makeup.lips": 0.4,
+          "makeup.eyes": 0.45,
+          "makeup.lashes": 0.55,
+          "makeup.cheeks": 0.6,
+          "makeup.brows": 0.5,
+          // Hair: shape it nearly always, since "unspecified hair" is a
+          // wasted opportunity on a character being invented from nothing.
+          "hair.length": 0.15,
+          "hair.texture": 0.15,
+          "hair.style": 0.4,
+          "hair.fringe": 0.5,
+          // Glasses are a strong visual choice and most people do not wear
+          // them in a photograph.
+          "eyewear.type": 0.82,
+          "eyewear.frame": 0.2,
+          "extras.freckles": 0.65,
+          "extras.mark": 0.7,
+          "extras.piercing": 0.7,
+        },
+        // Within a field, not every option is equally likely in life. An even
+        // draw across eight lengths shaves or buzzes one character in five,
+        // which says more about the length of the list than about anybody.
+        // Unlisted options weigh 1.
+        optionWeights: {
+          "hair.length": { "Shaved": 0.1, "Buzz cut": 0.15, "Pixie": 0.5, "Very long": 0.5 },
+          "makeup.style": { "Goth": 0.4, "Editorial": 0.3, "Bold": 0.6 },
+          "makeup.lips": { "Black": 0.2 },
+          "extras.piercing": { "Multiple ear": 0.6, "Lip": 0.5, "Septum": 0.5 },
+        },
+        // A field that only makes sense once another is set. Frames with no
+        // glasses is not a look.
+        requires: { "eyewear.frame": "eyewear.type" },
+        // And a field that stops making sense once another says something
+        // particular. Drawing independently gave shaved heads worn in a
+        // ponytail — a combination each half of which is fine alone, which is
+        // exactly what independent draws cannot see.
+        skipWhen: {
+          "hair.style": { "hair.length": ["Shaved", "Buzz cut"] },
+          "hair.fringe": { "hair.length": ["Shaved", "Buzz cut"] },
+          "hair.texture": { "hair.length": ["Shaved", "Buzz cut"] },
+        },
+        // Never drawn.
+        //
+        // Facial structure, because it is what pickFaceVariation randomises
+        // afresh on every generation so each press of Regen offers a different
+        // face to choose between — pinning it here would fix the face at the
+        // first attempt.
+        //
+        // Tattoos, because they are a decision about a person rather than a
+        // detail of one. A vibe can reasonably guess at hair and makeup; it
+        // cannot guess whether this character is someone who has tattoos.
+        skipGroups: ["structure", "body"],
+      },
+
       // ── Body & tattoos ──────────────────────────────────────────────────────
       // The base image is nude on purpose: it is the only thing passed to the
       // image model, clothing is decided per scene in chat, and tattoos hidden
