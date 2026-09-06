@@ -4502,11 +4502,12 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
 
   const handleDeleteMessage = (index, isLast) => {
     if (!isLast) {
-      if (!confirm("Delete this message and everything after it?")) return;
+      if (!confirm("Delete this message and everything after it? Generated images are kept — delete those individually.")) return;
       // No snapshot to restore from this far back, but the replies being
       // deleted may still have trackers in flight — stand them down.
       discardScene();
-      setMessages(m => m.slice(0, index));
+      // Images survive: see handleEditMessage. Deleting one is always deliberate.
+      setMessages(m => [...m.slice(0, index), ...m.slice(index + 1).filter(x => x.role === "image")]);
     } else {
       // Same problem as regeneration: the reply is gone, so the state it moved
       // forward should go with it.
@@ -4514,7 +4515,39 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       setMessages(m => m.filter((_, i) => i !== index));
     }
   };
-  const handleEditMessage = (index, newContent) => setMessages(m => m.map((msg, i) => i === index ? { ...msg, content: newContent } : msg));
+  // Editing a message you already sent rewrites the turn, so the reply it drew
+  // — and everything the two of you said after it — no longer answers anything
+  // that was said. They are dropped and the character answers the new wording.
+  // Generated images are the exception: they cost money and time to make, and
+  // one you liked is not invalidated by rewording the line above it, so they
+  // stay put and can only be removed deliberately.
+  const handleEditMessage = async (index, newContent) => {
+    const current = messages;
+    const edited = { ...current[index], content: newContent };
+    const after = current.slice(index + 1);
+    const staleTurns = after.filter(m => m.role !== "image");
+    const keptImages = after.filter(m => m.role === "image");
+    const base = [...current.slice(0, index), edited, ...keptImages];
+    if (edited.role !== "user" || staleTurns.length === 0) {
+      setMessages(base);
+      return;
+    }
+    // Roll the scene back to how it stood before the first reply being dropped,
+    // exactly as a regeneration does, and stand down its trackers.
+    const firstReply = staleTurns.find(m => m.role === "assistant");
+    const restoredChar = restoreScene(firstReply?.stateBefore);
+    const stateBefore = sceneSnapshot(restoredChar);
+    setMessages(base); setRegenLoading(true); setError("");
+    try {
+      const reply = await sendChat({ messages: base.filter(m => m.role !== "image"), character: restoredChar, model: settings.selectedModel, settings });
+      const withReply = [...base, { role: "assistant", content: reply, stateBefore }];
+      setMessages(withReply);
+      applyWardrobe(withReply, restoredChar);
+      applyStaging(withReply, restoredChar);
+      applyIntentions(withReply, restoredChar);
+    } catch (e) { setError(e.message); }
+    setRegenLoading(false);
+  };
 
   const triggerImageGen = async (auto = false) => {
     if (imgLoading) return;
