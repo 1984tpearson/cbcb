@@ -466,9 +466,16 @@ Elena: *she leans into it*"></textarea></label>
     const { taskId } = await res.json();
     if (!taskId) throw new Error("no task id returned");
 
-    const schedule = [900, 900, 1200, 1500, 2000];
+    // Same shape as the app's pollWiroTask, and for the same reason: a 202 can
+    // mean "still generating" or "you are being rate limited", and this page
+    // is the likeliest place to hit the limit — Generate both runs two of
+    // these loops at once, against a budget that is per project.
+    const schedule = [900, 900, 1200, 1500, 2000, 2000, 2000, 2000, 2500, 2500, 3000, 3000, 4000];
+    const throttleBackoff = [4000, 8000, 12000, 20000];
+    let throttled = 0, nextWait = null;
     for (let i = 0; i < 160; i++) {
-      await new Promise(r => setTimeout(r, schedule[Math.min(i, schedule.length - 1)]));
+      await new Promise(r => setTimeout(r, nextWait ?? schedule[Math.min(i, schedule.length - 1)]));
+      nextWait = null;
       let s;
       try {
         s = await fetch(IMAGE_PROXY_URL, {
@@ -476,7 +483,17 @@ Elena: *she leans into it*"></textarea></label>
           body: JSON.stringify({ action: "status", taskId, outputFormat: body.outputFormat }),
         });
       } catch { continue; }
-      if (s.status === 202) continue;
+      if (s.status === 202) {
+        const pending = await s.json().catch(() => null);
+        if (pending && pending.throttled) {
+          nextWait = (pending.retryAfterSeconds > 0)
+            ? pending.retryAfterSeconds * 1000
+            : throttleBackoff[Math.min(throttled, throttleBackoff.length - 1)];
+          throttled++;
+          console.info(`[lab] rate limited on poll ${i + 1} — waiting ${nextWait}ms`);
+        }
+        continue;
+      }
       if (!s.ok) throw new Error(`${s.status} ${await s.text().catch(() => "")}`);
       const done = await s.json();
       if (done && done.imageUrl) return done.imageUrl;
