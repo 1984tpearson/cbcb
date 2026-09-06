@@ -474,7 +474,9 @@ const storage = {
 // mapping is linear, so each slider step is half a centimetre.
 function buildAppearanceSystemNote(appearance) {
   if (!appearance) return "";
-  const desc = appearanceWords(appearance);
+  // Trailing full stop trimmed: the template supplies its own, and a written
+  // description is a sentence while the settings produce a fragment.
+  const desc = appearanceWords(appearance).replace(/\s*\.\s*$/, "");
   if (!desc) return "";
   return fillTemplate(CFG.prompts.appearanceNote, { description: desc });
 }

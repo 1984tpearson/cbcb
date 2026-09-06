@@ -1108,13 +1108,21 @@
       partnerWordRelationship: "partner",
       statusPhraseMarried: "married to",
       statusPhraseRelationship: "in a relationship with",
-      appearanceNote: "\n\n[APPEARANCE] Your physical appearance: {description}. You are aware of how you look but only mention it naturally if directly relevant — never force it into conversation.",
+      // Framed as what an observer sees, not as "your appearance is", because
+      // the description may now be third-person prose read off the base image
+      // ("The person has a slender build… Her long black hair…"). Introduced
+      // as YOUR appearance, that lands as a paragraph about somebody else in
+      // the middle of a second-person system prompt, and the character can
+      // start referring to herself as "she". Said this way both forms read
+      // correctly — the prose, and the comma-separated list the appearance
+      // settings still produce.
+      appearanceNote: "\n\n[APPEARANCE] What someone looking at you sees: {description}. That is you. You are aware of how you look but only mention it naturally if directly relevant — never force it into conversation.",
       userPersonaNote: "\n\n[ABOUT THE PERSON YOU'RE TALKING TO] {details}. Address and refer to them accordingly.",
       // Asked of the vision model about a base image, and stored on that image.
       // Prose rather than fields: this is read by language models, which do
       // more with "dyed copper hair growing out at the roots" than with an
       // enum, and it can carry what the appearance settings have no field for.
-      appearanceDescriptionInstruction: "Look at this photograph and describe the person's physical appearance in two or three sentences of plain prose, as a novelist would describe a character on the page. Cover build, height, colouring, hair, face and anything distinctive — scars, freckles, tattoos, glasses. Describe only the body and the face: say nothing about the pose, the framing, the background, the lighting, or whether they are clothed. Write only the description, with no preamble and no commentary.",
+      appearanceDescriptionInstruction: "Look at this photograph and describe the person's physical appearance in two or three sentences of plain prose, as a novelist would describe a character on the page. Cover build, height, colouring, hair, face and anything distinctive — scars, freckles, tattoos, glasses. Describe only lasting physical features: say nothing about the pose, the framing, the background, the lighting, whether they are clothed, or their expression and mood, which change from moment to moment and are not part of how they look. Refer to them in the third person and keep to one subject throughout — do not start with \"the person\" and switch to \"she\". Write only the description, with no preamble and no commentary.",
       definingHeader: "DEFINING TRAITS — these must be visible in every reply:",
       alsoTrueHeader: "Also true of you:",
       userPersonaName: "their name is {name}",
