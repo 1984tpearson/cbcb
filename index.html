@@ -1563,6 +1563,16 @@ function randomiseAppearance(parsed, current) {
   const isTouched = key => c[key] !== undefined && c[key] !== DEFAULT_APPEARANCE[key];
 
   return {
+    // Everything here is a slider or a colour; these three are not, and
+    // rebuilding the object from a fixed key list was quietly dropping them.
+    // description is the written account of the base image, and losing it sent
+    // the chat model back to sliders that had just been randomised into a
+    // different person. baseSnapshot and origin are what the appearance editor
+    // measures edits against, and without them it opens declaring every field
+    // an unapplied change.
+    description: c.description,
+    baseSnapshot: c.baseSnapshot,
+    origin: c.origin,
     hairColour: isTouched("hairColour") ? c.hairColour : (parsed?.hairColour || pick(hairOptions)),
     hairColourCustom: isTouched("hairColour") ? (c.hairColourCustom || "") : "",
     eyeColour: isTouched("eyeColour") ? c.eyeColour : (parsed?.eyeColour || pick(eyeOptions)),
@@ -3251,7 +3261,15 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
         persona: form.persona.trim() || result.persona,
         age: form.age || result.age || "",
         maritalStatus: form.maritalStatus !== "Single" ? form.maritalStatus : (result.maritalStatus || "Single"),
-        appearance: randomiseAppearance(result.appearance, form.appearance),
+        // A character that already has a base image keeps the appearance it
+        // was built with. Rolling new sliders would describe someone the
+        // pictures are not of — and on an uploaded photo it would do that to
+        // every field at once, since nothing there was ever "set" for the
+        // don't-clobber rule to protect. Vibe fills in the blanks; a photo
+        // means the appearance is no longer blank.
+        appearance: form.referenceImage
+          ? { ...form.appearance, avatar: normaliseAvatar(form.appearance && form.appearance.avatar) }
+          : randomiseAppearance(result.appearance, form.appearance),
       };
 
       // Asked after the persona exists rather than alongside it: the whole
