@@ -909,7 +909,7 @@ function buildAgeVoiceNote(age, sliders, disabledSliders) {
 // relationships that mean that partner is the user. Anything else — neighbour,
 // colleague, best friend's wife — means the partner is a third party, which is
 // the case the model kept collapsing into "married to the user".
-const ATTACHED_STATUSES = ["Married", "In a relationship"];
+const ATTACHED_STATUSES = ["Married", "Engaged", "In a relationship"];
 const USER_IS_PARTNER = ["Wife", "Husband", "Girlfriend", "Boyfriend", "Partner"];
 
 // One extra identity line spelling out who the partner is. Returns "" when the
@@ -919,8 +919,11 @@ function buildPartnerClarifier(maritalStatus, relStr) {
   const p = CFG.prompts;
   if (!ATTACHED_STATUSES.includes(maritalStatus) || !relStr) return "";
   const married = maritalStatus === "Married";
+  const engaged = maritalStatus === "Engaged";
   const partnerWord = married ? p.partnerWordMarried : p.partnerWordRelationship;
-  const statusPhrase = married ? p.statusPhraseMarried : p.statusPhraseRelationship;
+  const statusPhrase = married ? p.statusPhraseMarried
+    : engaged ? p.statusPhraseEngaged
+    : p.statusPhraseRelationship;
   if (USER_IS_PARTNER.includes(relStr)) {
     return fillTemplate(p.partnerIsUserLine, { partnerWord, statusPhrase });
   }
@@ -1418,7 +1421,7 @@ const ETHNICITY_POOL = Object.keys(ETHNICITY_PROFILES);
 // Weighted so most characters are of an ordinary dating age without every one
 // landing on the same number, which "age: <a number, varied>" was producing.
 const AGE_BANDS = [[19, 25], [23, 30], [26, 34], [30, 40], [35, 48], [42, 60]];
-const MARITAL_POOL = ["Single", "Single", "Single", "In a relationship", "Married", "Divorced", "It's complicated", "Widowed"];
+const MARITAL_POOL = ["Single", "Single", "Single", "In a relationship", "Engaged", "Married", "Divorced", "It's complicated", "Widowed"];
 const pickOne = (arr) => arr[Math.floor(Math.random() * arr.length)];
 // Anything the owner has already filled in wins over the roll. The cast is
 // what the model is told to write, so rolling over a pre-filled age or
@@ -3232,7 +3235,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
     id: Date.now().toString(), name: "", persona: "", nsfw: false,
     referenceImage: null, backgroundImage: null, autoImage: false,
     gender: "Female", customGender: "", sliders: { ...DEFAULT_SLIDERS }, disabledSliders: [],
-    age: "", maritalStatus: "Single", relationship: "", relationshipCustom: "",
+    age: "", maritalStatus: "", relationship: "", relationshipCustom: "",
     appearance: { ...DEFAULT_APPEARANCE },
   });
   const [vibe, setVibe] = useState("");
@@ -3282,7 +3285,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
         customGender: form.customGender,
         name: form.name.trim() || null,
         age: form.age || null,
-        maritalStatus: form.maritalStatus !== "Single" ? form.maritalStatus : null,
+        maritalStatus: form.maritalStatus || null,
         relationship: form.relationship || null,
         relationshipCustom: form.relationshipCustom || null,
         persona: form.persona.trim() || null,
@@ -3293,7 +3296,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
         name: form.name.trim() || result.name,
         persona: form.persona.trim() || result.persona,
         age: form.age || result.age || "",
-        maritalStatus: form.maritalStatus !== "Single" ? form.maritalStatus : (result.maritalStatus || "Single"),
+        maritalStatus: form.maritalStatus || result.maritalStatus || "Single",
         // A character that already has a base image keeps the appearance it
         // was built with. Rolling new sliders would describe someone the
         // pictures are not of — and on an uploaded photo it would do that to
@@ -3603,7 +3606,11 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
             </div>
             <div style={{ flex: 2 }}>
               <label style={S.label}>Marital Status</label>
-              <select style={S.select} value={form.maritalStatus || "Single"} onChange={e => setForm(f => ({ ...f, maritalStatus: e.target.value }))}>
+              {/* Blank rather than Single by default. Vibe used to treat Single
+                  as "not chosen" and roll its own status over the top, so the
+                  one status you could not ask for was the commonest one. */}
+              <select style={S.select} value={form.maritalStatus || ""} onChange={e => setForm(f => ({ ...f, maritalStatus: e.target.value }))}>
+                <option value="">Any — let the vibe decide</option>
                 {MARITAL_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>

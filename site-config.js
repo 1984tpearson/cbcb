@@ -1108,6 +1108,11 @@
       partnerWordRelationship: "partner",
       statusPhraseMarried: "married to",
       statusPhraseRelationship: "in a relationship with",
+      // Engaged keeps the neutral "partner" as the noun — fiancé/fiancée is
+      // gendered and the character's partner may be anyone — but says so in
+      // the phrase, since "in a relationship with" loses the whole point of
+      // choosing engaged over it.
+      statusPhraseEngaged: "engaged to",
       // Framed as what an observer sees, not as "your appearance is", because
       // the description may now be third-person prose read off the base image
       // ("The person has a slender build… Her long black hair…"). Introduced
@@ -1284,7 +1289,7 @@
     // ── Option lists ─────────────────────────────────────────────────────────
     options: {
       genders: ["Female", "Male", "Non-binary", "Custom"],
-      maritalStatuses: ["Single", "Married", "Divorced", "Widowed", "In a relationship", "It's complicated"],
+      maritalStatuses: ["Single", "In a relationship", "Engaged", "Married", "Divorced", "Widowed", "It's complicated"],
       hairColours: ["Black", "Dark brown", "Brown", "Auburn", "Dirty blonde", "Blonde", "Platinum blonde", "Red", "Strawberry blonde", "Grey", "White", "Coloured", "Custom"],
       eyeColours: ["Brown", "Dark brown", "Hazel", "Green", "Blue", "Grey", "Amber", "Custom"],
       skinTones: ["Fair", "Light", "Medium", "Olive", "Tan", "Brown", "Dark brown", "Ebony", "Custom"],
