@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=23"></script>
-  <script src="image-prompt.js?v=23"></script>
+  <script src="site-config.js?v=24"></script>
+  <script src="image-prompt.js?v=24"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -359,7 +359,7 @@ const {
   EMPTY_STAGING, STAGING_KEYS, hasStaging, buildStagingImageDesc,
   HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
   appearancePhrasePreview, buildAppearancePrompt, pickFaceVariation,
-  buildFacePrompt, buildFaceEditPrompt, isFaceUnset,
+  buildFacePrompt, buildFaceEditPrompt, isFaceUnset, isFaceStructureUnset,
   buildBodyBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
   isUserUndressed, povSelfBody, isIntimateScene,
   detectPhysicalContact, stripViewerLimbs,
@@ -3212,10 +3212,13 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
 
       // Each click of Regen should offer a genuinely different face to pick
       // from. Chat images deliberately do not do this — they pass the chosen
-      // base image instead, and need the face to stay put. Skipped once the
-      // face editor has specified a face, since a random face shape on top of
-      // a chosen one is two descriptions of the same features competing.
-      const faceVariation = isFaceUnset(form.appearance && form.appearance.face) ? pickFaceVariation() : "";
+      // base image instead, and need the face to stay put.
+      //
+      // Gated on the structure alone, not the whole face. The pools describe
+      // face shape, cheekbones, nose, mouth, eyes and skin, so a chosen face
+      // shape is the only thing they compete with — lipstick and a ponytail
+      // have no opinion about a jawline.
+      const faceVariation = isFaceStructureUnset(form.appearance && form.appearance.face) ? pickFaceVariation() : "";
       const extra = [imgPrompt.trim(), faceVariation].filter(Boolean).join(", ");
       const body = normaliseBody(form.appearance && form.appearance.body);
 

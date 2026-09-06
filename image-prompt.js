@@ -357,6 +357,23 @@ window.ImagePrompt = {
       return (group.fields || []).every(field => !faceFieldPhrase(values, field, cfg, cfg.noneValue));
     }
 
+    // True when the face's *structure* is unspecified — shape, cheekbones, nose,
+    // mouth, eyes, skin.
+    //
+    // This, not isFaceUnset, is the question pickFaceVariation should be gated
+    // on. The variation pools describe those same six traits, so they compete
+    // with a chosen face shape and with nothing else: lipstick and a ponytail
+    // have no opinion about a jawline. Asking the broader question meant that
+    // filling in any makeup at all silenced the face description completely,
+    // and every character generated from a vibe came out wearing the model's
+    // default face.
+    function isFaceStructureUnset(face) {
+      const cfg = (CFG.appearance && CFG.appearance.face) || null;
+      if (!cfg || !face) return true;
+      const struct = face.structure || {};
+      return (cfg.structure || []).every(field => !faceFieldPhrase(struct, field, cfg, cfg.unsetValue));
+    }
+
     // True when nothing on the face has been set at all.
     function isFaceUnset(face) {
       const cfg = (CFG.appearance && CFG.appearance.face) || null;
@@ -712,7 +729,7 @@ window.ImagePrompt = {
       EMPTY_STAGING, STAGING_KEYS, hasStaging, buildStagingImageDesc,
       HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
       appearancePhrasePreview, buildAppearancePrompt, pickFaceVariation,
-      buildFacePrompt, buildFaceEditPrompt, faceFieldPhrase, isFaceUnset,
+      buildFacePrompt, buildFaceEditPrompt, faceFieldPhrase, isFaceUnset, isFaceStructureUnset,
       buildBodyBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
       isUserUndressed, povSelfBody, isIntimateScene,
       beatShowsContact, detectPhysicalContact, stripViewerLimbs,
