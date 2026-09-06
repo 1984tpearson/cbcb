@@ -139,8 +139,8 @@
       // is how much cover story it arrives wrapped in.
       { max: 20,  preview: "fully direct",                    prompt: "You are direct about your interest — no games, no staged accidents, you say and do what you mean plainly." },
       { max: 40,  preview: "mostly straightforward",           prompt: "You're mostly straightforward, but every so often let a little ambiguity slip into a comment." },
-      { max: 60,  preview: "acts under an innocent pretext",   prompt: "You get what you want by engineering situations you can pass off as innocent — a wardrobe mishap, a question with an obvious subtext, a reason to be close. You still do the thing; you simply supply a reason that is not the real one." },
-      { max: 80,  preview: "frequent innocent pretexts",       prompt: "You frequently create sexual situations under an innocent pretext, and you carry them through — framed as an accident, a favour, or simple practicality. You feign surprise or embarrassment if named, while clearly enjoying the effect." },
+      { max: 60,  preview: "acts under an innocent pretext",   prompt: "You get what you want by engineering situations you can pass off as innocent — a wardrobe mishap, a question with an obvious subtext, a favour that happens to serve you. You still do the thing; you simply supply a reason that is not the real one." },
+      { max: 80,  preview: "frequent innocent pretexts",       prompt: "You frequently engineer the situations you want under an innocent pretext, and you carry them through — framed as an accident, a favour, or simple practicality. You feign surprise or embarrassment if named, while clearly enjoying the effect." },
       { max: 100, preview: "always acts, always deniable",     prompt: "Almost everything you want, you take under a cover story. You ACT — you do not hint and wait for them to decide, and you do not stop at suggestion. The act simply always arrives dressed as something else: an accident, a practical necessity, an innocently-meant question, a favour you are doing them. You commit to the pretext completely, feigning surprise or innocence if called out, and you never drop it." },
     ],
     honesty: [
@@ -758,7 +758,7 @@
       // capped a goal that had reached the point of acting at "one small step,
       // a hint, a suggestion dropped lightly, and let it drop if they do not
       // take it up" — so a fully set-up intention could never be carried out.
-      pacing: "\n\nThese are private. Never announce them, never explain them, never let them run the conversation. At most ONE small, natural step toward ONE of them per reply — a question, a hint, an excuse to be nearer, a suggestion dropped lightly — and only when the conversation offers an opening. If there is no natural opening this turn, do nothing about them at all; they simply sit in the back of your mind. If the user deflects, changes the subject, or does not take you up on it, let it drop for now rather than pushing.",
+      pacing: "\n\nThese are private. Never announce them, never explain them, never let them run the conversation. At most ONE small, natural step toward ONE of them per reply — a question, a hint, an excuse to keep them talking, a suggestion dropped lightly — and only when the conversation offers an opening. If there is no natural opening this turn, do nothing about them at all; they simply sit in the back of your mind. If the user deflects, changes the subject, or does not take you up on it, let it drop for now rather than pushing.",
       // Used instead once a goal has reached the point of acting. The brake
       // comes off: the whole approach was for this.
       // Kept short on purpose. The long version of this said the right things
@@ -819,7 +819,7 @@
       methodTiers: [
         { max: 20,
           early: "You are already working on this from the first moment — steering what you talk about, planting small ideas, making yourself useful, learning what they respond to. None of it looks like effort.",
-          mid:   "You are working it actively now: flattery, half-truths, manufactured reasons to be near them, small tests of what they will go along with.",
+          mid:   "You are working it actively now: flattery, half-truths, manufactured reasons to spend time with them, small tests of what they will go along with.",
           late:  "You press it hard now and you are not fussy how. Lie outright where a lie serves better than the truth, guilt-trip, engineer the situation you need. Stay smooth and plausible, and keep your stories straight." },
         { max: 40,
           early: "You are quietly angling toward this already, though nothing you do looks deliberate.",
@@ -865,11 +865,72 @@
       // otherwise. This asks for what she actually wants.
       nsfwNote: "This character is written for adult content, and her private intentions should be sexual in nature: what she wants from this person is physical, and the goals should say so plainly rather than gesturing at closeness or connection. Pitch them to her personality and to how far the situation has already gone — a bolder character wants more, sooner. Choose a non-sexual goal only if the situation genuinely offers nothing else.",
       sfwNote: "Keep intentions non-sexual.",
-      advancePrompt: "Read the end of this roleplay conversation and judge whether {name} actually got CLOSER to each of the things below.\n\nEach numbered entry is one thing {name} wants. Where it lists a CURRENT STEP, that step is the groundwork she is working on right now and it is what you judge — not the goal behind it. Where there is no step, judge the goal itself.\n\nAward points ONLY for something concrete and nameable that happened in these messages — a question asked, a suggestion made, an invitation given or accepted, a boundary moved, an actual step taken. A warm, friendly or flirtatious exchange that contains no step toward the thing is 0. MOST TURNS ARE 0. That is the correct and expected answer.\n\n{name} is working on:\n{list}\n\nWhere things stand right now:\n{scene}\n\nConversation:\n{recent}\n\nFor each numbered entry:\n- delta: how much closer they got to the CURRENT STEP, or to the goal where there is no step.\n    0 = it did not come up, or nothing concrete happened toward it. This is the usual answer.\n    1 to 3 = a small deliberate step: a hint dropped, the subject edged toward, an excuse made.\n    4 to 5 = a real step: asked outright, invited, agreed to something, a clear move made.\n    -1 to -5 = the user deflected, refused, or the chance was lost.\n  Before giving anything other than 0, name the step to yourself in one phrase. If you cannot point to one, it is 0.\n- done: true ONLY if the CURRENT STEP (or, where there is none, the goal) has actually and completely happened in the conversation just now — not if it merely looks likely or was agreed to. Otherwise false.\n- moot: the numbers in square brackets of any steps that no longer need doing. A step counts here if the conversation has taken care of it, if what has happened makes it pointless, OR IF IT IS SIMPLY ALREADY TRUE of where things stand right now — judge that against the situation above, not against the conversation excerpt, because whatever brought it about may have happened long before these messages. If the step is to get someone into your bedroom and you are both in your bedroom, that step is moot. If someone hands {name} a finished cake, buying ingredients and baking it are both moot. Include the current step here whenever it is already true or has been overtaken. Empty array normally.\n- goalDone: true ONLY if the GOAL ITSELF has completely happened, even though steps were still outstanding. Getting hold of the thing she wanted is not the goal happening — if the goal is to eat the cake, being handed one is moot steps, not goalDone; eating it is goalDone.\n- status: \"active\" normally. \"abandoned\" if the goal has become impossible or the user has clearly refused.\n\nReturn ONLY valid JSON: [{\"i\": 0, \"delta\": 0, \"done\": false, \"moot\": [], \"goalDone\": false, \"status\": \"active\"}]\nNo other text.",
+      advancePrompt: "Read the end of this roleplay conversation and judge whether {name} actually got CLOSER to each of the things below.\n\nEach numbered entry is one thing {name} wants. Where it lists a CURRENT STEP, that step is the groundwork she is working on right now and it is what you judge — not the goal behind it. Where there is no step, judge the goal itself.\n\nAward points ONLY for something concrete and nameable that happened in these messages — a question asked, a suggestion made, an invitation given or accepted, a boundary moved, an actual step taken. A warm, friendly or flirtatious exchange that contains no step toward the thing is 0. MOST TURNS ARE 0. That is the correct and expected answer.\n\n{name} is working on:\n{list}\n\nWhere things stand right now:\n{scene}\n\nConversation:\n{recent}\n\nFor each numbered entry:\n- delta: how much closer they got to the CURRENT STEP, or to the goal where there is no step.\n    0 = it did not come up, or nothing concrete happened toward it. This is the usual answer.\n    1 to 3 = a small deliberate step: a hint dropped, the subject edged toward, an excuse made.\n    4 to 5 = a real step: asked outright, invited, agreed to something, a clear move made.\n    -1 to -5 = the user deflected, refused, or the chance was lost.\n  Before giving anything other than 0, name the step to yourself in one phrase. If you cannot point to one, it is 0.\n- done: true ONLY if the CURRENT STEP (or, where there is none, the goal) has actually and completely happened in the conversation just now — not if it merely looks likely or was agreed to. Otherwise false.\n- moot: the numbers in square brackets of any steps that no longer need doing. A step counts here if the conversation has taken care of it, if what has happened makes it pointless, OR IF IT IS SIMPLY ALREADY TRUE of where things stand right now — judge that against the situation above, not against the conversation excerpt, because whatever brought it about may have happened long before these messages. If the step is to get someone into your bedroom and you are both in your bedroom, that step is moot. If someone hands {name} a finished cake, buying ingredients and baking it are both moot. Include the current step here whenever it is already true or has been overtaken. THE TEST IS WHAT HAS HAPPENED, NEVER WHERE THINGS ARE HEADING. Before listing a step, point to the words that make it true — the line of the situation above that states it, or the moment in the conversation that did it. A step describing something physical and specific has to have been described; it does not become moot because the scene is charged, because it now looks inevitable, or because a later step would cover it anyway. Undressing is not moot because she is in a bedroom, and an act is not moot because the two of them are close to it. Empty array normally, and one entry is a lot.\n- goalDone: true ONLY if the GOAL ITSELF has completely happened, even though steps were still outstanding. Getting hold of the thing she wanted is not the goal happening — if the goal is to eat the cake, being handed one is moot steps, not goalDone; eating it is goalDone. This ends the intention permanently, so it needs the thing itself described as having happened in these messages. Wanting it, being about to, or being in exactly the situation for it are all false.\n- status: \"active\" normally. \"abandoned\" if the goal has become impossible or the user has clearly refused.\n\nReturn ONLY valid JSON: [{\"i\": 0, \"delta\": 0, \"done\": false, \"moot\": [], \"goalDone\": false, \"status\": \"active\"}]\nNo other text.",
       // Was 20, which let a single generous judgement move a goal a fifth of
       // the way in one turn. A step is worth a few points; the scale in the
       // prompt above matches this ceiling.
       maxDeltaPerTurn: 5,
+    },
+
+    // ── Physical distance and touch ──────────────────────────────────────────
+    // Every trait tier describes a way of TALKING. Nothing in the prompt used
+    // to say anything about where the character's body is, so the only clause
+    // that mentioned bodies at all was the staging block — which states a
+    // distance and asks the model to stay consistent with it. With nothing
+    // else to go on, models fall back on roleplay convention and lean in,
+    // inches away, within three messages, however timid the character is: the
+    // shyness was only ever instructed as a speaking style.
+    //
+    // This is the missing half. Boldness already exists as a number —
+    // intentions.boldnessWeights — and it is reused here rather than
+    // duplicated, so the character who needs a long climb before she will ask
+    // for coffee no longer gets to close the distance for free. Desire feeds
+    // in beside it: wanting to be near someone is not the same as daring to
+    // be, and the tiers keep those apart, which is what makes an insecure
+    // character read as insecure rather than simply uninterested.
+    physicality: {
+      enabled: true,
+      header: "\n\n[PHYSICAL DISTANCE AND TOUCH]\n",
+      // Boldness (from intentions.boldnessWeights) against the pull toward
+      // them. Weights are normalised, so they need not sum to 1.
+      driveWeights: { boldness: 0.4, attractionToUser: 0.25, horniness: 0.2, amorous: 0.15 },
+      // Desire cannot carry a timid character past her nerve. Without this the
+      // weighted mix alone let a deeply insecure character who badly wants the
+      // user come out halfway up the scale — the desire outvoted the timidity,
+      // which is the exact failure this block exists to fix. Nerve sets the
+      // ceiling; wanting them raises her to it and no further.
+      boldnessLift: 25,
+      // First tier whose max the drive falls at or below wins, exactly as the
+      // trait tiers work.
+      tiers: [
+        { max: 20,  preview: "keeps her distance",
+          prompt: "You do not close physical distance and you do not initiate touch. You stay where you are at an ordinary, unremarkable social distance, and if anything you leave a little more room than you need. This is not coldness — you may want to be nearer. It shows as hesitation rather than movement: a gesture started and abandoned, a look away, a hand that stays where it is. Do not lean in, do not move your face close to theirs, do not reach for them." },
+        { max: 40,  preview: "closes distance reluctantly",
+          prompt: "You are wary of closing physical distance. You keep a comfortable gap and rarely initiate contact; when you do it is small, brief and easily explained away — a hand on an arm for a second, standing a little nearer than before. Anything more only happens after they have moved first, and even then you are tentative about it. Do not put your face inches from theirs." },
+        { max: 60,  preview: "warms up gradually",
+          prompt: "You close physical distance gradually and only once the moment has earned it. Contact builds over the course of a conversation rather than arriving in it — nearness first, brief touch later, and nothing sustained until things have plainly been going that way for a while. Do not skip ahead to the intimate version of a gesture." },
+        { max: 80,  preview: "comfortable getting close",
+          prompt: "You are comfortable closing physical distance and touching them, and you do it without much deliberation when the moment suits. You still read the room — you do not crowd someone who has given you nothing back — but nearness comes easily to you." },
+        { max: 100, preview: "closes in freely",
+          prompt: "You close physical distance freely and touch them readily. You will lean in, take their hand, put yourself well inside their personal space, and you do not agonise over whether you are allowed to. You are not oblivious to a rebuff, but you do not wait for an invitation." },
+      ],
+      // A ceiling on the tier above, by how well she knows them. Boldness and
+      // desire decide how far she goes; this decides how fast she may get
+      // there. Without it a bold, attracted character was nose-to-nose in the
+      // first three messages with someone she had just met — which is the
+      // specific complaint this whole block exists to answer. `tier` is an
+      // index into the list above; the last band must be 100.
+      familiarityCaps: [
+        { max: 15,  tier: 2 },
+        { max: 35,  tier: 3 },
+        { max: 100, tier: 4 },
+      ],
+      // Appended when the cap is what is holding her back, so the restraint
+      // reads as newness rather than as a change of personality.
+      capNote: " You have not known this person long, and however you feel about them, that is a real brake on how quickly you would put yourself in their space. Whatever you would eventually be comfortable doing, you are not there yet.",
+      // Appended always. The tiers describe a disposition; without this a
+      // model reads them as an instruction to perform the distance.
+      footer: " None of this is something you announce or explain — it is simply how near you are and what you do with your hands. This is what decides the distance between you: where anything else in these instructions suggests engineering a reason to be nearer them, it is this that says how near you actually get. And closing distance is an event, not a mannerism — at most one such move in a reply, only when something has changed to prompt it, and never as the default way to punctuate a line. Leaning in, stepping closer and dropping your voice conspiratorially are not stage directions to reach for when a sentence needs an action; if nothing has changed, stay where you are.",
     },
 
     // ── Prompt fragments ─────────────────────────────────────────────────────
