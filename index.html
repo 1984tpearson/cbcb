@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=18"></script>
-  <script src="image-prompt.js?v=18"></script>
+  <script src="site-config.js?v=19"></script>
+  <script src="image-prompt.js?v=19"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -2516,6 +2516,39 @@ function FaceField({ field, value, customValue, onChange, onCustomChange, unsetV
   );
 }
 
+// Every tab occupies the same box, scrolling inside it rather than growing the
+// modal. Tabs hold wildly different amounts of content — two dropdowns on
+// Eyewear against a dozen on Body — and a dialog that jumps size on every tab
+// change moves the buttons out from under your thumb.
+const tabPanel = { height: "min(58vh, 460px)", overflowY: "auto", overflowX: "hidden", paddingRight: 2 };
+
+// What the character was made with. Written once, at creation, and never
+// touched again — unlike baseSnapshot, which moves to the current settings
+// every time the base image is regenerated. Reset needs the fixed one: a
+// baseline that follows your edits is not a baseline.
+function withAppearanceOrigin(character) {
+  const a = character.appearance || {};
+  if (a.origin) return character;
+  return { ...character, appearance: { ...a, origin: snapshotOf({ ...a, face: normaliseFace(a.face) }, normaliseBody(a.body)) } };
+}
+
+// For characters made before origin existed there is nothing recorded, so fall
+// back to the state their current base image was generated from, and failing
+// that to whatever they are saved as. Neither is literally "as created", but
+// both are a real earlier state rather than an invented one.
+function characterOrigin(character) {
+  const a = character.appearance || {};
+  return a.origin || a.baseSnapshot || snapshotOf({ ...a, face: normaliseFace(a.face) }, normaliseBody(a.body));
+}
+
+// Which fields each tab owns, so a tab can be reset without touching the rest.
+const TAB_RESET_KEYS = {
+  Face: { faceGroups: ["makeup", "eyewear", "extras", "structure"] },
+  Hair: { faceGroups: ["hair"] },
+  Body: { appearance: ["ethnicity", "hairColour", "eyeColour", "skinTone", "height", "build", "chest", "waist", "hips"] },
+  Tattoos: { body: true },
+};
+
 const grid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 };
 
 // One tab's worth of appearance fields. `face`, `appearance` and `body` are held
@@ -2637,6 +2670,51 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
 
   const setFaceField = (groupKey, fieldKey, value) =>
     setFace(f => ({ ...f, [groupKey]: { ...f[groupKey], [fieldKey]: value } }));
+
+  // What this character was made with — the target every reset aims at.
+  const origin = characterOrigin(character);
+  const originFace = normaliseFace(origin.face);
+  const originBody = normaliseBody(origin.body);
+
+  // Reset one tab, or all of them. Per tab because the tabs are how you think
+  // about the character here: undoing an experiment with her hair should not
+  // also throw away the tattoos you were happy with.
+  const resetTab = (which) => {
+    const spec = TAB_RESET_KEYS[which];
+    if (!spec) return;
+    if (spec.faceGroups) setFace(f => {
+      const next = { ...f };
+      for (const g of spec.faceGroups) next[g] = { ...originFace[g] };
+      return next;
+    });
+    if (spec.appearance) setAppearance(a => {
+      const next = { ...a };
+      for (const k of spec.appearance) {
+        next[k] = origin[k] !== undefined ? origin[k] : DEFAULT_APPEARANCE[k];
+        next[k + "Custom"] = origin[k + "Custom"] || "";
+      }
+      return next;
+    });
+    if (spec.body) setBody({ ...originBody });
+  };
+  const resetAll = () => {
+    setFace(originFace);
+    setBody(originBody);
+    setAppearance({ ...DEFAULT_APPEARANCE, ...origin, face: undefined, body: undefined });
+  };
+
+  // Whether a tab currently differs from what the character was made with, so
+  // a reset button that would do nothing can say so rather than look broken.
+  const tabIsOriginal = (which) => {
+    const spec = TAB_RESET_KEYS[which];
+    if (!spec) return true;
+    if (spec.faceGroups) return spec.faceGroups.every(g => JSON.stringify(face[g]) === JSON.stringify(originFace[g]));
+    if (spec.appearance) return spec.appearance.every(k =>
+      String(appearance[k] ?? "") === String(origin[k] ?? DEFAULT_APPEARANCE[k] ?? "")
+      && String(appearance[k + "Custom"] || "") === String(origin[k + "Custom"] || ""));
+    if (spec.body) return JSON.stringify(body) === JSON.stringify(originBody);
+    return true;
+  };
   const patchAppearance = (patch) => setAppearance(a => ({ ...a, ...patch }));
   const patchBody = (patch) => setBody(b => ({ ...b, ...patch }));
 
@@ -2741,7 +2819,7 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
           <TabBar tabs={[...APPEARANCE_TABS, "Images"]} active={tab} onChange={setTab} />
 
           {tab !== "Images" ? (
-            <div>
+            <div style={tabPanel}>
               <AppearanceTabFields tab={tab} face={face} onFace={setFaceField}
                 appearance={appearance} onAppearance={patchAppearance}
                 body={body} onBody={patchBody} />
@@ -2750,9 +2828,16 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
                   ? `Regenerating will change: ${describeAppearanceChanges(changedKeys)}. Everything else is held as it is.`
                   : "Matches the current base image. Change something, then regenerate on the Images tab."}
               </p>
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                <button style={{ ...S.btnSecondary, opacity: tabIsOriginal(tab) ? 0.5 : 1 }}
+                  onClick={() => resetTab(tab)} disabled={tabIsOriginal(tab)}>
+                  Reset {tab}
+                </button>
+                <button style={S.btnSecondary} onClick={resetAll}>Reset all to character default</button>
+              </div>
             </div>
           ) : (
-            <div>
+            <div style={tabPanel}>
               <label style={{ ...S.label, marginTop: 0 }}>Base image</label>
               {baseUrl
                 ? <img src={baseUrl} alt="base" onClick={() => setLightbox(baseUrl)}
@@ -3017,7 +3102,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
           <TabBar tabs={FORM_TABS} active={tab} onChange={setTab} />
 
           {tab === "Character" && (
-            <div>
+            <div style={tabPanel}>
           {/* Vibe */}
           <label style={S.label}>Auto-Generate from Vibe</label>
           <div style={{ display: "flex", gap: 8 }}>
@@ -3116,14 +3201,16 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
           )}
 
           {APPEARANCE_TABS.includes(tab) && (
+            <div style={tabPanel}>
             <AppearanceTabFields tab={tab}
               face={formFace} onFace={setFormFace}
               appearance={{ ...DEFAULT_APPEARANCE, ...(form.appearance || {}) }} onAppearance={patchAppearance}
               body={formBody} onBody={patchBody} />
+            </div>
           )}
 
           {tab === "Images" && (
-            <div>
+            <div style={tabPanel}>
           {/* Image */}
           <label style={S.label}>Reference / Background Image</label>
           {generatedImages.length > 0 && (
@@ -3176,7 +3263,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onCancel}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { if (form.name.trim()) onSave(form); }} disabled={!form.name.trim()}>Save Character</button>
+          <button style={S.btnPrimary} onClick={() => { if (form.name.trim()) onSave(withAppearanceOrigin(form)); }} disabled={!form.name.trim()}>Save Character</button>
         </div>
       </div>
     </div>
