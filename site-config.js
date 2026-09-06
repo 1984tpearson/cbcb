@@ -768,6 +768,13 @@
             keys: ["body"] },
         ],
         baseSuffix: "photorealistic, natural skin texture, sharp focus, high detail",
+        // Turning an uploaded photograph into a base image. The photograph is
+        // the whole description here — no appearance settings are sent at all,
+        // because a slider that says "athletic" cannot improve on a picture of
+        // the actual person, and where the two disagree the words would pull
+        // the result away from the face that was uploaded.
+        uploadPreamble: "the exact same person as the reference photograph, photographed again as a plain full-body reference photo",
+        uploadHold: "keep their face, hair, skin tone, body shape, proportions, breast size and any tattoos or marks exactly as they are in the photograph, changing only the pose, framing, clothing and background",
         // Said explicitly rather than left unsaid: an unstated absence lets the
         // model invent tattoos, and a base image is the last place you want a
         // detail arriving by accident.

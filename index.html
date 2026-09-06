@@ -360,7 +360,7 @@ const {
   HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
   appearancePhrasePreview, buildAppearancePrompt, pickFaceVariation,
   buildFacePrompt, buildFaceEditPrompt, isFaceUnset, isFaceStructureUnset,
-  buildBodyBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
+  buildBodyBasePrompt, buildUploadBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
   isUserUndressed, povSelfBody, isIntimateScene,
   detectPhysicalContact, stripViewerLimbs,
   buildPovModifiers, joinPromptParts, assembleImagePrompt,
@@ -3200,6 +3200,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       // inputImage, which expects a URL it can fetch — so an uploaded
       // reference never actually anchored anything. Generated images already
       // go through this path (see generateImageWiro).
+      let hostedUrl = null;
       try {
         const uploadRes = await fetch(UPLOAD_IMAGE_URL, {
           method: "POST",
@@ -3208,24 +3209,63 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
         });
         if (uploadRes.ok) {
           const { url } = await uploadRes.json();
-          if (url) setForm(f => (f.referenceImage === dataUrl ? { ...f, referenceImage: url, backgroundImage: f.backgroundImage === dataUrl ? url : f.backgroundImage } : f));
+          if (url) {
+            hostedUrl = url;
+            setForm(f => (f.referenceImage === dataUrl ? { ...f, referenceImage: url, backgroundImage: f.backgroundImage === dataUrl ? url : f.backgroundImage } : f));
+          }
         }
       } catch {} // the data URL still renders locally; only Wiro needs the real one
 
-      // Match the sliders to the photo. Failure here is not fatal — the
-      // image is already set, the settings just stay as they were.
+      // A base image is a specific kind of photograph — nude, standing, mid-
+      // thigh up, grey studio — and an upload is almost never one. So the
+      // upload is not the base image; it is what the base image is generated
+      // from, the same way the appearance settings are on the other path.
+      //
+      // The settings themselves are ignored entirely. Reading them off the
+      // photo with the vision model and writing them into the sliders was how
+      // this used to work, and it was solving a problem that no longer exists:
+      // the sliders fed the base image, so the photo had to be translated into
+      // them. Now the photo is passed to the image model directly, which reads
+      // a face and a build better than a nine-field JSON summary of one ever
+      // did, and the translation is a lossy step in the middle.
+      //
+      // Failure leaves the raw upload as the reference image, which is what it
+      // used to be — worse framing, but a character that still works.
       try {
-        const { appearance, age } = await analyseAppearanceFromImage({ imageUrl: dataUrl, current: form.appearance });
-        setForm(f => ({ ...f, appearance }));
-        setSuggestedAge(age && !form.age ? age : null);
-        setAppearanceNote("Appearance settings matched to your image — check them below and adjust anything that looks off.");
-        setShowAppearance(true);
+        if (!hostedUrl) throw new Error("the image could not be uploaded for the generator to read");
+        setImgStage("base");
+        const base = await generateImageWiro({
+          prompt: buildUploadBasePrompt({ extra: imgPrompt.trim() }),
+          model: settings.imageModel,
+          initImage: hostedUrl,
+          seed: Math.floor(Math.random() * 2147483647),
+        });
+        setGeneratedImages(prev => [{ base, avatar: null }, ...prev]);
+        setForm(f => ({
+          ...f,
+          referenceImage: base,
+          avatarImage: null,
+          backgroundImage: null,
+          // The base image came from the photograph rather than from these
+          // settings, so the appearance editor would otherwise open reading
+          // every field as an unapplied change waiting to be regenerated.
+          appearance: { ...f.appearance, baseSnapshot: snapshotOf(f.appearance || {}, normaliseBody(f.appearance && f.appearance.body)) },
+        }));
+        setAppearanceNote("Base image generated from your photo. The appearance settings below are not used for it — the photo describes her — but they still feed what the chat model reads about her.");
       } catch (err) {
-        // Surface the proxy's own words rather than a generic failure: the
-        // difference between a rejected model name and a rejected message
-        // shape is the whole diagnosis, and it is only in this message.
-        console.error("Appearance read failed:", err);
-        setAppearanceNote(`Couldn't read appearance from that image (${err.message}) — set the appearance settings manually so they don't fight the photo.`);
+        console.error("Base image from upload failed:", err);
+        setAppearanceNote(`Couldn't turn that photo into a base image (${err.message}) — it is being used as-is, so chat images will copy its framing and clothing.`);
+      }
+      setImgStage("");
+
+      // The age is still worth reading off the photo: it is not an appearance
+      // setting, nothing else can estimate it, and it is offered rather than
+      // applied.
+      try {
+        const { age } = await analyseAppearanceFromImage({ imageUrl: dataUrl, current: form.appearance });
+        setSuggestedAge(age && !form.age ? age : null);
+      } catch (err) {
+        console.error("Age read failed:", err);
       }
       setAnalysing(false);
     };
@@ -3501,7 +3541,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
             <img src={characterAvatar(form)} alt="ref" style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 8, marginBottom: 8, background: "var(--bg3)" }} />
           )}
           <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <button style={S.btnSecondary} onClick={() => fileRef.current.click()} disabled={analysing}>{analysing ? "Reading image…" : "Upload Image"}</button>
+            <button style={S.btnSecondary} onClick={() => fileRef.current.click()} disabled={analysing || imgLoading || saving}>{analysing ? (imgStage === "base" ? "Base image…" : "Reading image…") : "Upload Image"}</button>
             <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileUpload} />
           </div>
           {appearanceNote && (
@@ -3517,7 +3557,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input style={{ ...S.input, flex: 1, marginBottom: 0 }} placeholder="Optional — leave blank to use appearance settings"
               value={imgPrompt} onChange={e => setImgPrompt(e.target.value)} />
-            <button style={S.btnPrimary} onClick={handleGenerateImage} disabled={imgLoading}>{imgLoading && imgStage === "base" ? "Base image…" : form.referenceImage ? "↺ Regen" : "Gen Image"}</button>
+            <button style={S.btnPrimary} onClick={handleGenerateImage} disabled={imgLoading || analysing}>{imgLoading && imgStage === "base" ? "Base image…" : form.referenceImage ? "↺ Regen" : "Gen Image"}</button>
           </div>
 
           <div style={S.divider} />
@@ -3552,7 +3592,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
             ))}
           </div>
           <button style={{ ...S.btnSecondary, marginTop: 10, width: "100%", textAlign: "center" }}
-            onClick={handleGenerateAvatar} disabled={imgLoading || saving || !form.referenceImage}>
+            onClick={handleGenerateAvatar} disabled={imgLoading || analysing || saving || !form.referenceImage}>
             {imgLoading && imgStage === "avatar" ? "Avatar…" : form.avatarImage ? "↺ Regenerate avatar" : "Generate avatar"}
           </button>
 
@@ -3562,7 +3602,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onCancel}>Cancel</button>
-          <button style={S.btnPrimary} onClick={handleSaveCharacter} disabled={!form.name.trim() || imgLoading || saving}>{saving ? "Avatar…" : "Save Character"}</button>
+          <button style={S.btnPrimary} onClick={handleSaveCharacter} disabled={!form.name.trim() || imgLoading || analysing || saving}>{saving ? "Avatar…" : "Save Character"}</button>
         </div>
       </div>
     </div>

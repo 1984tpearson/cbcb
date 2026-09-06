@@ -497,6 +497,23 @@ window.ImagePrompt = {
         .filter(Boolean).join(", ");
     }
 
+    // An uploaded photograph turned into a base image: same framing, same
+    // nudity, same suffix as every other base image, but described by the
+    // picture rather than by the appearance settings.
+    //
+    // Nothing from buildAppearancePrompt reaches this. The settings were
+    // written to describe a character nobody had seen yet; once there is a
+    // photograph of her they are a second, worse account of the same person,
+    // and the image model splits the difference between them. The photograph
+    // wins outright — including the tattoos, which is why the usual "clean
+    // unmarked skin" clause is left off here.
+    function buildUploadBasePrompt({ extra } = {}) {
+      const cfg = (CFG.appearance && CFG.appearance.body) || null;
+      if (!cfg) return "";
+      return [cfg.uploadPreamble, cfg.uploadHold, cfg.baseFraming, cfg.baseNudeClause, extra, cfg.baseSuffix]
+        .filter(Boolean).join(", ");
+    }
+
     // avatar is { lighting, lightingCustom, outfit } — how this photograph is
     // taken rather than what she looks like, which is why it lives apart from
     // appearance and never reaches a base image.
@@ -741,7 +758,7 @@ window.ImagePrompt = {
       HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
       appearancePhrasePreview, buildAppearancePrompt, pickFaceVariation,
       buildFacePrompt, buildFaceEditPrompt, faceFieldPhrase, isFaceUnset, isFaceStructureUnset,
-      buildBodyBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
+      buildBodyBasePrompt, buildUploadBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
       isUserUndressed, povSelfBody, isIntimateScene,
       beatShowsContact, detectPhysicalContact, stripViewerLimbs,
       buildPovModifiers, joinPromptParts, subjectFor, assembleImagePrompt,
