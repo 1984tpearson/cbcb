@@ -4650,6 +4650,9 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     const userMsg = { role: "user", content: text };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages); setInput(""); setLoading(true);
+    // Talking to them is what counts as using them — this is what orders the
+    // character list. Opening the chat to read it back deliberately doesn't.
+    commitCharacter({ lastUsedAt: Date.now() });
     try {
       const stateBefore = sceneSnapshot(characterRef.current);
       const reply = await sendChat({ messages: newMessages.filter(m => m.role !== "image"), character, model: settings.selectedModel, settings });
@@ -5301,21 +5304,13 @@ function App() {
     dataApi.deleteCharacter(id).catch(e => setLoadError(e.message));
   };
 
-  // The list is ordered by last use — most recent first. Nothing is recorded
-  // for characters made before lastUsedAt existed, so fall back to the id,
+  // The list is ordered by last use — most recent first, where "used" means a
+  // message was sent to them. Nothing is recorded for characters made before
+  // lastUsedAt existed, so fall back to the id,
   // which is the Date.now() of their creation. get_characters returns rows in
   // whatever order Postgres hands them back, so without this the list shuffles.
   const lastUsedOf = (c) => c.lastUsedAt || Number(c.id) || 0;
   const orderedCharacters = [...characters].sort((a, b) => lastUsedOf(b) - lastUsedOf(a));
-
-  const openCharacter = (char) => {
-    const stamped = { ...char, lastUsedAt: Date.now() };
-    const next = charactersRef.current.map(c => c.id === stamped.id ? stamped : c);
-    charactersRef.current = next;
-    setCharacters(next);
-    persistCharacter(stamped, next);
-    setActiveChar(stamped);
-  };
 
   const updateCharacter = (char) => {
     const next = charactersRef.current.map(c => c.id === char.id ? char : c);
@@ -5370,7 +5365,7 @@ function App() {
         ) : (
           <div style={discreetMode ? { display: "flex", flexDirection: "column", borderTop: "1px solid #e0e0e0" } : S.characterGrid}>
             {orderedCharacters.map(c => (
-              <CharacterCard key={c.id} character={c} onSelect={openCharacter}
+              <CharacterCard key={c.id} character={c} onSelect={setActiveChar}
                 onEdit={c => { setEditingChar(c); setShowCharForm(true); }} onEditAppearance={setAppearanceChar} onDelete={deleteCharacter}
                 discreetMode={discreetMode} />
             ))}
