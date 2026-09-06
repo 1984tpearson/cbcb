@@ -655,10 +655,18 @@
         // which says more about the length of the list than about anybody.
         // Unlisted options weigh 1.
         optionWeights: {
-          "hair.length": { "Shaved": 0.1, "Buzz cut": 0.15, "Pixie": 0.5, "Very long": 0.5 },
+          "hair.length": { "Pixie": 0.5, "Very long": 0.5 },
           "makeup.style": { "Goth": 0.4, "Editorial": 0.3, "Bold": 0.6 },
           "makeup.lips": { "Black": 0.2 },
           "extras.piercing": { "Multiple ear": 0.6, "Lip": 0.5, "Septum": 0.5 },
+        },
+        // Options the randomiser never offers, however the weights fall. A
+        // shaved or buzzed head is a strong statement about a person rather
+        // than a detail of their appearance, and a generator that hands it out
+        // by chance is making that statement on the user's behalf. Still there
+        // to be chosen deliberately.
+        neverRandom: {
+          "hair.length": ["Shaved", "Buzz cut"],
         },
         // A field that only makes sense once another is set. Frames with no
         // glasses is not a look.

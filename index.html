@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=20"></script>
-  <script src="image-prompt.js?v=20"></script>
+  <script src="site-config.js?v=21"></script>
+  <script src="image-prompt.js?v=21"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -1579,6 +1579,7 @@ function randomiseFaceAndBody(currentFace, currentBody) {
   const skip = new Set(cfg.skipGroups || []);
   const requires = cfg.requires || {};
   const skipWhen = cfg.skipWhen || {};
+  const neverRandom = cfg.neverRandom || {};
   const noneChance = key => (cfg.noneChance && cfg.noneChance[key] !== undefined)
     ? cfg.noneChance[key] : (cfg.defaultNoneChance ?? 0.45);
   // Weighted draw. An unlisted option weighs 1, so a field with no weights
@@ -1616,8 +1617,9 @@ function randomiseFaceAndBody(currentFace, currentBody) {
       if (Math.random() < noneChance(key)) continue;
       // Never draw Custom: it is a prompt for text nobody has typed, so it
       // would read as an empty phrase rather than a choice.
+      const never = neverRandom[key] || [];
       const options = (field.options || [])
-        .filter(o => o.value !== sentinel && o.value !== FACE_CFG.customValue && o.phrase);
+        .filter(o => o.value !== sentinel && o.value !== FACE_CFG.customValue && o.phrase && !never.includes(o.value));
       if (!options.length) continue;
       out[field.key] = pickWeighted(options, key).value;
       filled.add(key);
