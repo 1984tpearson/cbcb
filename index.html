@@ -358,7 +358,7 @@ const {
   ACTION_TEXT_RE, extractActionText,
   EMPTY_STAGING, STAGING_KEYS, hasStaging, buildStagingImageDesc,
   HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
-  appearancePhrasePreview, buildAppearancePrompt, pickFaceVariation,
+  appearancePhrasePreview, buildAppearancePrompt, appearanceWords, pickFaceVariation,
   buildFacePrompt, buildFaceEditPrompt, isFaceUnset, isFaceStructureUnset,
   buildBodyBasePrompt, buildUploadBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
   isUserUndressed, povSelfBody, isIntimateScene,
@@ -474,7 +474,7 @@ const storage = {
 // mapping is linear, so each slider step is half a centimetre.
 function buildAppearanceSystemNote(appearance) {
   if (!appearance) return "";
-  const desc = buildAppearancePrompt(appearance);
+  const desc = appearanceWords(appearance);
   if (!desc) return "";
   return fillTemplate(CFG.prompts.appearanceNote, { description: desc });
 }
@@ -1869,6 +1869,26 @@ function salvagePartialAppearance(raw) {
 // Also returns an estimated age, which the caller offers as a suggestion
 // rather than applying — age from a photo is a guess, and the user's own
 // number should win.
+// A written description of the person in an image, for the language models to
+// read. Kept separate from analyseAppearanceFromImage because they answer to
+// different readers: that one fills form fields, this one writes prose, and
+// prose is what a chat model does something with.
+async function describeAppearanceFromImage({ imageUrl }) {
+  const text = (await aiComplete({
+    model: VISION_MODEL,
+    params: { max_tokens: 300 },
+    messages: [{
+      role: "user",
+      content: [
+        { type: "text", text: CFG.prompts.appearanceDescriptionInstruction },
+        { type: "image_url", image_url: { url: imageUrl } },
+      ],
+    }],
+  })).trim();
+  if (!text) throw new Error("the model returned nothing");
+  return text;
+}
+
 async function analyseAppearanceFromImage({ imageUrl, current }) {
   const list = arr => arr.filter(o => o !== "Custom").map(o => `"${o}"`).join(", ");
   const instruction = `Look at this photograph of a person and describe their physical appearance.
@@ -2570,7 +2590,10 @@ function ColourField({ field, appearance, onChange }) {
 // of hairstyle or jawline would not register as a change at all. Only
 // baseSnapshot itself is dropped, so snapshots do not nest.
 function snapshotOf(appearance, body) {
-  const { baseSnapshot, ...rest } = appearance || {};
+  // description is dropped alongside baseSnapshot: it is prose about the image
+  // that was generated, not a setting the next one is generated from, so
+  // editing the wording must not report the base image as out of date.
+  const { baseSnapshot, description, ...rest } = appearance || {};
   return { ...rest, face: normaliseFace(rest.face), body: body || null };
 }
 
@@ -2800,13 +2823,24 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
   const [baseUrl, setBaseUrl] = useState(character.referenceImage || null);
   const [avatarUrl, setAvatarUrl] = useState(character.avatarImage || null);
   const [variants, setVariants] = useState(() => {
+    const saved = (character.appearance && character.appearance.description) || "";
     const existing = character.faceVariants || [];
-    if (existing.length || !character.referenceImage) return existing;
+    // Variants saved before descriptions existed have none, so the current
+    // base image adopts whatever description the character is carrying —
+    // otherwise opening the editor would show it blank and saving would wipe
+    // it. Only the image the description actually belongs to gets it.
+    if (existing.length) {
+      return saved
+        ? existing.map(v => (v.url === character.referenceImage && !v.description ? { ...v, description: saved } : v))
+        : existing;
+    }
+    if (!character.referenceImage) return existing;
     // Seed from the current base image so what you started with is always one
     // click away, even on a character that predates this editor.
-    return [{ id: "original", url: character.referenceImage, label: "Original", date: Date.now() }];
+    return [{ id: "original", url: character.referenceImage, label: "Original", date: Date.now(), description: saved }];
   });
   const [extraPrompt, setExtraPrompt] = useState("");
+  const [showDesc, setShowDesc] = useState(false);
   const [avatar, setAvatar] = useState(() => normaliseAvatar(character.appearance && character.appearance.avatar));
   const patchAvatar = (patch) => setAvatar(a => ({ ...a, ...patch }));
   const [busy, setBusy] = useState("");
@@ -2898,7 +2932,11 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
         seed: Math.floor(Math.random() * 2147483647),
       });
       const label = changedKeys.length ? describeAppearanceChanges(changedKeys) : "Re-shot";
-      setVariants(v => [{ id: `${Date.now()}`, url, label, date: Date.now(), settings: snapshotOf(full(), body) }, ...v]);
+      // The new image inherits the old one's description rather than starting
+      // blank: a regeneration holds everything it was not told to change, so
+      // the words are right more often than not, and a character is never left
+      // with none. Where the change was the point, Read from image rewrites it.
+      setVariants(v => [{ id: `${Date.now()}`, url, label, date: Date.now(), description, settings: snapshotOf(full(), body) }, ...v]);
       setBaseUrl(url);
       setBaseline(snapshotOf(full(), body));
     } catch (e) { setError(e.message); }
@@ -2932,6 +2970,21 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
 
   // Selecting a variant restores the settings that produced it, so the controls
   // never describe something other than the image on screen.
+  // The written description belongs to the base image, not to the character:
+  // each regeneration is a different photograph of her, and the words that
+  // describe one need not describe another. Selecting a base image selects its
+  // description, and the selected one is what gets saved for the chat model.
+  const selectedVariant = variants.find(v => v.url === baseUrl) || null;
+  const description = selectedVariant ? (selectedVariant.description || "") : "";
+  const setDescription = (text) => setVariants(vs => vs.map(v => (v.url === baseUrl ? { ...v, description: text } : v)));
+  const readDescription = async () => {
+    if (!baseUrl) return;
+    setBusy("description"); setError("");
+    try { setDescription(await describeAppearanceFromImage({ imageUrl: baseUrl })); }
+    catch (e) { setError(`Couldn't read a description from that image (${e.message}).`); }
+    setBusy("");
+  };
+
   const pickVariant = (v) => {
     setBaseUrl(v.url);
     if (v.settings) {
@@ -2962,7 +3015,7 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
       referenceImage: baseUrl,
       avatarImage: nextAvatar,
       backgroundImage: bgFollowed ? nextAvatar : character.backgroundImage,
-      appearance: { ...appearance, face, body, avatar, baseSnapshot: baseline },
+      appearance: { ...appearance, face, body, avatar, baseSnapshot: baseline, description: description || null },
       faceVariants: variants.slice(0, 12),
     });
   };
@@ -3016,6 +3069,39 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
               <button style={{ ...S.btnPrimary, marginTop: 8 }} onClick={generateBase} disabled={!!busy}>
                 {busy === "base" ? "Generating…" : "Generate base image"}
               </button>
+
+              {/* The written description of THIS base image. Folded away by
+                  default because it is not something you set — it is read off
+                  the picture, and most of the time you never need to look at
+                  it. What it is for is on the label, since a description that
+                  never reaches an image is otherwise baffling. */}
+              <button style={{ ...S.btnSecondary, marginTop: 8, width: "100%", textAlign: "center" }}
+                onClick={() => setShowDesc(v => !v)} disabled={!baseUrl}>
+                {showDesc ? "▲ Hide written description" : description ? "▼ Written description" : "▼ Written description — none yet"}
+              </button>
+              {showDesc && (
+                <div style={{ marginTop: 8 }}>
+                  <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 6px" }}>
+                    How this image is described to the chat model in words. The image model never sees it — it sees the
+                    picture. Where this is filled in it replaces the appearance settings as her written description,
+                    which is what makes an uploaded photo describable at all.
+                  </p>
+                  <textarea style={{ ...S.input, height: 90, resize: "vertical" }}
+                    placeholder="e.g. Tall and heavy-set, with dyed copper hair growing out dark at the roots…"
+                    value={description} onChange={e => setDescription(e.target.value)} />
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button style={S.btnSecondary} onClick={readDescription} disabled={!!busy || !baseUrl}>
+                      {busy === "description" ? "Reading…" : description ? "↺ Re-read from image" : "Read from image"}
+                    </button>
+                    <button style={S.btnSecondary} onClick={() => setDescription(buildAppearancePrompt(full()))} disabled={!!busy}>
+                      Write from settings
+                    </button>
+                    {description && (
+                      <button style={S.btnSecondary} onClick={() => setDescription("")} disabled={!!busy}>Clear</button>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <label style={S.label}>Previous versions</label>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -3231,6 +3317,10 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       //
       // Failure leaves the raw upload as the reference image, which is what it
       // used to be — worse framing, but a character that still works.
+      // Which image the written description should be read from: the base
+      // image once there is one, and the photograph itself if the conversion
+      // failed and the photograph is what the character is stuck with.
+      let describedFrom = hostedUrl || dataUrl;
       try {
         if (!hostedUrl) throw new Error("the image could not be uploaded for the generator to read");
         setImgStage("base");
@@ -3241,6 +3331,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
           seed: Math.floor(Math.random() * 2147483647),
         });
         setGeneratedImages(prev => [{ base, avatar: null }, ...prev]);
+        describedFrom = base;
         setForm(f => ({
           ...f,
           referenceImage: base,
@@ -3266,6 +3357,18 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
         setSuggestedAge(age && !form.age ? age : null);
       } catch (err) {
         console.error("Age read failed:", err);
+      }
+
+      // And a written description, because on this path the appearance
+      // settings describe nobody: they were never filled in for this
+      // character, and nothing is going to fill them in now. Without this the
+      // chat model would be told she looks like the defaults. Generated
+      // characters need none — their settings are what they were built from.
+      try {
+        const written = await describeAppearanceFromImage({ imageUrl: describedFrom });
+        setForm(f => ({ ...f, appearance: { ...f.appearance, description: written } }));
+      } catch (err) {
+        console.error("Description read failed:", err);
       }
       setAnalysing(false);
     };
@@ -3925,7 +4028,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   // and no idea what anyone was wearing.
   const inferScenarioSetup = async (scenario, currentChar) => {
     try {
-      const appearanceDesc = buildAppearancePrompt(currentChar.appearance);
+      const appearanceDesc = appearanceWords(currentChar.appearance);
       // Intentions are seeded here too, but only when the character is allowed
       // to form her own — the toggle is "let {name} form intentions", and this
       // is exactly that, just at the start rather than six turns in.

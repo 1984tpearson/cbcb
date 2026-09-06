@@ -563,6 +563,18 @@ window.ImagePrompt = {
     // image paths do not: nothing in a frame cropped at mid-thigh gives 195 cm
     // a referent, so the figure was spending prompt attention to say nothing,
     // in a prompt whose body description was already being outweighed.
+    // What the LANGUAGE models are told she looks like. A base image can carry
+    // its own written description — read off the picture by the vision model —
+    // and where one exists it wins: it describes the character that actually
+    // exists, while the appearance settings describe the one that was asked
+    // for, and on an uploaded photograph those settings never described her at
+    // all. No description, and the settings are still the best account there
+    // is. The image model never reads either of these; it reads the picture.
+    function appearanceWords(appearance) {
+      const written = String((appearance && appearance.description) || "").trim();
+      return written || buildAppearancePrompt(appearance);
+    }
+
     function buildAppearancePrompt(appearance, { measurements = true } = {}) {
       if (!appearance) return "";
       const a = appearance;
@@ -642,7 +654,7 @@ window.ImagePrompt = {
     // the same time, and says which of the viewer's own parts are in the shot.
     async function extractScene({ messages, character, model, aiComplete }) {
       const recent = messages.slice(-10).filter(m => m.role !== "image").map(m => `${m.role === "user" ? "User" : character.name}: ${m.content}`).join("\n");
-      const appearanceDesc = buildAppearancePrompt(character.appearance);
+      const appearanceDesc = appearanceWords(character.appearance);
       const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
       const ageDesc = character.age ? `${character.age} year old` : "";
       // charDesc may be passed in already built — the lab holds it as editable
@@ -756,7 +768,7 @@ window.ImagePrompt = {
       ACTION_TEXT_RE, extractActionText,
       EMPTY_STAGING, STAGING_KEYS, hasStaging, buildStagingImageDesc,
       HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
-      appearancePhrasePreview, buildAppearancePrompt, pickFaceVariation,
+      appearancePhrasePreview, buildAppearancePrompt, appearanceWords, pickFaceVariation,
       buildFacePrompt, buildFaceEditPrompt, faceFieldPhrase, isFaceUnset, isFaceStructureUnset,
       buildBodyBasePrompt, buildUploadBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
       isUserUndressed, povSelfBody, isIntimateScene,
