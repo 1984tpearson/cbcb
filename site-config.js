@@ -1211,7 +1211,14 @@
         // extra detail was not visible in the finished images, so the money was
         // going nowhere. Lite and v4.5 stay at 2k because 1k is not a valid
         // resolution on either.
-        "seedream-v5-pro-uncensored": { resolution: "1k", aspectRatio: "9:16", outputFormat: "png" },
+        // jpeg, not png. Every image is paid for three times over in wall-clock
+        // time — Wiro's own postprocess, the download into upload-image, and
+        // the upload into Storage — and then again on every page load that
+        // shows it. A 1k png is several times the bytes of the same image as
+        // jpeg for no visible difference in a photograph. Nothing downstream
+        // assumes a format: the status path returns whatever URL Wiro gives,
+        // and upload-image reads the mime off the response.
+        "seedream-v5-pro-uncensored": { resolution: "1k", aspectRatio: "9:16", outputFormat: "jpeg" },
       },
       vision: "mistralai/mistral-small-3.1-24b-instruct",
       reactivity: "meta-llama/llama-3.1-8b-instruct",
