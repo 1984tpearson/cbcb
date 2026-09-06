@@ -2526,12 +2526,24 @@ function ShapeField({ field, appearance, onChange }) {
 
 // Hair, eyes, skin and ethnicity already stored a "<key>Custom" companion, so
 // these only need rendering — the shape is the one the app already used.
+// Each colour field says which tab it belongs on. They all used to sit
+// together on Body, which put the hair colour a tab away from the hairstyle
+// and the eye colour a tab away from the eyes — the settings that describe one
+// feature were split across two screens, and you had to know that to find
+// them. Ethnicity is not appearance-only: it is who the character is, so in the
+// generator it belongs on Character. The editor has no Character tab, so there
+// it sits on Face, next to the structure fields it shares an identity hold
+// with.
 const COLOUR_FIELDS = [
-  { key: "ethnicity", label: "Ethnicity", options: ETHNICITIES, blank: "Not specified" },
-  { key: "hairColour", label: "Hair colour", options: HAIR_COLOURS },
-  { key: "eyeColour", label: "Eye colour", options: EYE_COLOURS },
-  { key: "skinTone", label: "Skin tone", options: SKIN_TONES },
+  { key: "ethnicity", label: "Ethnicity", options: ETHNICITIES, blank: "Not specified", tab: "Face", characterTab: true },
+  { key: "hairColour", label: "Hair colour", options: HAIR_COLOURS, tab: "Hair" },
+  { key: "eyeColour", label: "Eye colour", options: EYE_COLOURS, tab: "Face" },
+  // Skin tone stays on Body: it is the whole body's skin, not the face's.
+  { key: "skinTone", label: "Skin tone", options: SKIN_TONES, tab: "Body" },
 ];
+const colourFieldsFor = (tab, hasCharacterTab) => COLOUR_FIELDS.filter(f =>
+  (hasCharacterTab && f.characterTab) ? false : f.tab === tab);
+const ETHNICITY_FIELD = COLOUR_FIELDS.find(f => f.key === "ethnicity");
 
 function ColourField({ field, appearance, onChange }) {
   const customKey = field.key + "Custom";
@@ -2664,9 +2676,9 @@ function characterOrigin(character) {
 
 // Which fields each tab owns, so a tab can be reset without touching the rest.
 const TAB_RESET_KEYS = {
-  Face: { faceGroups: ["makeup", "eyewear", "extras", "structure"] },
-  Hair: { faceGroups: ["hair"] },
-  Body: { appearance: ["ethnicity", "hairColour", "eyeColour", "skinTone", "height", "build", "chest", "waist", "hips"] },
+  Face: { faceGroups: ["makeup", "eyewear", "extras", "structure"], appearance: ["ethnicity", "eyeColour"] },
+  Hair: { faceGroups: ["hair"], appearance: ["hairColour"] },
+  Body: { appearance: ["skinTone", "height", "build", "chest", "waist", "hips"] },
   Tattoos: { body: true },
 };
 
@@ -2675,15 +2687,19 @@ const grid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(15
 // One tab's worth of appearance fields. `face`, `appearance` and `body` are held
 // by the caller because the two screens store them differently — the generator
 // keeps them inside its form, the editor as its own state.
-function AppearanceTabFields({ tab, face, onFace, appearance, onAppearance, body, onBody }) {
+// `hasCharacterTab` is the generator saying it has somewhere better to put the
+// ethnicity. It is one flag rather than two copies of the field list, so the
+// two screens still cannot drift apart on anything else.
+function AppearanceTabFields({ tab, face, onFace, appearance, onAppearance, body, onBody, hasCharacterTab }) {
   const groups = (FACE_CFG.groups || []).filter(g => (g.tab || "Face") === tab);
   const showStructure = tab === (FACE_CFG.structureTab || "Face");
+  const colourFields = colourFieldsFor(tab, hasCharacterTab);
 
   if (tab === "Body") {
     return (
       <div>
         <div style={grid}>
-          {COLOUR_FIELDS.map(field => (
+          {colourFields.map(field => (
             <ColourField key={field.key} field={field} appearance={appearance} onChange={onAppearance} />
           ))}
           {BODY_SHAPE_FIELDS.map(field => (
@@ -2723,6 +2739,13 @@ function AppearanceTabFields({ tab, face, onFace, appearance, onAppearance, body
 
   return (
     <div>
+      {colourFields.length > 0 && (
+        <div style={grid}>
+          {colourFields.map(field => (
+            <ColourField key={field.key} field={field} appearance={appearance} onChange={onAppearance} />
+          ))}
+        </div>
+      )}
       {groups.map(group => (
         <div key={group.key}>
           <label style={S.label}>{group.label}</label>
@@ -2830,11 +2853,15 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
   const tabIsOriginal = (which) => {
     const spec = TAB_RESET_KEYS[which];
     if (!spec) return true;
-    if (spec.faceGroups) return spec.faceGroups.every(g => JSON.stringify(face[g]) === JSON.stringify(originFace[g]));
-    if (spec.appearance) return spec.appearance.every(k =>
+    // Every part of the spec, not the first one that exists: a tab can own both
+    // face groups and appearance fields now that the hair colour sits with the
+    // hairstyle, and returning on the first would call a tab unchanged while
+    // half of it had moved.
+    if (spec.faceGroups && !spec.faceGroups.every(g => JSON.stringify(face[g]) === JSON.stringify(originFace[g]))) return false;
+    if (spec.appearance && !spec.appearance.every(k =>
       String(appearance[k] ?? "") === String(origin[k] ?? DEFAULT_APPEARANCE[k] ?? "")
-      && String(appearance[k + "Custom"] || "") === String(origin[k + "Custom"] || ""));
-    if (spec.body) return JSON.stringify(body) === JSON.stringify(originBody);
+      && String(appearance[k + "Custom"] || "") === String(origin[k + "Custom"] || ""))) return false;
+    if (spec.body && JSON.stringify(body) !== JSON.stringify(originBody)) return false;
     return true;
   };
   const patchAppearance = (patch) => setAppearance(a => ({ ...a, ...patch }));
@@ -3305,6 +3332,13 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
             <input style={{ ...S.input, marginTop: 8 }} placeholder="Describe gender identity..." value={form.customGender || ""} onChange={e => setForm(f => ({ ...f, customGender: e.target.value }))} />
           )}
 
+          {/* Ethnicity sits with name, gender and age rather than on an
+              appearance tab: it is read as who the character is, and it is the
+              one appearance field that also reaches the written prompts. */}
+          <ColourField field={ETHNICITY_FIELD}
+            appearance={{ ...DEFAULT_APPEARANCE, ...(form.appearance || {}) }}
+            onChange={patchAppearance} />
+
           {/* Age & Marital Status */}
           <div style={{ display: "flex", gap: 12 }}>
             <div style={{ flex: 1 }}>
@@ -3378,7 +3412,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
 
           {APPEARANCE_TABS.includes(tab) && (
             <div style={tabPanel}>
-            <AppearanceTabFields tab={tab}
+            <AppearanceTabFields tab={tab} hasCharacterTab
               face={formFace} onFace={setFormFace}
               appearance={{ ...DEFAULT_APPEARANCE, ...(form.appearance || {}) }} onAppearance={patchAppearance}
               body={formBody} onBody={patchBody} />
