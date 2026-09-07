@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Wardrobe</title>
-<script src="site-config.js?v=36"></script>
+<script src="site-config.js?v=37"></script>
 <script src="image-prompt.js?v=24"></script>
 <style>
   :root {
@@ -1177,7 +1177,8 @@
   // .info.models, and a model may describe its endpoints as `function`,
   // `functions` or `endpoints`. Anything that does not yield an id and a
   // text2image endpoint we support is skipped rather than guessed at.
-  const SUPPORTED_ENDPOINTS = ["text2image_flux", "text2image_sdxl", "text2image"];
+  // Cheapest-capable order, which is also the order the picker groups by.
+  const SUPPORTED_ENDPOINTS = ["text2image_sdxl_lightning", "text2image_flux", "text2image_sdxl", "text2image"];
 
   function normaliseDezgoList(info) {
     const root = info && info.info !== undefined ? info.info : info;
@@ -1222,8 +1223,18 @@
       // Anything trained to draw rather than photograph is separated out, not
       // dropped: it is still a legitimate choice, just a bad default for a
       // reference a photographic scene has to match.
-      const haystack = (name + " " + id + " " + family + " " + cats).toLowerCase();
-      const stylised = wardrobeCfg().stylisedHints.some(h => haystack.includes(h));
+      //
+      // Dezgo labels every model itself — general, realistic, anime, artistic,
+      // drawing, tshirt — so that label decides it. The keyword list is only
+      // the fallback for a model that carries no category, and it was wrong
+      // where the two disagreed: it read "illustrious" in a name Dezgo calls
+      // realistic, and "dream" in DreamShaper, which is a photographic model.
+      const cfgS = wardrobeCfg();
+      const declared = [].concat(m.categories || m.category || [])
+        .filter(c => typeof c === "string").map(c => c.trim().toLowerCase());
+      const stylised = declared.length
+        ? declared.some(c => cfgS.stylisedCategories.includes(c))
+        : cfgS.stylisedHints.some(h => (name + " " + id + " " + family + " " + cats).toLowerCase().includes(h));
 
       out.push({
         id, endpoint, params, stylised, family,

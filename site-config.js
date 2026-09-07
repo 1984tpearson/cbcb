@@ -1309,12 +1309,15 @@
       // garment reference is copied by everything downstream, so it wants the
       // detail. SD1 and SD2 genuinely degrade above native and are left alone.
       preferredSide: 1024,
-      upscalableEndpoints: ["text2image_sdxl", "text2image_flux"],
+      upscalableEndpoints: ["text2image_sdxl", "text2image_flux", "text2image_sdxl_lightning"],
 
       dezgoPricing: {
         text2image: 0.0019,
         text2image_sdxl: 0.0075,
         text2image_flux: 0.0075,
+        // Lightning reaches 1024px in a few steps, and Dezgo prices steps
+        // linearly, so it lands between the 512px models and full SDXL.
+        text2image_sdxl_lightning: 0.0038,
       },
 
       // A flat lay wants a plain, literal photograph of a garment. Models
@@ -1327,6 +1330,11 @@
       // anything artistic and also nothing to do with style, and "dream"
       // catches DreamShaper, which is a general photographic model. Both were
       // in this list and both were wrong.
+      // Dezgo's own category vocabulary, from its catalogue: general, realistic,
+      // anime, artistic, drawing, tshirt. These are the ones that draw rather
+      // than photograph. Authoritative, so it is checked before the keywords.
+      stylisedCategories: ["anime", "artistic", "drawing", "tshirt"],
+
       stylisedHints: ["anime", "pony", "cartoon", "manga", "hentai", "illustration", "illustrious",
                       "artistic", "painting", "toon", "comic", "pixel", "furry", "waifu", "sketch"],
 

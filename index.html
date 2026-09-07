@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=36"></script>
+  <script src="site-config.js?v=37"></script>
   <script src="image-prompt.js?v=24"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -1219,10 +1219,14 @@ const POLL_SCHEDULE_MS = [900, 900, 1200, 1500, 2000, 2000, 2000, 2000, 2500, 25
 // harder cannot make the image arrive sooner, and it is what caused this.
 const THROTTLE_BACKOFF_MS = [4000, 8000, 12000, 20000];
 const MAX_POLLS = 160;
+const MAX_TRANSIENT_POLL_FAILURES = 8;
 
 async function pollWiroTask({ taskId, outputFormat, modelId, startedAt, maxPolls = MAX_POLLS }) {
   let throttled = 0;
   let nextWaitMs = null;
+  // Enough to ride out a runtime blip lasting a minute or so, not so many that
+  // a genuinely dead proxy is waited on forever.
+  let transientFailures = 0;
   for (let attempt = 0; attempt < maxPolls; attempt++) {
     await sleepUnlessVisible(nextWaitMs ?? POLL_SCHEDULE_MS[Math.min(attempt, POLL_SCHEDULE_MS.length - 1)]);
     nextWaitMs = null;
@@ -1234,7 +1238,12 @@ async function pollWiroTask({ taskId, outputFormat, modelId, startedAt, maxPolls
         body: JSON.stringify({ action: "status", taskId, outputFormat }),
       });
     } catch {
-      continue; // transient network blip — the task is still running
+      // Same event as a 5xx above, and now handled the same way.
+      transientFailures++;
+      if (transientFailures > MAX_TRANSIENT_POLL_FAILURES) {
+        throw new Error(`Wiro error: lost contact with the image proxy. Task ${taskId} may still finish.`);
+      }
+      continue;
     }
     if (statusRes.status === 202) {
       // Still generating — but read the body, because it also says whether
@@ -1250,10 +1259,26 @@ async function pollWiroTask({ taskId, outputFormat, modelId, startedAt, maxPolls
       }
       continue;
     }
+    // A failure to get an answer is transient by definition: polling is a read,
+    // the task is running on Wiro either way, and giving up throws away an
+    // image that will be generated and billed regardless. This used to throw
+    // on any HTTP failure while treating a network error as transient — the
+    // same event, handled two opposite ways — so one blip from Supabase's edge
+    // runtime lost a whole generation. Only a 4xx is fatal: that is this
+    // client asking for something wrong, and asking again will not fix it.
+    if (statusRes.status >= 500 || statusRes.status === 429) {
+      transientFailures++;
+      if (transientFailures > MAX_TRANSIENT_POLL_FAILURES) {
+        throw new Error(`Wiro error: the image proxy kept failing (${statusRes.status}). Task ${taskId} may still finish.`);
+      }
+      nextWaitMs = THROTTLE_BACKOFF_MS[Math.min(transientFailures - 1, THROTTLE_BACKOFF_MS.length - 1)];
+      continue;
+    }
     if (!statusRes.ok) {
       const err = await statusRes.text().catch(() => "");
       throw new Error(`Wiro error: ${statusRes.status} ${err}`);
     }
+    transientFailures = 0;
     const done = await statusRes.json();
     // Attribute the wait: Wiro's queue and generation times against our own
     // round trip. Without this "it's slow" is unattributable — the fix for a

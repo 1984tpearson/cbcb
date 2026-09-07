@@ -46,6 +46,11 @@ const DEZGO_ENDPOINTS: Record<string, string> = {
   text2image: 'https://api.dezgo.com/text2image',
   text2image_sdxl: 'https://api.dezgo.com/text2image_sdxl',
   text2image_flux: 'https://api.dezgo.com/text2image_flux',
+  // SDXL Lightning: 1024px at a handful of steps, so it prices below plain
+  // SDXL for the same resolution. Dezgo's catalogue lists five models on it,
+  // two of them photoreal, and none of them were reachable while this endpoint
+  // was missing from the allowlist.
+  text2image_sdxl_lightning: 'https://api.dezgo.com/text2image_sdxl_lightning',
 };
 const DEZGO_DEFAULT_ENDPOINT = 'text2image_flux';
 
