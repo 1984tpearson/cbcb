@@ -1202,19 +1202,25 @@
       // many more (the SDXL endpoint especially) — add them here with the right
       // endpoint and params and they will appear in the dropdown untouched by
       // any code change.
+      // Adding one: the id must be Dezgo's exact model slug, which is the last
+      // segment of its page URL (dezgo.com/model/<id>). A wrong one is refused
+      // with {"model":["InvalidEnumValue"]} and costs nothing — Dezgo validates
+      // before it generates — so trying one is cheap, but it does mean an
+      // unverified id in this list is a button that only ever errors.
+      //
+      // "flux_1_dev" was such a button and has been removed: it was inferred
+      // from Flux's upstream naming rather than read off Dezgo, and Dezgo does
+      // not accept it. Only flux_1_schnell is confirmed working here.
       dezgoModels: [
         {
+          // Confirmed: three generations through this at ~7s each.
           id: "flux_1_schnell", label: "Flux schnell — best value",
           endpoint: "text2image_flux", negative: false,
           params: { width: 1024, height: 1024, steps: 4 },
         },
         {
-          id: "flux_1_dev", label: "Flux dev — slower, more faithful",
-          endpoint: "text2image_flux", negative: false,
-          params: { width: 1024, height: 1024, steps: 20 },
-        },
-        {
-          id: "dreamshaper_7", label: "Dreamshaper 7 — cheapest, 512px",
+          // From Dezgo's own published Node example, but not yet run from here.
+          id: "dreamshaper_7", label: "Dreamshaper 7 — cheapest, 512px (untested)",
           endpoint: "text2image", negative: true,
           params: { width: 512, height: 512, steps: 20, guidance: 7 },
         },

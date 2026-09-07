@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Wardrobe</title>
-<script src="site-config.js?v=26"></script>
+<script src="site-config.js?v=27"></script>
 <style>
   :root {
     --pink: #d4547a; --pink-bg: #fdf1f4; --pink-border: #f0c4d1;
@@ -546,6 +546,30 @@
     throw new Error("The generation did not finish in time");
   }
 
+  // Dezgo reports a bad request as a JSON validation object naming the field it
+  // rejected. Read on a phone that is a wall of braces, and the useful part —
+  // WHICH field, and therefore which line of site-config.js is wrong — is
+  // buried in it. So the field names are pulled out and said plainly, with the
+  // raw body kept on the end for anything this does not recognise.
+  function explainDezgoError(body, httpStatus, model) {
+    let parsed = null;
+    try { parsed = JSON.parse(String(body).replace(/^Dezgo error \d+:\s*/, "")); } catch {}
+    const fields = parsed && parsed.errors && typeof parsed.errors === "object" ? parsed.errors : null;
+    if (!fields) return body || ("Dezgo request failed: " + httpStatus);
+
+    const names = Object.keys(fields);
+    if (names.includes("model")) {
+      return 'Dezgo does not recognise the model id "' + model.id + '" on the ' + model.endpoint +
+        ' endpoint. The id has to be Dezgo\'s exact slug — the last part of its model page URL. ' +
+        'Fix it in wardrobe.dezgoModels in site-config.js; nothing was charged.';
+    }
+    // Any other rejected field is a parameter this model should not have been
+    // sent, which is the same fix in the same place: its params in the config.
+    return "Dezgo rejected " + names.map(n => '"' + n + '"').join(", ") +
+      " for " + model.id + ". Those come from that model's params in " +
+      "wardrobe.dezgoModels in site-config.js. Nothing was charged.";
+  }
+
   // Dezgo has no task queue: one request, and the image bytes come back on it.
   // So there is nothing to poll, and the whole of the Wiro machinery above has
   // no equivalent here. The proxy hands them over as a data URL, which is
@@ -565,7 +589,7 @@
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "dezgo", endpoint: m.endpoint, params }),
     });
-    if (!res.ok) throw new Error(await res.text().catch(() => "Dezgo request failed: " + res.status));
+    if (!res.ok) throw new Error(explainDezgoError(await res.text().catch(() => ""), res.status, m));
     const { dataUrl } = await res.json();
     if (!dataUrl) throw new Error("Dezgo returned no image");
     return dataUrl;
