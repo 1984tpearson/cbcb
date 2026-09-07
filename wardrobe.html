@@ -678,8 +678,59 @@
   // and the same two-step protocol, as index.html.
   const POLL_SCHEDULE_MS = [900, 900, 1200, 1500, 2000, 2000, 2000, 2500, 3000, 3000, 4000];
   const MAX_POLLS = 120;
+  // Enough to ride out a runtime blip lasting a minute or so, not so many that
+  // a genuinely dead proxy is waited on forever.
+  const MAX_CONSECUTIVE_POLL_FAILURES = 8;
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  // Supabase's own edge runtime, refusing before our function is even reached
+  // — it comes back in milliseconds, with this code, and means nothing ran:
+  // no Wiro task started, no Dezgo image generated, nothing billed. That makes
+  // it the one failure that is always safe to retry, including on the calls
+  // that spend money, and it is worth telling apart from a real error for
+  // exactly that reason.
+  function isRuntimeDegraded(status, text) {
+    if (status !== 503) return false;
+    return /SUPABASE_EDGE_RUNTIME|SERVICE_DEGRADED|temporarily unavailable/i.test(String(text || ""));
+  }
+
+  const RETRY_WAIT_MS = [1200, 3000, 6000];
+
+  // Posts to the image proxy, retrying only the runtime rejection above.
+  // Deliberately not retrying anything else: a generation that failed after
+  // the provider was called may already have produced and billed an image,
+  // and quietly paying twice is worse than reporting the failure.
+  async function proxyPost(payload) {
+    let lastErr = "";
+    for (let attempt = 0; attempt <= RETRY_WAIT_MS.length; attempt++) {
+      let res;
+      try {
+        res = await fetch(IMAGE_PROXY_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } catch (e) {
+        // Never reached the server at all, so nothing ran: same reasoning.
+        lastErr = "could not reach the image proxy: " + e.message;
+        if (attempt === RETRY_WAIT_MS.length) break;
+        await sleep(RETRY_WAIT_MS[attempt]);
+        continue;
+      }
+      if (res.ok) return res;
+      const text = await res.text().catch(() => "");
+      if (!isRuntimeDegraded(res.status, text)) {
+        const err = new Error(text || ("Image proxy: " + res.status));
+        err.status = res.status;
+        throw err;
+      }
+      lastErr = "Supabase's edge runtime is briefly unavailable";
+      if (attempt === RETRY_WAIT_MS.length) break;
+      await sleep(RETRY_WAIT_MS[attempt]);
+    }
+    throw new Error(lastErr + " — it did not come back after " +
+      (RETRY_WAIT_MS.length + 1) + " tries. Nothing was charged; try again shortly.");
+  }
 
   async function generateViaWiro({ prompt, model, aspectRatio, resolution, inputImage }) {
     const params = (CFG.models.imageParams || {})[model] || {};
@@ -701,13 +752,20 @@
     // its prompt refers to them in that order.
     if (inputImage) body.inputImage = inputImage;
 
-    const res = await fetch(IMAGE_PROXY_URL, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error("Image proxy: " + res.status + " " + (await res.text().catch(() => "")));
+    const res = await proxyPost(body);
     const { taskId } = await res.json();
     if (!taskId) throw new Error("Image proxy returned no task id");
 
+    // Polling is a read, so every failure to get an answer is transient by
+    // definition: the task is running on Wiro either way, and giving up throws
+    // away an image that is going to be generated and billed regardless. A
+    // single 503 from Supabase's runtime used to end the whole generation here
+    // — which is precisely the loss the submit-and-poll split exists to
+    // prevent, reintroduced one layer up.
+    //
+    // Only a 4xx is fatal: that is this client asking for something wrong, and
+    // asking again will not fix it.
+    let consecutiveFailures = 0;
     for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
       await sleep(POLL_SCHEDULE_MS[Math.min(attempt, POLL_SCHEDULE_MS.length - 1)]);
       let statusRes;
@@ -716,9 +774,28 @@
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "status", taskId, outputFormat: body.outputFormat }),
         });
-      } catch { continue; } // transient blip — the task is still running
-      if (statusRes.status === 202) continue;
+      } catch {
+        consecutiveFailures++;
+        if (consecutiveFailures > MAX_CONSECUTIVE_POLL_FAILURES) {
+          throw new Error("Lost contact with the image proxy while waiting. Task " + taskId +
+            " may still finish — nothing to do but try again.");
+        }
+        continue;
+      }
+      if (statusRes.status === 202) { consecutiveFailures = 0; continue; }
+      if (statusRes.status >= 500 || statusRes.status === 429) {
+        consecutiveFailures++;
+        if (consecutiveFailures > MAX_CONSECUTIVE_POLL_FAILURES) {
+          throw new Error("The image proxy kept failing while waiting (" + statusRes.status +
+            "). Task " + taskId + " may still finish.");
+        }
+        // Backed off rather than hammered: if the runtime is degraded, asking
+        // faster is the opposite of helping.
+        await sleep(RETRY_WAIT_MS[Math.min(consecutiveFailures - 1, RETRY_WAIT_MS.length - 1)]);
+        continue;
+      }
       if (!statusRes.ok) throw new Error("Image proxy: " + statusRes.status + " " + (await statusRes.text().catch(() => "")));
+      consecutiveFailures = 0;
       const done = await statusRes.json();
       if (done && done.imageUrl) return done.imageUrl;
     }
@@ -764,11 +841,14 @@
     // The flag on the model says which is which.
     if (m.negative && wardrobeCfg().negativePrompt) params.negative_prompt = wardrobeCfg().negativePrompt;
 
-    const res = await fetch(IMAGE_PROXY_URL, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "dezgo", endpoint: m.endpoint, params }),
-    });
-    if (!res.ok) throw new Error(explainDezgoError(await res.text().catch(() => ""), res.status, m));
+    let res;
+    try {
+      res = await proxyPost({ action: "dezgo", endpoint: m.endpoint, params });
+    } catch (e) {
+      // proxyPost only throws for real errors — a runtime rejection is retried
+      // inside it, since that one provably never reached Dezgo.
+      throw new Error(explainDezgoError(e.message, e.status, m));
+    }
     const { dataUrl } = await res.json();
     if (!dataUrl) throw new Error("Dezgo returned no image");
     return dataUrl;
@@ -1065,11 +1145,7 @@
     btn.disabled = true;
     quickStatus("Asking Dezgo what it has…", "busy");
     try {
-      const res = await fetch(IMAGE_PROXY_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "dezgo", list: true }),
-      });
-      if (!res.ok) throw new Error(await res.text().catch(() => "HTTP " + res.status));
+      const res = await proxyPost({ action: "dezgo", list: true });
       const body = await res.json();
       const list = normaliseDezgoList(body);
       if (!list.length) {
