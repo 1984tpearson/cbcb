@@ -166,6 +166,9 @@
           <button onclick="fromUrl()">From URL</button>
         </div>
         <input type="file" id="uploadFile" accept="image/png,image/jpeg,image/webp" hidden onchange="uploadShot(event)" />
+        <div class="acquire">
+          <button id="rereadBtn" onclick="rereadImage()">Re-read picture</button>
+        </div>
         <div class="variants" id="variants"></div>
       </div>
       <div>
@@ -179,9 +182,10 @@
         <label class="field"><span>Description</span>
           <textarea id="fDescription" rows="4" oninput="refreshPromptView()"
             placeholder="Bias-cut black silk slip dress, thin spaghetti straps, cowl neck, mid-calf length, slight sheen."></textarea></label>
-        <p class="hint">This is what the flat lay is generated from, and what would ground the wording if
-          this garment is later used in a chat image. Be specific — cut, fabric, colour, length, fastenings.
-          "A dress" produces a different dress every time.</p>
+        <p class="hint">Leave the name, category, tags and description empty and they are read off the
+          picture once it exists — only the blanks, so anything you type yourself is kept. To generate a
+          flat lay you need a line here to start from, but it can be rough: "black silk slip dress" is
+          enough, and the finished description is written back from the actual image.</p>
         <div class="row2">
           <label class="field"><span>Generator</span>
             <select id="fProvider" onchange="refreshProvider()"></select></label>
@@ -211,7 +215,7 @@
   const CORRECT_PIN = "1555";
   const UNLOCK_KEY = "personachat_unlocked";
   const {
-    DEFAULTS, clone, loadConfig, fillTemplate, call,
+    DEFAULTS, clone, loadConfig, fillTemplate, call, aiComplete, parseJsonReply,
     WARDROBE_ROW_ID, ACCESS_TOKEN, IMAGE_PROXY_URL, UPLOAD_IMAGE_URL,
   } = window.SiteConfig;
 
@@ -422,6 +426,7 @@
       ? '<img src="' + esc(draft.image) + '" alt="" />'
       : '<span class="none">No image yet.<br />Generate one from the description, or upload a photo.</span>';
     document.getElementById("copyBtn").disabled = !draft.image;
+    document.getElementById("rereadBtn").disabled = !draft.image;
 
     // Previous shots are kept rather than thrown away: regenerating is cheap to
     // do and expensive to undo, and the one you replaced is often the better one.
@@ -571,6 +576,109 @@
     return url;
   }
 
+  // ── Reading the garment back off its own picture ───────────────────────────
+  // Naming, filing and tagging a garment is exactly the kind of form-filling
+  // nobody does, and a wardrobe of "Untitled" in no category is a wardrobe you
+  // cannot search. So the picture is read once it exists, and the answers are
+  // dropped into whatever was left blank.
+  //
+  // Only blanks. Something typed by hand is a decision, and a model that
+  // overwrites it is a model you have to fight; this one only fills silence.
+  async function readGarmentFromImage(imageUrl) {
+    const w = wardrobeCfg();
+    const instruction = fillTemplate(w.analyseInstruction, {
+      categories: w.categories.map(c => JSON.stringify(c)).join(", "),
+    });
+    const raw = (await aiComplete({
+      model: CFG.models.vision,
+      // Four fields of prose: the proxy's default cap truncates this mid-JSON.
+      params: { max_tokens: 400 },
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: instruction },
+          { type: "image_url", image_url: { url: imageUrl } },
+        ],
+      }],
+    })).trim();
+
+    const parsed = parseJsonReply(raw);
+    // The reply is the diagnosis — a refusal reads nothing like truncated
+    // JSON — so it is carried rather than reported as a bare failure.
+    if (!parsed) throw new Error("model replied: " + raw.slice(0, 140));
+    return parsed;
+  }
+
+  // Fills the blanks in the open editor. Returns what it actually changed, so
+  // the status line can say something specific rather than "done".
+  function applyReading(reading) {
+    const w = wardrobeCfg();
+    const filled = [];
+    const nameEl = document.getElementById("fName");
+    if (!nameEl.value.trim() && typeof reading.name === "string" && reading.name.trim()) {
+      nameEl.value = reading.name.trim(); filled.push("name");
+    }
+    const descEl = document.getElementById("fDescription");
+    if (!descEl.value.trim() && typeof reading.description === "string" && reading.description.trim()) {
+      descEl.value = reading.description.trim(); filled.push("description");
+    }
+    // Only a category that is actually on the list — an invented one would sit
+    // in the filter dropdown as a permanent one-off.
+    const catEl = document.getElementById("fCategory");
+    if (w.categories.includes(reading.category) && catEl.value === w.categories[0]) {
+      catEl.value = reading.category; filled.push("category");
+    }
+    const tagEl = document.getElementById("fTags");
+    if (!tagEl.value.trim() && Array.isArray(reading.tags)) {
+      const tags = reading.tags
+        .filter(t => typeof t === "string" && t.trim())
+        .map(t => t.trim().toLowerCase())
+        .slice(0, 6);
+      if (tags.length) { tagEl.value = tags.join(", "); filled.push("tags"); }
+    }
+    refreshPromptView();
+    return filled;
+  }
+
+  // Run after an image arrives, and on demand from the Re-read button. Never
+  // throws into the caller: a garment with a picture and no tags is still a
+  // garment, and losing the image over a failed description would be absurd.
+  async function autoRead(imageUrl, { force = false } = {}) {
+    status("Reading the picture…", "busy");
+    try {
+      const reading = await readGarmentFromImage(imageUrl);
+      if (force) {
+        // The button is an explicit ask, so it overwrites — that is the
+        // difference between "fill this in for me" and "do it again properly".
+        if (typeof reading.name === "string") document.getElementById("fName").value = reading.name.trim();
+        if (typeof reading.description === "string") document.getElementById("fDescription").value = reading.description.trim();
+        if (wardrobeCfg().categories.includes(reading.category)) document.getElementById("fCategory").value = reading.category;
+        if (Array.isArray(reading.tags)) {
+          document.getElementById("fTags").value = reading.tags
+            .filter(t => typeof t === "string" && t.trim())
+            .map(t => t.trim().toLowerCase()).slice(0, 6).join(", ");
+        }
+        refreshPromptView();
+        status("Read from the picture. Check it, then Save.", "ok");
+        return;
+      }
+      const filled = applyReading(reading);
+      status(filled.length
+        ? "Filled in " + filled.join(", ") + " from the picture. Check it, then Save."
+        : "Read the picture — everything was already filled in.", "ok");
+    } catch (e) {
+      status("Image saved, but reading it failed: " + e.message, "err");
+    }
+  }
+
+  window.rereadImage = async function () {
+    if (!draft || !draft.image) return;
+    const btn = document.getElementById("rereadBtn");
+    btn.disabled = true;
+    await autoRead(draft.image, { force: true });
+    btn.disabled = false;
+  };
+
   function acceptImage(url, source, prompt) {
     if (draft.image) draft.variants = [draft.image, ...(draft.variants || [])].slice(0, 8);
     draft.image = url;
@@ -598,6 +706,10 @@
           }));
       acceptImage(stored, provider, prompt);
       status("Generated.", "ok");
+      // Read from the generated picture rather than the words that asked for
+      // it: what came out is often not quite what was described, and the
+      // picture is what a later scene copies.
+      await autoRead(stored);
     } catch (e) {
       status(e.message, "err");
     }
@@ -617,8 +729,10 @@
         r.onerror = () => reject(new Error("Could not read that file"));
         r.readAsDataURL(file);
       });
-      acceptImage(await persistDataUrl(dataUrl), "upload", "");
+      const stored = await persistDataUrl(dataUrl);
+      acceptImage(stored, "upload", "");
       status("Uploaded.", "ok");
+      await autoRead(stored);
     } catch (e) {
       status(e.message, "err");
     }
@@ -631,8 +745,10 @@
     try {
       // Copied into Storage rather than linked: a URL on somebody else's site
       // is a picture that disappears without warning.
-      acceptImage(await persist(src.trim()), "url", "");
+      const stored = await persist(src.trim());
+      acceptImage(stored, "url", "");
       status("Saved into storage.", "ok");
+      await autoRead(stored);
     } catch (e) {
       status(e.message, "err");
     }

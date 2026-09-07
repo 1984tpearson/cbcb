@@ -26,6 +26,7 @@
   // into a third file, where they would be one deploy away from being wrong.
   const IMAGE_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/image-proxy";
   const UPLOAD_IMAGE_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/upload-image";
+  const AI_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/ai-proxy";
 
   // ── Tier tables ────────────────────────────────────────────────────────────
   // One row per trait. Each tier is { max, preview, prompt }: the first tier
@@ -1179,6 +1180,16 @@
       // prompt still puts the word mannequin in front of the model.
       negativePrompt: "person, model, mannequin, human, body, face, hands, arms, legs, worn, being worn, dressing form, coat hanger, crumpled, folded pile",
 
+      // Read back off the finished picture, so that naming and filing a garment
+      // is not a form to fill in. {categories} is substituted with the list
+      // above — the model must choose from it rather than inventing a category,
+      // or the filter dropdown fills up with one-offs that mean the same thing.
+      //
+      // It reads the IMAGE, not the description, on purpose: a generated flat
+      // lay often differs from what was asked for, and what is actually in the
+      // picture is what a later scene will be copying.
+      analyseInstruction: "Look at this photograph of a single item of clothing, laid out flat. Return ONLY valid JSON with these exact fields, no markdown and no commentary:\n{\n  \"name\": a short specific name for the garment, 2-5 words, no brand names,\n  \"category\": exactly one of [{categories}],\n  \"tags\": an array of 3 to 6 lowercase one-word tags covering colour, season, formality and occasion,\n  \"description\": one or two sentences describing cut, fabric, colour, length, neckline, sleeves, fastenings and pattern, as a clothing catalogue would\n}\nDescribe only the garment. Say nothing about the background, the lighting or the photograph itself. If the picture shows more than one item, describe the largest.",
+
       // Dezgo models, cheapest-capable first. Each entry says which endpoint it
       // belongs to and the parameters that endpoint takes, because they differ:
       // the Flux endpoint has no guidance or negative prompt, the SD one does.
@@ -1429,6 +1440,63 @@
     await call("save_chat", { characterId: CONFIG_ROW_ID, messages: config });
   }
 
+  // Single entry point for every AI proxy call. Every caller used to read
+  // `data.choices[0].message.content` straight off the response, so a proxy
+  // error surfaced as a TypeError about `undefined` instead of the actual
+  // problem — and in the silent-catch callers, as nothing at all.
+  //
+  // Lives here rather than in index.html because wardrobe.html needs the same
+  // call and the same handling of its failures; index.html keeps a wrapper of
+  // the same name that delegates to this, so its fifteen callers are unchanged.
+  async function aiComplete({ model, messages, params }) {
+    let res;
+    try {
+      res = await fetch(AI_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // params are merged into the OpenRouter body — the proxy forwards it
+        // verbatim. Only the conversation passes any: the tracker calls want
+        // plain, repeatable JSON, and penalties would work against that.
+        body: JSON.stringify({ model, messages, ...(params || {}) }),
+      });
+    } catch (e) {
+      throw new Error(`AI proxy unreachable: ${e.message}`);
+    }
+
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new Error(`AI proxy error ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
+    }
+
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      throw new Error("AI proxy returned a non-JSON response");
+    }
+
+    if (data && data.error) {
+      const msg = typeof data.error === "string" ? data.error : (data.error.message || JSON.stringify(data.error));
+      throw new Error(`AI proxy error: ${String(msg).slice(0, 200)}`);
+    }
+
+    const content = data && data.choices && data.choices[0] && data.choices[0].message
+      ? data.choices[0].message.content
+      : undefined;
+    if (typeof content !== "string") throw new Error("AI proxy returned no completion");
+    return content;
+  }
+
+  // Strips markdown fences and parses. Returns null instead of throwing —
+  // callers decide whether a malformed reply is worth surfacing.
+  function parseJsonReply(raw) {
+    const clean = String(raw).replace(/```json/gi, "").replace(/```/g, "").trim();
+    try { return JSON.parse(clean); } catch {}
+    const match = clean.match(/[\{\[][\s\S]*[\}\]]/);
+    if (match) { try { return JSON.parse(match[0]); } catch {} }
+    return null;
+  }
+
   // Merged config, ready to read. Never throws: a proxy that is down or a
   // malformed override must not take the whole app with it, so the built-in
   // defaults stand in and the caller is told what went wrong.
@@ -1461,7 +1529,10 @@
     ACCESS_TOKEN,
     IMAGE_PROXY_URL,
     UPLOAD_IMAGE_URL,
+    AI_PROXY_URL,
     call,
+    aiComplete,
+    parseJsonReply,
     clone,
     deepMerge,
     loadConfig,

@@ -387,7 +387,6 @@ const DEFAULT_SETTINGS = {
   imageModel: DEZGO_MODELS[0].id,
 };
 
-const AI_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/ai-proxy";
 const IMAGE_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/image-proxy";
 const UPLOAD_IMAGE_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/upload-image";
 
@@ -447,54 +446,11 @@ const dataApi = {
 // `data.choices[0].message.content` straight off the response, so a proxy
 // error surfaced as a TypeError about `undefined` instead of the actual
 // problem — and in the silent-catch callers, as nothing at all.
-async function aiComplete({ model, messages, params }) {
-  let res;
-  try {
-    res = await fetch(AI_PROXY_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // params are merged into the OpenRouter body — the proxy forwards it
-      // verbatim. Only the conversation passes any: the tracker calls want
-      // plain, repeatable JSON, and penalties would work against that.
-      body: JSON.stringify({ model, messages, ...(params || {}) }),
-    });
-  } catch (e) {
-    throw new Error(`AI proxy unreachable: ${e.message}`);
-  }
-
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`AI proxy error ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
-  }
-
-  let data;
-  try {
-    data = await res.json();
-  } catch {
-    throw new Error("AI proxy returned a non-JSON response");
-  }
-
-  if (data && data.error) {
-    const msg = typeof data.error === "string" ? data.error : (data.error.message || JSON.stringify(data.error));
-    throw new Error(`AI proxy error: ${String(msg).slice(0, 200)}`);
-  }
-
-  const content = data && data.choices && data.choices[0] && data.choices[0].message
-    ? data.choices[0].message.content
-    : undefined;
-  if (typeof content !== "string") throw new Error("AI proxy returned no completion");
-  return content;
-}
-
-// Strips markdown fences and parses. Returns null instead of throwing —
-// callers decide whether a malformed reply is worth surfacing.
-function parseJsonReply(raw) {
-  const clean = String(raw).replace(/```json/gi, "").replace(/```/g, "").trim();
-  try { return JSON.parse(clean); } catch {}
-  const match = clean.match(/[\{\[][\s\S]*[\}\]]/);
-  if (match) { try { return JSON.parse(match[0]); } catch {} }
-  return null;
-}
+// The implementation moved to site-config.js when wardrobe.html came to need
+// the same call and the same handling of its failures. Kept as a name here so
+// that every caller below reads as it always did.
+const aiComplete = window.SiteConfig.aiComplete;
+const parseJsonReply = window.SiteConfig.parseJsonReply;
 
 const storage = {
   get: (key, fallback = null) => {
