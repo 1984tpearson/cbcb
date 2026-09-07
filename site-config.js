@@ -1451,17 +1451,29 @@
       // which never worked and has been removed: an adjective cannot win an
       // argument with a geometric constraint.
       //
-      // This states the geometry instead: she is near, she is framed where she
-      // actually is, and the gap is closed by the camera being close rather
-      // than by anything being longer than it is.
+      // So this says one thing: she is near, and near fills the frame. Nothing
+      // else. Two longer versions have been cut back to it, each for a reason
+      // worth keeping:
       //
-      // Deliberately says nothing about the camera pointing up or down. It
-      // once said "angled down towards her", which is right for oral and
-      // wrong for her riding the viewer — there the viewer is lying down and
-      // the camera looks up. The direction depends on the scene, and this
-      // clause does not know the scene; what it does know is that she is
-      // close, and that closeness is what removes the reason to stretch.
-      povIntimateFraming: "she is close enough to touch and fills much of the frame, framed where she actually is rather than centred out of habit, and everything of the viewer's is true to size, foreshortened by how near she is and never elongated to bridge a gap",
+      // It once said "the camera angled down towards her", which is right for
+      // oral and wrong for her riding the viewer — there the viewer is lying
+      // down and the camera looks up. This clause does not know the scene, so
+      // it no longer claims a direction.
+      //
+      // It then said the viewer's body "meets her at its true size... never
+      // elongated or stretched to bridge a gap", and that made things worse.
+      // Two reasons, both general enough to remember. A diffusion model does
+      // not do negation — it conditions on the words that are there, so
+      // "elongated", "stretched" and "gap" went into a prompt about a penis
+      // and argued for what they were meant to forbid. And it was the fourth
+      // separate mention of the viewer's anatomy in one prompt, where the file
+      // already records that removing a redundant mention of the viewer's
+      // hands and arms measurably improved the images. Every mention is
+      // something the model tries to draw.
+      //
+      // So: describe where SHE is, and let viewerBody be the only clause that
+      // names any part of the viewer.
+      povIntimateFraming: "close to her, she fills much of the frame",
 
       // The viewer's own posture, as camera height. Without it the prompt says
       // she is kneeling and says nothing about where the camera is, so the
