@@ -33,6 +33,21 @@
   label.field > span { display:block; font-size:12px; font-weight:700; color:var(--muted); margin-bottom:4px; }
   .hint { color:var(--muted); font-size:12px; line-height:1.5; margin:0 0 12px; }
 
+  /* ── Quick add ──
+     The whole point of the page: type what the garment is, pick how to get a
+     picture of it, and never see a form. Everything else about the garment is
+     read off the picture afterwards. */
+  .quickadd { padding:14px 18px; border-bottom:1px solid var(--border); background:var(--bg2); }
+  .quickadd input[type=text] { font-size:15px; padding:11px 13px; }
+  .qbtns { display:flex; gap:8px; margin-top:8px; }
+  .qbtns button { flex:1; min-height:40px; }
+  #quickStatus { margin-top:9px; font-size:12px; font-weight:700; line-height:1.5; overflow-wrap:anywhere; }
+  #quickStatus:empty { display:none; }
+  #quickStatus.ok { color:var(--ok); }
+  #quickStatus.busy { color:var(--muted); }
+  #quickStatus.err { color:var(--err); background:#fdf0ee; border:1px solid #e8b4ae;
+                     border-radius:9px; padding:9px 11px; }
+
   /* ── Filter bar ── */
   .filters { display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding:10px 18px;
              border-bottom:1px solid var(--border); background:var(--bg3); }
@@ -80,6 +95,17 @@
                 background:var(--bg); border:1px solid var(--border); border-radius:9px; padding:8px 10px;
                 line-height:1.5; max-height:110px; overflow-y:auto; white-space:pre-wrap; }
   .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  /* Which model, which shape, what exact prompt: real controls, but not ones
+     worth reading past every time a garment is opened. */
+  .advanced { border:1px solid var(--border); border-radius:12px; margin-bottom:12px; }
+  .advanced > summary { cursor:pointer; padding:9px 12px; font-weight:800; font-size:12px;
+                        background:var(--bg3); border-radius:11px; list-style:none;
+                        display:flex; align-items:center; gap:8px; color:var(--muted); }
+  .advanced > summary::-webkit-details-marker { display:none; }
+  .advanced > summary::before { content:"\25B8"; color:var(--pink); font-size:10px; }
+  .advanced[open] > summary::before { content:"\25BE"; }
+  .advanced > *:not(summary) { margin-left:12px; margin-right:12px; }
+  .advanced > label.field:last-child { margin-bottom:12px; }
   .foot { display:flex; gap:8px; margin-top:16px; align-items:center; flex-wrap:wrap; }
   /* The header's status line sits at z-index 20 and the editor covers it at 50,
      so anything reported while the editor is open was being written to a part
@@ -138,8 +164,19 @@
     <span id="status"></span>
     <span class="spacer"></span>
     <button onclick="exportJson()">Export</button>
-    <button class="primary" onclick="openEditor(null)">Add garment</button>
   </header>
+
+  <div class="quickadd">
+    <input type="text" id="quickPrompt" placeholder="blue ball gown"
+           onkeydown="if(event.key==='Enter')quickGenerate()" />
+    <div class="qbtns">
+      <button class="primary" id="qGenBtn" onclick="quickGenerate()">Generate</button>
+      <button id="qUpBtn" onclick="document.getElementById('quickFile').click()">Upload</button>
+      <button id="qLinkBtn" onclick="quickLink()">Link</button>
+    </div>
+    <input type="file" id="quickFile" accept="image/png,image/jpeg,image/webp" hidden onchange="quickUpload(event)" />
+    <div id="quickStatus"></div>
+  </div>
 
   <div class="filters">
     <input type="search" id="search" placeholder="Search name, description, tag…" oninput="render()" />
@@ -182,19 +219,20 @@
         <label class="field"><span>Description</span>
           <textarea id="fDescription" rows="4" oninput="refreshPromptView()"
             placeholder="Bias-cut black silk slip dress, thin spaghetti straps, cowl neck, mid-calf length, slight sheen."></textarea></label>
-        <p class="hint">Leave the name, category, tags and description empty and they are read off the
-          picture once it exists — only the blanks, so anything you type yourself is kept. To generate a
-          flat lay you need a line here to start from, but it can be rough: "black silk slip dress" is
-          enough, and the finished description is written back from the actual image.</p>
-        <div class="row2">
-          <label class="field"><span>Generator</span>
-            <select id="fProvider" onchange="refreshProvider()"></select></label>
-          <label class="field"><span>Model</span>
-            <select id="fModel" onchange="refreshPromptView()"></select></label>
-        </div>
-        <label class="field" id="aspectField"><span>Shape</span><select id="fAspect"></select></label>
-        <label class="field"><span>Prompt that will be sent</span>
-          <div class="promptview" id="promptView"></div></label>
+        <p class="hint">All of this was read off the picture. Correct anything that is wrong — what you
+          type here is kept — or use Re-read picture to have it done again from scratch.</p>
+        <details class="advanced">
+          <summary>Generator settings</summary>
+          <div class="row2">
+            <label class="field"><span>Generator</span>
+              <select id="fProvider" onchange="refreshProvider()"></select></label>
+            <label class="field"><span>Model</span>
+              <select id="fModel" onchange="refreshPromptView()"></select></label>
+          </div>
+          <label class="field" id="aspectField"><span>Shape</span><select id="fAspect"></select></label>
+          <label class="field"><span>Prompt that will be sent</span>
+            <div class="promptview" id="promptView"></div></label>
+        </details>
       </div>
     </div>
     <div id="editorStatus"></div>
@@ -397,7 +435,7 @@
     const empty = document.getElementById("empty");
     empty.hidden = list.length > 0;
     empty.textContent = items.length === 0
-      ? "Nothing saved yet. Add a garment, describe it, and generate a flat lay."
+      ? "Nothing saved yet. Type what a garment is above and hit Generate, or upload a photo of one."
       : "No garment matches that filter.";
   };
 
@@ -713,6 +751,152 @@
       status("Image saved, but reading it failed: " + e.message, "err");
     }
   }
+
+  // ── Quick add ──────────────────────────────────────────────────────────────
+  // The whole flow in one call: get a picture, read it, save it. No editor, no
+  // form, and nothing to confirm — the garment is in the grid when it is done,
+  // and correcting it afterwards is a tap on the card for the rare time that
+  // matters.
+  //
+  // It saves even when the reading fails. A picture of a garment with a bad
+  // name is still the thing that was wanted; throwing it away because the
+  // describing step fell over would lose the part that cost money.
+  function quickStatus(text, kind) {
+    const el = document.getElementById("quickStatus");
+    el.textContent = text;
+    el.className = kind || "";
+  }
+
+  function setQuickBusy(busy, label) {
+    for (const id of ["qGenBtn", "qUpBtn", "qLinkBtn"]) {
+      document.getElementById(id).disabled = busy;
+    }
+    document.getElementById("qGenBtn").textContent = busy ? (label || "Working…") : "Generate";
+  }
+
+  // Everything the grid needs, with the typed line kept as a fallback name so
+  // a failed reading still leaves something legible rather than "Untitled".
+  function newGarment(typed) {
+    const w = wardrobeCfg();
+    return {
+      id: "g_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+      name: "", category: w.categories[0], description: typed || "", tags: [],
+      image: "", variants: [], prompt: "", source: "",
+      provider: w.provider,
+      model: w.provider === "dezgo" ? w.dezgoModels[0].id : CFG.models.image[0].id,
+      aspectRatio: w.aspectRatio,
+      createdAt: Date.now(), updatedAt: Date.now(),
+    };
+  }
+
+  // Fold a reading into a garment.
+  //
+  // The reading wins on description here, which is the opposite of the rule in
+  // the editor. The line typed into the quick-add box is a prompt — three words
+  // meant to produce a picture — not a description of the garment, and the
+  // description is what a later scene would be matching against. The typed line
+  // is not lost: it stays on the item as the prompt, and stands in as the name
+  // if the reading fails.
+  function mergeReading(item, reading) {
+    const w = wardrobeCfg();
+    const next = { ...item };
+    if (typeof reading.name === "string" && reading.name.trim()) next.name = reading.name.trim();
+    if (typeof reading.description === "string" && reading.description.trim()) {
+      next.description = reading.description.trim();
+    }
+    if (w.categories.includes(reading.category)) next.category = reading.category;
+    if (Array.isArray(reading.tags)) {
+      next.tags = reading.tags.filter(t => typeof t === "string" && t.trim())
+        .map(t => t.trim().toLowerCase()).slice(0, 6);
+    }
+    return next;
+  }
+
+  async function quickAdd({ typed, getImage, verb }) {
+    setQuickBusy(true, verb);
+    let item = newGarment(typed);
+    try {
+      quickStatus(verb + "…", "busy");
+      item.image = await getImage(item);
+      item.source = item.provider;
+    } catch (e) {
+      quickStatus(e.message, "err");
+      setQuickBusy(false);
+      return;
+    }
+
+    // From here the picture exists and is paid for, so nothing below is allowed
+    // to lose it — the reading is best-effort and the save happens regardless.
+    quickStatus("Reading the picture…", "busy");
+    try {
+      item = mergeReading(item, await readGarmentFromImage(item.image));
+    } catch (e) {
+      console.warn("Wardrobe: reading the picture failed", e);
+    }
+    if (!item.name) item.name = typed ? typed.trim() : "Untitled garment";
+
+    const before = items;
+    items = [item, ...items];
+    render();
+    try {
+      await saveItems();
+      quickStatus('Added "' + item.name + '" to ' + item.category + ".", "ok");
+      document.getElementById("quickPrompt").value = "";
+    } catch (e) {
+      items = before;
+      render();
+      quickStatus("Could not save: " + e.message, "err");
+    }
+    setQuickBusy(false);
+  }
+
+  window.quickGenerate = function () {
+    const typed = document.getElementById("quickPrompt").value.trim();
+    if (!typed) { quickStatus("Type what the garment is first.", "err"); return; }
+    const w = wardrobeCfg();
+    const prompt = fillTemplate(w.flatLayPrompt, { item: typed }) + ", " + w.styleModifiers;
+    return quickAdd({
+      typed, verb: "Generating",
+      getImage: async (item) => {
+        item.prompt = prompt;
+        const raw = item.provider === "dezgo"
+          ? await persistDataUrl(await generateDezgo({ prompt, modelId: item.model }))
+          : await persist(await generateFlatLay({ prompt, model: item.model, aspectRatio: item.aspectRatio }));
+        return raw;
+      },
+    });
+  };
+
+  window.quickUpload = function (event) {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = "";
+    if (!file) return;
+    const typed = document.getElementById("quickPrompt").value.trim();
+    return quickAdd({
+      typed, verb: "Uploading",
+      getImage: async () => {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result);
+          r.onerror = () => reject(new Error("Could not read that file"));
+          r.readAsDataURL(file);
+        });
+        return persistDataUrl(dataUrl);
+      },
+    });
+  };
+
+  window.quickLink = function () {
+    const src = prompt("Paste the image URL");
+    if (!src || !src.trim()) return;
+    const typed = document.getElementById("quickPrompt").value.trim();
+    return quickAdd({
+      typed, verb: "Fetching",
+      // Copied into Storage rather than linked: someone else's URL is a
+      // picture that disappears without warning.
+      getImage: () => persist(src.trim()),
+    });
+  };
 
   window.rereadImage = async function () {
     if (!draft || !draft.image) return;
