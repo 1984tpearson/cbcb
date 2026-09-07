@@ -4,7 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Wardrobe</title>
-<script src="site-config.js?v=29"></script>
+<script src="site-config.js?v=30"></script>
+<script src="image-prompt.js?v=24"></script>
 <style>
   :root {
     --pink: #d4547a; --pink-bg: #fdf1f4; --pink-border: #f0c4d1;
@@ -32,6 +33,29 @@
   label.field { display:block; margin-bottom:12px; }
   label.field > span { display:block; font-size:12px; font-weight:700; color:var(--muted); margin-bottom:4px; }
   .hint { color:var(--muted); font-size:12px; line-height:1.5; margin:0 0 12px; }
+
+  nav.tabs { display:flex; gap:6px; padding:10px 18px 0; background:var(--bg2); }
+  nav.tabs button { flex:1; border-radius:10px 10px 0 0; border-bottom:none; min-height:40px; }
+  nav.tabs button.on { background:var(--pink-bg); border-color:var(--pink-border); color:var(--pink); }
+
+  /* Selecting garments, rather than opening them: the same tiles, with the
+     chosen ones marked plainly enough to be read at a glance on a phone. */
+  .grid.picker .card { cursor:pointer; }
+  .grid.picker .card.chosen { border-color:var(--pink); box-shadow:0 0 0 2px var(--pink-border); }
+  .grid.picker .card.chosen .shot::after { content:"\2713"; position:absolute; top:6px; left:6px;
+    width:26px; height:26px; border-radius:50%; background:var(--pink); color:#fff;
+    font-weight:800; font-size:15px; display:flex; align-items:center; justify-content:center; }
+  #fitCharPreview img { width:110px; height:110px; object-fit:cover; border-radius:12px;
+                        border:1px solid var(--border); margin-top:10px; background:var(--bg3); }
+  #fitResult img { width:100%; border-radius:12px; background:var(--bg3); }
+  #fitResult .acts { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+  #fitResult .acts button { flex:1; min-height:40px; }
+  #fitStatus { margin-top:10px; font-size:12px; font-weight:700; line-height:1.5; overflow-wrap:anywhere; }
+  #fitStatus:empty { display:none; }
+  #fitStatus.ok { color:var(--ok); } #fitStatus.busy { color:var(--muted); }
+  #fitStatus.err { color:var(--err); background:#fdf0ee; border:1px solid #e8b4ae;
+                   border-radius:9px; padding:9px 11px; }
+  #fitGenBtn { width:100%; min-height:44px; }
 
   /* ── Quick add ──
      The whole point of the page: type what the garment is, pick how to get a
@@ -192,6 +216,12 @@
     <button onclick="exportJson()">Export</button>
   </header>
 
+  <nav class="tabs">
+    <button id="tabWardrobe" class="on" onclick="showView('wardrobe')">Wardrobe</button>
+    <button id="tabFitting" onclick="showView('fitting')">Fitting room</button>
+  </nav>
+
+  <div id="wardrobeView">
   <div class="quickadd">
     <input type="text" id="quickPrompt" placeholder="blue ball gown"
            onkeydown="if(event.key==='Enter')quickGenerate()" />
@@ -227,6 +257,37 @@
     <div class="grid" id="grid"></div>
     <div class="empty" id="empty" hidden></div>
   </main>
+  </div>
+
+  <div id="fittingView" hidden>
+    <main>
+      <div class="card">
+        <h2>Who</h2>
+        <p class="hint" id="fitCharHint">Loading characters…</p>
+        <select id="fitChar" onchange="pickCharacter()"></select>
+        <div id="fitCharPreview"></div>
+      </div>
+
+      <div class="card">
+        <h2>What they wear</h2>
+        <p class="hint" id="fitPickHint">Tap garments to put them on.</p>
+        <div class="grid picker" id="fitGarments"></div>
+      </div>
+
+      <div class="card">
+        <h2>Where</h2>
+        <label class="field">
+          <textarea id="fitScene" rows="2"></textarea></label>
+        <button class="primary" id="fitGenBtn" onclick="generateFitting()">Generate</button>
+        <div id="fitStatus"></div>
+      </div>
+
+      <div class="card" id="fitResultCard" hidden>
+        <h2>Result</h2>
+        <div id="fitResult"></div>
+      </div>
+    </main>
+  </div>
 </div>
 
 <div id="editor">
@@ -594,13 +655,13 @@
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-  async function generateFlatLay({ prompt, model, aspectRatio }) {
+  async function generateViaWiro({ prompt, model, aspectRatio, resolution, inputImage }) {
     const params = (CFG.models.imageParams || {})[model] || {};
     const body = {
       action: "submit",
       model,
       prompt,
-      resolution: params.resolution || "2k",
+      resolution: resolution || params.resolution || "2k",
       // The wardrobe's own shape wins over the model default, which is 9:16
       // for chat images and wrong for a garment laid out flat.
       aspectRatio: aspectRatio || wardrobeCfg().aspectRatio,
@@ -609,6 +670,10 @@
       seed: Math.floor(Math.random() * 2147483647),
     };
     if (params.outputFormat) body.outputFormat = params.outputFormat;
+    // A comma-joined list of URLs, which is what the proxy forwards to Wiro.
+    // The fitting room sends the character first and the garments after, and
+    // its prompt refers to them in that order.
+    if (inputImage) body.inputImage = inputImage;
 
     const res = await fetch(IMAGE_PROXY_URL, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -1005,6 +1070,181 @@
     btn.disabled = false;
   };
 
+  // ── Fitting room ───────────────────────────────────────────────────────────
+  // The reason the wardrobe exists: a character wearing chosen garments, with
+  // the garments coming from pictures rather than from a fresh description
+  // every time.
+  //
+  // The method is the character's reference photograph and the garment flat
+  // lays handed to the model together, as several input images. That is why
+  // this is Wiro and not the generator picked upstairs: Dezgo's text2image
+  // endpoints take no input image at all, so nothing it offers can do this.
+  let characters = [];
+  let chosenGarments = new Set();
+  let lastFitting = null;
+
+  function fitStatus(text, kind) {
+    const el = document.getElementById("fitStatus");
+    el.textContent = text;
+    el.className = kind || "";
+  }
+
+  // Display uses the clothed avatar, generation uses the nude reference. They
+  // are two different images for a reason and must never be swapped: the
+  // reference is the one the model learns the body from, and the avatar is the
+  // one a person should be looking at.
+  const charAvatar = c => (c && (c.avatarImage || c.referenceImage)) || null;
+
+  window.showView = function (which) {
+    const fitting = which === "fitting";
+    document.getElementById("wardrobeView").hidden = fitting;
+    document.getElementById("fittingView").hidden = !fitting;
+    document.getElementById("tabWardrobe").className = fitting ? "" : "on";
+    document.getElementById("tabFitting").className = fitting ? "on" : "";
+    if (fitting) openFitting();
+  };
+
+  async function openFitting() {
+    document.getElementById("fitScene").value =
+      document.getElementById("fitScene").value || wardrobeCfg().fitting.scene;
+    renderGarmentPicker();
+    if (characters.length) return;
+    try {
+      const body = await call("get_characters");
+      characters = (body.characters || []).filter(Boolean)
+        .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+    } catch (e) {
+      document.getElementById("fitCharHint").textContent = "Could not load characters: " + e.message;
+      return;
+    }
+    // A character with no reference image cannot be dressed: there is nothing
+    // to hand the model as the person. Listed but marked, rather than hidden,
+    // so the absence is explained instead of looking like a missing character.
+    const hint = document.getElementById("fitCharHint");
+    document.getElementById("fitChar").innerHTML = characters.map((c, i) =>
+      '<option value="' + i + '">' + esc(c.name || "Unnamed") +
+      (c.referenceImage ? "" : " — no base image") + "</option>").join("");
+    hint.textContent = characters.length
+      ? "Their base image is what the outfit gets put on."
+      : "No characters found.";
+    pickCharacter();
+  }
+
+  window.pickCharacter = function () {
+    const c = characters[Number(document.getElementById("fitChar").value)];
+    const box = document.getElementById("fitCharPreview");
+    box.innerHTML = (c && charAvatar(c))
+      ? '<img src="' + esc(charAvatar(c)) + '" alt="' + esc(c.name || "") + '" />'
+      : "";
+    document.getElementById("fitGenBtn").disabled = !(c && c.referenceImage);
+    if (c && !c.referenceImage) fitStatus(esc(c.name || "That character") + " has no base image to dress.", "err");
+    else fitStatus("", "");
+  };
+
+  function renderGarmentPicker() {
+    const withImages = items.filter(i => i.image);
+    const grid = document.getElementById("fitGarments");
+    grid.innerHTML = withImages.map(it =>
+      '<div class="card' + (chosenGarments.has(it.id) ? " chosen" : "") + '" data-pick="' + esc(it.id) + '">' +
+        '<div class="shot"><img src="' + esc(it.image) + '" alt="" loading="lazy" /></div>' +
+        '<div class="meta"><div class="nm">' + esc(it.name || "Untitled") + "</div></div></div>").join("");
+    grid.querySelectorAll("[data-pick]").forEach(c => {
+      c.onclick = () => toggleGarment(c.dataset.pick);
+    });
+    const max = wardrobeCfg().fitting.maxGarments;
+    document.getElementById("fitPickHint").textContent = withImages.length
+      ? chosenGarments.size + " of " + max + " chosen. Tap garments to put them on."
+      : "No garments with pictures yet — make some in the Wardrobe first.";
+  }
+
+  window.toggleGarment = function (id) {
+    if (chosenGarments.has(id)) chosenGarments.delete(id);
+    else {
+      const max = wardrobeCfg().fitting.maxGarments;
+      if (chosenGarments.size >= max) {
+        // A cap rather than silently dropping the extra: every garment is
+        // another reference image the model has to stay faithful to while also
+        // composing a person, and past a handful it stops managing either.
+        fitStatus("That is as many as it can wear at once (" + max + ").", "err");
+        return;
+      }
+      chosenGarments.add(id);
+      fitStatus("", "");
+    }
+    renderGarmentPicker();
+  };
+
+  window.generateFitting = async function () {
+    const c = characters[Number(document.getElementById("fitChar").value)];
+    if (!c || !c.referenceImage) { fitStatus("Pick a character with a base image.", "err"); return; }
+    const garments = items.filter(i => chosenGarments.has(i.id) && i.image);
+    if (!garments.length) { fitStatus("Pick at least one garment.", "err"); return; }
+
+    const f = wardrobeCfg().fitting;
+    // Appearance is deliberately thin: age, gender and height only. The base
+    // image says how they look, and repeating it in words cannot make the
+    // picture more like itself — the same reasoning the chat image path uses,
+    // and literally the same function, so the two cannot drift.
+    let charDesc = "";
+    try {
+      charDesc = window.ImagePrompt.create(CFG).buildChatCharDesc(c) || "";
+    } catch (e) { console.warn("Wardrobe: could not build character description", e); }
+
+    const garmentText = garments.map(g => g.description || g.name).filter(Boolean).join("; ");
+    const prompt = fillTemplate(f.promptTemplate, {
+      charDesc: charDesc ? ", " + charDesc : "",
+      garments: garmentText,
+      scene: document.getElementById("fitScene").value.trim() || f.scene,
+    }) + ", " + CFG.image.styleModifiers;
+
+    // Order matters and the prompt refers to it: the person first, then the
+    // garments in the order they were chosen.
+    const inputImage = [c.referenceImage, ...garments.map(g => g.image)].join(",");
+
+    const btn = document.getElementById("fitGenBtn");
+    btn.disabled = true; btn.textContent = "Generating…";
+    fitStatus("Dressing " + (c.name || "them") + " in " + garments.length +
+      " garment" + (garments.length === 1 ? "" : "s") + "… this takes a minute.", "busy");
+    try {
+      const raw = await generateViaWiro({
+        prompt, model: f.model, aspectRatio: f.aspectRatio,
+        resolution: f.resolution, inputImage,
+      });
+      const url = await persist(raw);
+      lastFitting = { url, prompt, character: c };
+      showFittingResult(url, c, garments);
+      fitStatus("", "");
+      await saveToGallery(c, url, prompt);
+    } catch (e) {
+      fitStatus(e.message, "err");
+    }
+    btn.disabled = false; btn.textContent = "Generate";
+  };
+
+  function showFittingResult(url, c, garments) {
+    document.getElementById("fitResultCard").hidden = false;
+    document.getElementById("fitResult").innerHTML =
+      '<img src="' + esc(url) + '" alt="" />' +
+      '<p class="hint">' + esc((c.name || "They") + " in " + garments.map(g => g.name).join(", ")) +
+      " — saved to their gallery.</p>" +
+      '<div class="acts"><button onclick="generateFitting()">Again</button></div>';
+  }
+
+  // Straight into the character's gallery, which is where the app already
+  // looks for pictures of them — a fitting room image nobody can find from the
+  // chat is a fitting room image that was not worth generating.
+  async function saveToGallery(c, url, prompt) {
+    try {
+      const body = await call("get_gallery", { characterId: c.id });
+      const gallery = Array.isArray(body.gallery) ? body.gallery : [];
+      // Capped at 20, the same as every other writer of this list.
+      const next = [{ url, prompt, date: Date.now() }, ...gallery].slice(0, 20);
+      await call("save_gallery", { characterId: c.id, gallery: next });
+    } catch (e) {
+      fitStatus("Image made, but saving it to the gallery failed: " + e.message, "err");
+    }
+  }
+
   // ── Deleting from the grid ─────────────────────────────────────────────────
   // Asks first. The delete sits on top of every picture in a scrolling grid of
   // thumbnails, which on a phone is a 32px target inside the thing you scroll
@@ -1201,7 +1441,7 @@
             item.prompt = prompt;
             return gen.provider === "dezgo"
               ? persistDataUrl(await generateDezgo({ prompt, modelId: gen.id }))
-              : persist(await generateFlatLay({ prompt, model: gen.id, aspectRatio: item.aspectRatio }));
+              : persist(await generateViaWiro({ prompt, model: gen.id, aspectRatio: item.aspectRatio }));
           },
         });
         made += 1;
@@ -1456,7 +1696,7 @@
     try {
       const stored = provider === "dezgo"
         ? await persistDataUrl(await generateDezgo({ prompt, modelId }))
-        : await persist(await generateFlatLay({
+        : await persist(await generateViaWiro({
             prompt,
             model: modelId,
             aspectRatio: document.getElementById("fAspect").value,

@@ -1224,6 +1224,37 @@
       // many more (the SDXL endpoint especially) — add them here with the right
       // endpoint and params and they will appear in the dropdown untouched by
       // any code change.
+      // ── Fitting room ───────────────────────────────────────────────────────
+      // A character wearing chosen garments. This is what the wardrobe is for:
+      // the same dress in every scene rather than a fresh guess each time.
+      //
+      // Wiro only, and not a preference — Dezgo's text2image endpoints take no
+      // input image at all, and the whole method here is handing the model the
+      // character's reference photograph and the garment flat lays together.
+      // Nothing Dezgo offers can do that, so the generator picker is not
+      // consulted for this.
+      fitting: {
+        // Seedream v5 Pro: the most reliable of the three at holding several
+        // reference images at once, which is the entire job here.
+        model: "seedream-v5-pro-uncensored",
+        // Full length, so the whole outfit is in frame.
+        aspectRatio: "9:16",
+        resolution: "1k",
+        // Wiro caps inputImage at 15 including references, and coherence falls
+        // off long before that: each garment is another thing the model has to
+        // keep faithful while also composing a person.
+        maxGarments: 5,
+        // The default scene. Deliberately plain — a fitting room shot is for
+        // seeing the clothes, and a busy background is the model's attention
+        // going somewhere other than the outfit.
+        scene: "standing facing the camera, full length, plain light grey studio backdrop, soft even lighting",
+        // {charDesc}, {garments} and {scene} are substituted. The reference
+        // images are named in order because otherwise the model has no way to
+        // know which picture is the person and which are the clothes — and
+        // "the first image" is the only handle it has on them.
+        promptTemplate: "Full length fashion photograph of the person in the first reference image{charDesc}, wearing {garments}. The reference images after the first are the garments, photographed flat — dress the person in exactly those garments, matching their colour, cut, fabric and detailing precisely. {scene}",
+      },
+
       // What a generation costs, per endpoint family. Dezgo prices by family and
       // resolution rather than per model, and steps scale it linearly, so this
       // is a table of four numbers rather than one per model in a list of
