@@ -65,7 +65,7 @@ const DEZGO_INFO_PATHS = ['/info', '/models'];
 //
 // SERPAPI_KEY is optional. When it is absent the provider simply is not
 // offered, rather than the whole action failing.
-const SEARCH_PROVIDERS = ['auto', 'openverse', 'wikimedia', 'serpapi'] as const;
+const SEARCH_PROVIDERS = ['auto', 'openverse', 'wikimedia', 'serpapi', 'serper'] as const;
 
 // Sent on every search. An API refusing an unidentified caller is ordinary,
 // and Deno's default agent string is exactly the kind a WAF turns away — which
@@ -152,6 +152,35 @@ async function searchWikimedia(query: string, limit: number) {
       page: (info.descriptionurl as string) || '',
     };
   }).filter((r) => r.url);
+}
+
+// Serper: Google Images behind a key. The keyless indexes are openly-licensed
+// corpora — an encyclopedia's media library and a Creative Commons catalogue —
+// and neither carries commercial product photography, which is what a flat lay
+// of a specific garment is. No amount of falling back between them fixes that;
+// only a real image search has the range.
+async function searchSerper(query: string, limit: number, key: string) {
+  const res = await fetch('https://google.serper.dev/images', {
+    method: 'POST',
+    headers: { 'X-API-KEY': key, 'Content-Type': 'application/json', 'User-Agent': SEARCH_UA },
+    body: JSON.stringify({ q: query, num: limit }),
+  });
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => '')).slice(0, 200);
+    throw new Error(`Serper returned HTTP ${res.status}${detail ? ': ' + detail : ''}`);
+  }
+  const body = await res.json();
+  // Defensive: this shape has not been seen from here, so anything missing an
+  // image URL is dropped rather than turned into a broken tile.
+  const results = Array.isArray(body?.images) ? body.images : [];
+  return results.slice(0, limit).map((r: Record<string, unknown>) => ({
+    url: (r.imageUrl as string) || (r.thumbnailUrl as string) || '',
+    thumbnail: (r.thumbnailUrl as string) || (r.imageUrl as string) || '',
+    title: (r.title as string) || '',
+    source: (r.source as string) || 'google',
+    license: '',
+    page: (r.link as string) || '',
+  })).filter((r: { url: string }) => typeof r.url === 'string' && r.url);
 }
 
 async function searchSerpapi(query: string, limit: number, key: string) {
@@ -338,6 +367,16 @@ Deno.serve(async (req: Request) => {
     const limit = Math.max(1, Math.min(40, Number(payload.limit) || 20));
 
     try {
+      if (requested === 'serper') {
+        const key = Deno.env.get('SERPER_KEY');
+        if (!key) {
+          return new Response('Serper is not configured on the server (SERPER_KEY is not set)', {
+            status: 503,
+            headers: corsHeaders(),
+          });
+        }
+        return json({ provider: 'serper', results: await searchSerper(query, limit, key) }, 200);
+      }
       if (requested === 'serpapi') {
         const key = Deno.env.get('SERPAPI_KEY');
         if (!key) {
@@ -361,11 +400,22 @@ Deno.serve(async (req: Request) => {
       // only judgeable if you know where it came from. Every failure along the
       // way is carried, so a total miss says what each one actually said
       // instead of just "nothing".
+      //
+      // Keyed providers first, and not as a preference: the keyless ones index
+      // openly-licensed material only, so their coverage of clothing is
+      // whatever happens to have been donated. Setting one key is therefore
+      // the entire configuration — no client change follows it, because this
+      // order picks the better source the moment it can.
+      const serperKey = Deno.env.get('SERPER_KEY');
+      const serpapiKey = Deno.env.get('SERPAPI_KEY');
+      const chain: Array<[string, () => Promise<unknown[]>]> = [];
+      if (serperKey) chain.push(['serper', () => searchSerper(query, limit, serperKey)]);
+      if (serpapiKey) chain.push(['serpapi', () => searchSerpapi(query, limit, serpapiKey)]);
+      chain.push(['openverse', () => searchOpenverse(query, limit)]);
+      chain.push(['wikimedia', () => searchWikimedia(query, limit)]);
+
       const tried: string[] = [];
-      for (const [name, run] of [
-        ['openverse', () => searchOpenverse(query, limit)],
-        ['wikimedia', () => searchWikimedia(query, limit)],
-      ] as Array<[string, () => Promise<unknown[]>]>) {
+      for (const [name, run] of chain) {
         try {
           const results = await run();
           if (results.length) return json({ provider: name, results, tried }, 200);
