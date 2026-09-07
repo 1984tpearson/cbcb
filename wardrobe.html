@@ -1006,14 +1006,15 @@
   };
 
   // ── Deleting from the grid ─────────────────────────────────────────────────
-  // One tap, no confirmation dialog. A dialog on every deletion is a tax paid
-  // by the many obviously-bad garments to protect the rare good one, and it is
-  // the wrong way round: the deletion is cheap to undo, so let it happen and
-  // offer the undo.
+  // Asks first. The delete sits on top of every picture in a scrolling grid of
+  // thumbnails, which on a phone is a 32px target inside the thing you scroll
+  // with — near enough to a real tap that the wrong one happens without being
+  // noticed, and an undo nobody knows to look for is no protection at all.
   //
-  // The undo stays until something else is done, rather than expiring on a
-  // timer — a timer that runs out while the phone is in a pocket has protected
-  // nobody, and this is the only route back once the row is written.
+  // The undo stays anyway, for the deletion that was confirmed and regretted.
+  // It waits until something else is done rather than expiring on a timer: a
+  // timer that runs out while the phone is in a pocket has protected nobody,
+  // and once the row is written this is the only route back.
   let lastDeleted = null;
 
   function quickStatusWithUndo(text) {
@@ -1032,6 +1033,9 @@
     const index = items.findIndex(i => i.id === id);
     if (index < 0) return;
     const item = items[index];
+    // Named, not "this item": the whole risk is deleting one garment while
+    // meaning another, and a dialog that does not say which is no help.
+    if (!confirm('Delete "' + (item.name || "this garment") + '"?')) return;
     const before = items;
     items = items.filter(i => i.id !== id);
     render();
