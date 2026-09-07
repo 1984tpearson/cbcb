@@ -1224,6 +1224,30 @@
       // many more (the SDXL endpoint especially) — add them here with the right
       // endpoint and params and they will appear in the dropdown untouched by
       // any code change.
+      // What a generation costs, per endpoint family. Dezgo prices by family and
+      // resolution rather than per model, and steps scale it linearly, so this
+      // is a table of four numbers rather than one per model in a list of
+      // dozens. Approximate and published rather than measured — treat it as
+      // the order of magnitude that decides which model to pick, not a bill.
+      dezgoPricing: {
+        text2image: 0.0019,
+        text2image_sdxl: 0.0075,
+        text2image_flux: 0.0075,
+      },
+
+      // A flat lay wants a plain, literal photograph of a garment. Models
+      // trained for anime, ponies, pixel art or illustration will cheerfully
+      // produce a drawing of one, which is useless as a reference for a
+      // photographic scene — so they are listed separately rather than mixed
+      // in. Matched against the model's name, family and categories together.
+      // Matched as substrings against name, id, family and categories, so each
+      // one has to be a word that cannot appear innocently: "art" would catch
+      // anything artistic and also nothing to do with style, and "dream"
+      // catches DreamShaper, which is a general photographic model. Both were
+      // in this list and both were wrong.
+      stylisedHints: ["anime", "pony", "cartoon", "manga", "hentai", "illustration", "illustrious",
+                      "artistic", "painting", "toon", "comic", "pixel", "furry", "waifu", "sketch"],
+
       // Adding one: the id must be Dezgo's exact model slug, which is the last
       // segment of its page URL (dezgo.com/model/<id>). A wrong one is refused
       // with {"model":["InvalidEnumValue"]} and costs nothing — Dezgo validates

@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Wardrobe</title>
-<script src="site-config.js?v=28"></script>
+<script src="site-config.js?v=29"></script>
 <style>
   :root {
     --pink: #d4547a; --pink-bg: #fdf1f4; --pink-border: #f0c4d1;
@@ -827,8 +827,19 @@
     // otherwise, so the page works before the first fetch and after a failed one.
     const dezgo = cachedDezgoModels() || w.dezgoModels;
     return [
-      ...dezgo.map(m => ({ key: "dezgo:" + m.id, provider: "dezgo", id: m.id, label: generatorLabel(m.label, "dezgo") })),
-      ...CFG.models.image.map(m => ({ key: "wiro:" + m.id, provider: "wiro", id: m.id, label: generatorLabel(m.label, "wiro") })),
+      ...dezgo.map(m => ({
+        key: "dezgo:" + m.id, provider: "dezgo", id: m.id,
+        label: generatorLabel(m.label, "dezgo"),
+        // Present on a fetched model, absent on a configured one — so the
+        // configured fallbacks are priced from the same table rather than
+        // showing nothing next to a list where everything else has a price.
+        cost: m.cost ?? w.dezgoPricing[m.endpoint] ?? null,
+        stylised: !!m.stylised,
+      })),
+      ...CFG.models.image.map(m => ({
+        key: "wiro:" + m.id, provider: "wiro", id: m.id,
+        label: generatorLabel(m.label, "wiro"), cost: null, stylised: false,
+      })),
     ];
   }
 
@@ -848,14 +859,39 @@
     return list.find(g => g.key === fallbackKey) || list[0];
   }
 
+  // Pennies, not dollars: every number here is a fraction of a cent, and
+  // "$0.0075" is four characters of zero before anything informative.
+  function costLabel(cost) {
+    if (cost == null) return "";
+    const pence = cost * 100;
+    return " · " + (pence < 1 ? pence.toFixed(2) : pence.toFixed(1)) + "c";
+  }
+
+  function optionFor(g, current) {
+    return '<option value="' + esc(g.key) + '"' + (g.key === current.key ? " selected" : "") + ">" +
+      esc(g.label + costLabel(g.cost)) + "</option>";
+  }
+
   function refreshGeneratorPick() {
     const list = allGenerators();
     const current = currentGenerator();
-    const sel = document.getElementById("genPick");
-    sel.innerHTML = list.map(g =>
-      '<option value="' + esc(g.key) + '"' + (g.key === current.key ? " selected" : "") + ">" +
-      esc(g.label) + "</option>").join("");
-    document.getElementById("genPickLabel").textContent = "Using " + current.label;
+
+    // Three groups, because the list is long enough that an ungrouped one is
+    // just a wall: what suits the job, what does not, and the other provider.
+    const plain = list.filter(g => g.provider === "dezgo" && !g.stylised);
+    const stylised = list.filter(g => g.provider === "dezgo" && g.stylised);
+    const wiro = list.filter(g => g.provider === "wiro");
+    const group = (label, gs) => gs.length
+      ? '<optgroup label="' + esc(label) + '">' + gs.map(g => optionFor(g, current)).join("") + "</optgroup>"
+      : "";
+
+    document.getElementById("genPick").innerHTML =
+      group("Photographic — best for flat lays", plain) +
+      group("Stylised — draws rather than photographs", stylised) +
+      group("Wiro", wiro);
+
+    document.getElementById("genPickLabel").textContent =
+      "Using " + current.label + costLabel(current.cost);
   }
 
   // ── Dezgo's own model list ─────────────────────────────────────────────────
@@ -910,18 +946,26 @@
       if (w > 0 && h > 0) { params.width = w; params.height = h; }
 
       const family = typeof m.family === "string" ? m.family : "";
-      const label = (typeof m.name === "string" && m.name.trim() ? m.name.trim() : id) +
-        (family ? " — " + family : "");
+      const name = (typeof m.name === "string" && m.name.trim()) ? m.name.trim() : id;
+      const cats = [].concat(m.categories || m.category || []).join(" ");
+
+      // Anything trained to draw rather than photograph is separated out, not
+      // dropped: it is still a legitimate choice, just a bad default for a
+      // reference a photographic scene has to match.
+      const haystack = (name + " " + id + " " + family + " " + cats).toLowerCase();
+      const stylised = wardrobeCfg().stylisedHints.some(h => haystack.includes(h));
+
       out.push({
-        id, label, endpoint, params,
+        id, endpoint, params, stylised, family,
+        label: name + (family ? " — " + family : ""),
+        cost: wardrobeCfg().dezgoPricing[endpoint] ?? null,
         // Flux has no CFG and so takes no negative prompt; the others do.
         negative: endpoint !== "text2image_flux",
       });
     }
-    // Flux first, then SDXL, then SD1 — cheapest-capable order, matching how
-    // the hardcoded list was arranged.
-    out.sort((a, b) => SUPPORTED_ENDPOINTS.indexOf(a.endpoint) - SUPPORTED_ENDPOINTS.indexOf(b.endpoint)
-      || a.label.localeCompare(b.label));
+    // Cheapest first, which is the order the question "which of these do I
+    // want" is actually asked in. Ties break on name so the list is stable.
+    out.sort((a, b) => (a.cost ?? 99) - (b.cost ?? 99) || a.label.localeCompare(b.label));
     return out;
   }
 
@@ -942,8 +986,19 @@
           " but nothing in it looked like a text-to-image model.");
       }
       try { localStorage.setItem(DEZGO_LIST_KEY, JSON.stringify(list)); } catch {}
+
+      // The raw catalogue is kept server-side as well as the normalised list.
+      // Which fields Dezgo actually publishes — whether it prices per model,
+      // how it names its categories — decides how well this list can be sorted
+      // and grouped, and none of that is knowable from a normalised copy. It
+      // is one row, written only when this button is pressed.
+      call("save_chat", { characterId: "__dezgo_catalogue__", messages: body })
+        .catch(e => console.warn("Wardrobe: could not keep the raw catalogue", e));
+
       refreshGeneratorPick();
-      quickStatus("Found " + list.length + " Dezgo models.", "ok");
+      const styled = list.filter(m => m.stylised).length;
+      quickStatus("Found " + list.length + " Dezgo models (" + (list.length - styled) +
+        " photographic, " + styled + " stylised).", "ok");
     } catch (e) {
       quickStatus("Could not fetch the model list: " + e.message, "err");
     }
