@@ -274,24 +274,28 @@
   <div id="wardrobeView">
   <div class="quickadd">
     <input type="text" id="quickPrompt" placeholder="blue ball gown"
-           onkeydown="if(event.key==='Enter')quickGenerate()" />
+           onkeydown="if(event.key==='Enter')quickSearch()" />
     <div class="qbtns">
-      <button class="primary" id="qGenBtn" onclick="quickGenerate()">Generate</button>
-      <select id="quickCount" title="How many to make"></select>
+      <button class="primary" id="qSearchBtn" onclick="quickSearch()">Search</button>
     </div>
     <div class="qbtns">
       <button id="qUpBtn" onclick="document.getElementById('quickFile').click()">Upload</button>
       <button id="qLinkBtn" onclick="quickLink()">Link</button>
       <button id="qExtractBtn" onclick="quickExtract()">Extract</button>
-      <button id="qSearchBtn" onclick="quickSearch()">Search</button>
+    </div>
+    <div class="qbtns">
+      <button id="qGenBtn" onclick="quickGenerate()">Generate</button>
+      <select id="quickCount" title="How many to make"></select>
     </div>
     <div id="searchResults" hidden>
       <div class="rowlabel" id="searchLabel"></div>
       <div class="grid picker" id="searchGrid"></div>
       <button id="searchCloseBtn" onclick="closeSearch()">Close results</button>
     </div>
-    <p class="qhint">Extract pulls the clothes out of a photo of someone wearing them — paste the photo's
-      URL above and press it, or press it with the box empty to pick a file.</p>
+    <p class="qhint">Enter searches. Generate costs a fraction of a penny per garment, so it is a
+      deliberate tap — for when the search has nothing you want. Extract pulls the clothes out of a
+      photo of someone wearing them: paste the photo's URL above and press it, or press it with the box
+      empty to pick a file.</p>
     <input type="file" id="quickFile" accept="image/png,image/jpeg,image/webp" hidden onchange="quickUpload(event)" />
     <input type="file" id="extractFile" accept="image/png,image/jpeg,image/webp" hidden onchange="extractFromFile(event)" />
     <details class="genpick">
@@ -1715,11 +1719,22 @@
     el.className = kind || "";
   }
 
-  function setQuickBusy(busy, label) {
-    for (const id of ["qGenBtn", "qUpBtn", "qLinkBtn", "qExtractBtn", "qSearchBtn"]) {
-      document.getElementById(id).disabled = busy;
+  // Which button each action renames while it runs. Renaming Generate during a
+  // search was fine when Generate was the only thing Enter could reach; now it
+  // would be a lie about what is happening, and about what is being spent.
+  const BUSY_LABELS = { qSearchBtn: "Search", qGenBtn: "Generate", qExtractBtn: "Extract",
+                        qUpBtn: "Upload", qLinkBtn: "Link" };
+
+  function setQuickBusy(busy, label, btnId) {
+    for (const id of Object.keys(BUSY_LABELS)) {
+      const el = document.getElementById(id);
+      el.disabled = busy;
+      el.textContent = BUSY_LABELS[id];
     }
-    document.getElementById("qGenBtn").textContent = busy ? (label || "Working…") : "Generate";
+    if (busy) {
+      const target = document.getElementById(BUSY_LABELS[btnId] ? btnId : "qSearchBtn");
+      target.textContent = (label || "Working") + "…";
+    }
   }
 
   // Everything the grid needs, with the typed line kept as a fallback name so
@@ -1852,8 +1867,8 @@
     return made;
   }
 
-  async function quickAdd({ typed, getImage, verb }) {
-    setQuickBusy(true, verb);
+  async function quickAdd({ typed, getImage, verb, btnId }) {
+    setQuickBusy(true, verb, btnId);
     let item = newGarment(typed);
     try {
       quickStatus(verb + "…", "busy");
@@ -1918,7 +1933,7 @@
     const typed = document.getElementById("quickPrompt").value.trim();
     if (!typed) { quickStatus("Type what the garment is first.", "err"); return; }
     const count = Math.max(1, Math.min(wardrobeCfg().maxBatch, Number(document.getElementById("quickCount").value) || 1));
-    setQuickBusy(true, "Generating");
+    setQuickBusy(true, "Generating", "qGenBtn");
     let lines;
     try {
       if (count > 1) quickStatus("Thinking up " + count + " versions…", "busy");
@@ -2019,7 +2034,7 @@
   }
 
   async function runExtract(photoUrl, label, { temporary }) {
-    setQuickBusy(true, "Extracting");
+    setQuickBusy(true, "Extracting", "qExtractBtn");
     let found;
     try {
       quickStatus("Looking at " + label + "…", "busy");
@@ -2097,7 +2112,7 @@
     // "ball gown flat lay" does not ask for a flat lay twice.
     const query = /flat\s*lay/i.test(typed) ? typed : typed + " " + w.searchSuffix;
 
-    setQuickBusy(true, "Searching");
+    setQuickBusy(true, "Searching", "qSearchBtn");
     quickStatus("Searching for “" + query + "”…", "busy");
     try {
       const res = await proxyPost({
@@ -2155,7 +2170,7 @@
     const hit = searchHits[index];
     if (!hit) return;
     const typed = document.getElementById("quickPrompt").value.trim();
-    setQuickBusy(true, "Saving");
+    setQuickBusy(true, "Saving", "qSearchBtn");
     quickStatus("Saving that picture…", "busy");
     try {
       await addOne({
@@ -2194,7 +2209,7 @@
         r.onerror = () => reject(new Error("Could not read that file"));
         r.readAsDataURL(file);
       });
-      setQuickBusy(true, "Extracting");
+      setQuickBusy(true, "Extracting", "qExtractBtn");
       quickStatus("Uploading the photo…", "busy");
       // The extract_ prefix is what lets it be deleted again: upload-image will
       // only remove files named that way, so this cannot take out a character's
@@ -2213,7 +2228,7 @@
     if (!file) return;
     const typed = document.getElementById("quickPrompt").value.trim();
     return quickAdd({
-      typed, verb: "Uploading",
+      typed, verb: "Uploading", btnId: "qUpBtn",
       getImage: async () => {
         const dataUrl = await new Promise((resolve, reject) => {
           const r = new FileReader();
@@ -2231,7 +2246,7 @@
     if (!src || !src.trim()) return;
     const typed = document.getElementById("quickPrompt").value.trim();
     return quickAdd({
-      typed, verb: "Fetching",
+      typed, verb: "Fetching", btnId: "qLinkBtn",
       // Copied into Storage rather than linked: someone else's URL is a
       // picture that disappears without warning.
       getImage: () => persist(src.trim()),
