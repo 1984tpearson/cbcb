@@ -170,9 +170,12 @@
           this garment is later used in a chat image. Be specific — cut, fabric, colour, length, fastenings.
           "A dress" produces a different dress every time.</p>
         <div class="row2">
-          <label class="field"><span>Image model</span><select id="fModel"></select></label>
-          <label class="field"><span>Shape</span><select id="fAspect"></select></label>
+          <label class="field"><span>Generator</span>
+            <select id="fProvider" onchange="refreshProvider()"></select></label>
+          <label class="field"><span>Model</span>
+            <select id="fModel" onchange="refreshPromptView()"></select></label>
         </div>
+        <label class="field" id="aspectField"><span>Shape</span><select id="fAspect"></select></label>
         <label class="field"><span>Prompt that will be sent</span>
           <div class="promptview" id="promptView"></div></label>
       </div>
@@ -278,8 +281,30 @@
       w.categories.map(c => '<option value="' + esc(c) + '">' + esc(c) + "</option>").join("");
     document.getElementById("fAspect").innerHTML =
       w.aspectRatios.map(a => '<option value="' + esc(a) + '">' + esc(a) + "</option>").join("");
+    document.getElementById("fProvider").innerHTML =
+      '<option value="dezgo">Dezgo</option><option value="wiro">Wiro (Seedream)</option>';
+  }
+
+  // The two providers do not take the same settings, so the model list and the
+  // shape control are rebuilt whenever the generator changes. Dezgo takes a
+  // width and a height that belong to the model, not a named aspect ratio, so
+  // the shape select has nothing to say there and is hidden rather than left
+  // sitting on screen doing nothing.
+  window.refreshProvider = function () {
+    const provider = document.getElementById("fProvider").value;
+    const w = wardrobeCfg();
+    const models = provider === "dezgo" ? w.dezgoModels : CFG.models.image;
     document.getElementById("fModel").innerHTML =
-      CFG.models.image.map(m => '<option value="' + esc(m.id) + '">' + esc(m.label) + "</option>").join("");
+      models.map(m => '<option value="' + esc(m.id) + '">' + esc(m.label) + "</option>").join("");
+    // Keep the draft's own model selected where it still exists on this provider.
+    if (draft && models.some(m => m.id === draft.model)) document.getElementById("fModel").value = draft.model;
+    document.getElementById("aspectField").hidden = provider === "dezgo";
+    refreshPromptView();
+  };
+
+  function dezgoModel(id) {
+    const list = wardrobeCfg().dezgoModels;
+    return list.find(m => m.id === id) || list[0];
   }
 
   // ── Grid ───────────────────────────────────────────────────────────────────
@@ -344,7 +369,8 @@
           id: "g_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
           name: "", category: w.categories[0], description: "", tags: [],
           image: "", variants: [], prompt: "", source: "",
-          model: CFG.models.image[0].id, aspectRatio: w.aspectRatio,
+          provider: w.provider, model: (w.provider === "dezgo" ? w.dezgoModels[0].id : CFG.models.image[0].id),
+          aspectRatio: w.aspectRatio,
           createdAt: Date.now(), updatedAt: Date.now(),
         };
 
@@ -353,8 +379,9 @@
     document.getElementById("fCategory").value = draft.category || w.categories[0];
     document.getElementById("fTags").value = (draft.tags || []).join(", ");
     document.getElementById("fDescription").value = draft.description || "";
-    document.getElementById("fModel").value = draft.model || CFG.models.image[0].id;
+    document.getElementById("fProvider").value = draft.provider || w.provider;
     document.getElementById("fAspect").value = draft.aspectRatio || w.aspectRatio;
+    refreshProvider();
     document.getElementById("deleteBtn").hidden = draftIsNew;
     document.getElementById("editor").classList.add("open");
     refreshShot();
@@ -412,7 +439,16 @@
 
   window.refreshPromptView = function () {
     const p = buildFlatLayPrompt();
-    document.getElementById("promptView").textContent = p || "Describe the garment and the prompt appears here.";
+    let text = p || "Describe the garment and the prompt appears here.";
+    // Shown only where it is actually sent. A negative prompt displayed beside
+    // a Flux model would be a straight lie about what the request contains.
+    if (p && document.getElementById("fProvider").value === "dezgo") {
+      const m = dezgoModel(document.getElementById("fModel").value);
+      if (m.negative && wardrobeCfg().negativePrompt) {
+        text += "\n\nNEGATIVE: " + wardrobeCfg().negativePrompt;
+      }
+    }
+    document.getElementById("promptView").textContent = text;
     document.getElementById("genBtn").disabled = !p;
   };
 
@@ -466,12 +502,48 @@
     throw new Error("The generation did not finish in time");
   }
 
+  // Dezgo has no task queue: one request, and the image bytes come back on it.
+  // So there is nothing to poll, and the whole of the Wiro machinery above has
+  // no equivalent here. The proxy hands them over as a data URL, which is
+  // exactly what upload-image's other intake path already takes.
+  async function generateDezgo({ prompt, modelId }) {
+    const m = dezgoModel(modelId);
+    const params = Object.assign({}, m.params, {
+      model: m.id,
+      prompt,
+      seed: Math.floor(Math.random() * 2147483647),
+    });
+    // Flux has no CFG and therefore no negative prompt; sending one is a 400.
+    // The flag on the model says which is which.
+    if (m.negative && wardrobeCfg().negativePrompt) params.negative_prompt = wardrobeCfg().negativePrompt;
+
+    const res = await fetch(IMAGE_PROXY_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "dezgo", endpoint: m.endpoint, params }),
+    });
+    if (!res.ok) throw new Error(await res.text().catch(() => "Dezgo request failed: " + res.status));
+    const { dataUrl } = await res.json();
+    if (!dataUrl) throw new Error("Dezgo returned no image");
+    return dataUrl;
+  }
+
   // Copy into Supabase Storage. Wiro's CDN is not somewhere to keep a
   // wardrobe, and a garment is meant to still be there in six months.
   async function persist(sourceUrl) {
     const res = await fetch(UPLOAD_IMAGE_URL, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sourceUrl, token: ACCESS_TOKEN, filename: "garment_" + Date.now() + "_" + Math.random().toString(36).slice(2) }),
+    });
+    if (!res.ok) throw new Error("Upload: " + res.status + " " + (await res.text().catch(() => "")));
+    const { url } = await res.json();
+    if (!url) throw new Error("Upload returned no URL");
+    return url;
+  }
+
+  async function persistDataUrl(dataUrl) {
+    const res = await fetch(UPLOAD_IMAGE_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dataUrl, token: ACCESS_TOKEN, filename: "garment_" + Date.now() + "_" + Math.random().toString(36).slice(2) }),
     });
     if (!res.ok) throw new Error("Upload: " + res.status + " " + (await res.text().catch(() => "")));
     const { url } = await res.json();
@@ -490,16 +562,20 @@
   window.generateShot = async function () {
     const prompt = buildFlatLayPrompt();
     if (!prompt) return;
+    const provider = document.getElementById("fProvider").value;
+    const modelId = document.getElementById("fModel").value;
     const btn = document.getElementById("genBtn");
     btn.disabled = true;
     status("Generating…", "busy");
     try {
-      const raw = await generateFlatLay({
-        prompt,
-        model: document.getElementById("fModel").value,
-        aspectRatio: document.getElementById("fAspect").value,
-      });
-      acceptImage(await persist(raw), "generated", prompt);
+      const stored = provider === "dezgo"
+        ? await persistDataUrl(await generateDezgo({ prompt, modelId }))
+        : await persist(await generateFlatLay({
+            prompt,
+            model: modelId,
+            aspectRatio: document.getElementById("fAspect").value,
+          }));
+      acceptImage(stored, provider, prompt);
       status("Generated.", "ok");
     } catch (e) {
       status(e.message, "err");
@@ -519,14 +595,7 @@
         r.onerror = () => reject(new Error("Could not read that file"));
         r.readAsDataURL(file);
       });
-      const res = await fetch(UPLOAD_IMAGE_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dataUrl, token: ACCESS_TOKEN, filename: "garment_" + Date.now() + "_" + Math.random().toString(36).slice(2) }),
-      });
-      if (!res.ok) throw new Error("Upload: " + res.status + " " + (await res.text().catch(() => "")));
-      const { url } = await res.json();
-      if (!url) throw new Error("Upload returned no URL");
-      acceptImage(url, "upload", "");
+      acceptImage(await persistDataUrl(dataUrl), "upload", "");
       status("Uploaded.", "ok");
     } catch (e) {
       status(e.message, "err");
@@ -562,6 +631,7 @@
     draft.category = document.getElementById("fCategory").value;
     draft.description = document.getElementById("fDescription").value.trim();
     draft.tags = document.getElementById("fTags").value.split(",").map(t => t.trim()).filter(Boolean);
+    draft.provider = document.getElementById("fProvider").value;
     draft.model = document.getElementById("fModel").value;
     draft.aspectRatio = document.getElementById("fAspect").value;
     draft.updatedAt = Date.now();

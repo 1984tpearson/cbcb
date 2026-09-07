@@ -10,6 +10,7 @@
 //
 //   submit  → start a Wiro task, return { taskId } immediately
 //   status  → check a task: 202 while running, { imageUrl } when done
+//   dezgo   → run a Dezgo generation and return { dataUrl } in one call
 //   (none)  → legacy blocking mode: submit, then poll inline until done
 //
 // The split exists because this function has a wall-clock limit. Blocking mode
@@ -28,6 +29,34 @@ const WIRO_MODELS: Record<string, string> = {
   'seedream-v4-5-uncensored': 'https://api.wiro.ai/v1/Run/bytedance/seedream-v4-5-uncensored',
 };
 const DEFAULT_MODEL = 'seedream-v5-pro-uncensored';
+
+// ── Dezgo ──────────────────────────────────────────────────────────────
+// A second provider, used by wardrobe.html for garment flat lays. Dezgo has no
+// task queue: the request blocks and comes back with the image bytes, so there
+// is nothing to poll and the whole thing is one call. That also means the
+// edge function's wall-clock limit is the ceiling on generation time — fine
+// for the endpoints below, which finish in seconds, and the reason a slow
+// Dezgo model has no business being added here.
+//
+// Endpoints are allowlisted for the same reason the Wiro models are: the path
+// is never interpolated from the request, or a caller could point this at any
+// URL on the host and spend the key on it.
+const DEZGO_ENDPOINTS: Record<string, string> = {
+  text2image: 'https://api.dezgo.com/text2image',
+  text2image_sdxl: 'https://api.dezgo.com/text2image_sdxl',
+  text2image_flux: 'https://api.dezgo.com/text2image_flux',
+};
+const DEZGO_DEFAULT_ENDPOINT = 'text2image_flux';
+
+// Which body parameters may be forwarded. The client decides the values and
+// which of them apply to the model it picked — that table lives in
+// site-config.js, so a parameter Dezgo renames or a model that turns out not
+// to accept one is a config edit rather than a redeploy of this function.
+// The allowlist is here because the client is not trusted to name fields.
+const DEZGO_ALLOWED_PARAMS = new Set([
+  'prompt', 'negative_prompt', 'model', 'width', 'height',
+  'steps', 'guidance', 'sampler', 'seed', 'format', 'transparent_background', 'upscale',
+]);
 const WIRO_TASK_DETAIL_URL = 'https://api.wiro.ai/v1/Task/Detail';
 const ALLOWED_ORIGINS = Deno.env.get('ALLOWED_ORIGIN') || '*';
 
@@ -154,16 +183,9 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  const apiKey = Deno.env.get('WIRO_API_KEY');
-  if (!apiKey) {
-    return new Response('Server misconfiguration', {
-      status: 500,
-      headers: corsHeaders(),
-    });
-  }
-
   // ── Read JSON payload from the browser ──────────
   // Expected shape: { action?, taskId?, model?, prompt, inputImage?, resolution?, aspectRatio?, outputFormat?, watermark?, seed? }
+  // For action 'dezgo': { action, endpoint?, params: { prompt, model, ... } }
   let payload: Record<string, unknown>;
   try {
     payload = await req.json();
@@ -175,6 +197,97 @@ Deno.serve(async (req: Request) => {
   }
 
   const action = typeof payload.action === 'string' ? payload.action : '';
+
+  // ── action: dezgo ────────────────────────────────
+  // One call in, one image out. Handled before the Wiro key is looked at, so a
+  // deployment holding only one of the two provider keys still serves the
+  // provider it can.
+  if (action === 'dezgo') {
+    const dezgoKey = Deno.env.get('DEZGO_API_KEY');
+    if (!dezgoKey) {
+      return new Response('Dezgo is not configured on the server (DEZGO_API_KEY is not set)', {
+        status: 503,
+        headers: corsHeaders(),
+      });
+    }
+
+    const endpointName = typeof payload.endpoint === 'string' ? payload.endpoint : DEZGO_DEFAULT_ENDPOINT;
+    const endpointUrl = DEZGO_ENDPOINTS[endpointName];
+    if (!endpointUrl) {
+      return new Response(`Unknown Dezgo endpoint: ${endpointName}`, { status: 400, headers: corsHeaders() });
+    }
+
+    const params = (payload.params && typeof payload.params === 'object' && !Array.isArray(payload.params))
+      ? payload.params as Record<string, unknown>
+      : {};
+    const form = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (!DEZGO_ALLOWED_PARAMS.has(key)) continue;
+      if (value === undefined || value === null || value === '') continue;
+      form.set(key, String(value));
+    }
+    if (!form.get('prompt')) {
+      return new Response('prompt is required', { status: 400, headers: corsHeaders() });
+    }
+
+    let dezgoRes: Response;
+    try {
+      dezgoRes = await fetch(endpointUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-Dezgo-Key': dezgoKey,
+        },
+        body: form.toString(),
+      });
+    } catch (e) {
+      return new Response(`Dezgo request failed: ${e instanceof Error ? e.message : String(e)}`, {
+        status: 502,
+        headers: corsHeaders(),
+      });
+    }
+
+    if (!dezgoRes.ok) {
+      // Passed through verbatim rather than summarised. Dezgo answers a wrong
+      // parameter name with a message that says which one, and that message is
+      // the whole diagnostic — the parameter table it refers to is editable in
+      // site-config.js, so the person reading the error can act on it.
+      const detail = await dezgoRes.text().catch(() => '');
+      return new Response(`Dezgo error ${dezgoRes.status}: ${detail.slice(0, 500)}`, {
+        status: dezgoRes.status >= 400 ? dezgoRes.status : 502,
+        headers: corsHeaders(),
+      });
+    }
+
+    // Dezgo answers with the image itself, not a URL, so the bytes have to
+    // come back through here. Returned as a data URL for the browser to hand
+    // to upload-image, which already takes one — the alternative is teaching
+    // this function to write to Storage, which is upload-image's whole job.
+    const contentType = dezgoRes.headers.get('content-type')?.split(';')[0] || 'image/png';
+    if (!contentType.startsWith('image/')) {
+      const detail = await dezgoRes.text().catch(() => '');
+      return new Response(`Dezgo returned ${contentType}: ${detail.slice(0, 500)}`, {
+        status: 502,
+        headers: corsHeaders(),
+      });
+    }
+    const bytes = new Uint8Array(await dezgoRes.arrayBuffer());
+    // Chunked so a megabyte-scale image does not blow the argument limit on
+    // String.fromCharCode, which takes one argument per byte.
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return json({ dataUrl: `data:${contentType};base64,${btoa(binary)}`, bytes: bytes.length }, 200);
+  }
+
+  const apiKey = Deno.env.get('WIRO_API_KEY');
+  if (!apiKey) {
+    return new Response('Server misconfiguration', {
+      status: 500,
+      headers: corsHeaders(),
+    });
+  }
 
   // ── action: status ───────────────────────────────
   // Poll an existing task. 202 while it is still running, the image URL when

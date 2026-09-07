@@ -1165,6 +1165,49 @@
       aspectRatio: "1:1",
       aspectRatios: ["1:1", "4:5", "3:4", "9:16", "16:9"],
       categories: ["Top", "Bottom", "Dress", "Outerwear", "Underwear", "Sleepwear", "Swimwear", "Shoes", "Accessory", "Full outfit"],
+
+      // Which generator the page reaches for first. Dezgo is the default
+      // because a flat lay needs no reference image, which is the one thing
+      // Dezgo's text2image endpoints cannot do and the entire reason chat
+      // images stay on Wiro.
+      provider: "dezgo",
+
+      // Only reaches models that actually take one — Flux has no CFG and so no
+      // negative prompt, which is exactly the case the `negative` flag below
+      // marks. Where it does apply it is far more reliable than the
+      // positive-prompt wording above, because "no mannequin" in a positive
+      // prompt still puts the word mannequin in front of the model.
+      negativePrompt: "person, model, mannequin, human, body, face, hands, arms, legs, worn, being worn, dressing form, coat hanger, crumpled, folded pile",
+
+      // Dezgo models, cheapest-capable first. Each entry says which endpoint it
+      // belongs to and the parameters that endpoint takes, because they differ:
+      // the Flux endpoint has no guidance or negative prompt, the SD one does.
+      // Kept here rather than in image-proxy.ts on purpose — the proxy
+      // allowlists parameter NAMES and nothing else, so a model added or a
+      // parameter renamed is an edit to this file and not a redeploy.
+      //
+      // Only ids that could be verified are listed: flux_1_schnell/flux_1_dev,
+      // and dreamshaper_7 from Dezgo's own published example. Dezgo carries
+      // many more (the SDXL endpoint especially) — add them here with the right
+      // endpoint and params and they will appear in the dropdown untouched by
+      // any code change.
+      dezgoModels: [
+        {
+          id: "flux_1_schnell", label: "Flux schnell — best value",
+          endpoint: "text2image_flux", negative: false,
+          params: { width: 1024, height: 1024, steps: 4 },
+        },
+        {
+          id: "flux_1_dev", label: "Flux dev — slower, more faithful",
+          endpoint: "text2image_flux", negative: false,
+          params: { width: 1024, height: 1024, steps: 20 },
+        },
+        {
+          id: "dreamshaper_7", label: "Dreamshaper 7 — cheapest, 512px",
+          endpoint: "text2image", negative: true,
+          params: { width: 512, height: 512, steps: 20, guidance: 7 },
+        },
+      ],
     },
 
     // ── Image generation ─────────────────────────────────────────────────────
