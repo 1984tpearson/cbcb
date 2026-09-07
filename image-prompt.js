@@ -88,7 +88,12 @@ window.ImagePrompt = {
     // wrists during sex is stranger than one that doesn't. Gated on the
     // character's NSFW toggle, same as every other explicit path in the app, so
     // an SFW character never gets this clause regardless of scene wording.
-    const POV_INTIMATE_RE = /\b(sex|sexual|fucking|fucks|thrust|thrusting|riding|rides|straddling|straddles|grinding|penetrat\w*|oral|blowjob|going down on|cock|dick|pussy|clit|nipples?|breasts?|tits|cum|climax|orgasm|moaning|naked|nude|undressed|topless|bare[- ]?chested)\b/i;
+    // "penis" was missing, and it is the word the extractor writes most often
+    // for the act this list exists to catch. So the commonest term for it was
+    // the one term that did not register as intimate — which silently dropped
+    // the user's own explicit detail from those shots, since this same test
+    // gates it, and left them with no intimate framing either.
+    const POV_INTIMATE_RE = /\b(sex|sexual|fucking|fucks|thrust|thrusting|riding|rides|straddling|straddles|grinding|penetrat\w*|oral|blowjob|blow job|going down on|cock|dick|penis|erection|erect|cunnilingus|deepthroat|pussy|clit|nipples?|breasts?|tits|cum|climax|orgasm|moaning|naked|nude|undressed|topless|bare[- ]?chested)\b/i;
     // Whether the VIEWER is dressed is decided by the tracked userOutfit, never by
     // the scene text: "naked" and "undressed" in a scene prompt are almost always
     // describing the character, and reading them as the viewer's state stripped
@@ -106,6 +111,10 @@ window.ImagePrompt = {
       return `${clothed}, the viewer wearing ${userOutfit}`;
     }
     const POV_INTIMATE_MODIFIER = CFG.image.povIntimateModifier;
+    // Where an explicit POV shot is composed. See buildPovModifiers: the
+    // contact branch returns before the intimate one, so this is the only
+    // framing an explicit shot ever gets.
+    const POV_INTIMATE_FRAMING = CFG.image.povIntimateFraming;
     function isIntimateScene(sceneText, staging, nsfw) {
       const userPose = (staging && staging.userPose) || "";
       return !!nsfw && POV_INTIMATE_RE.test(`${sceneText || ""} ${userPose}`);
@@ -184,6 +193,13 @@ window.ImagePrompt = {
         // only repeated the ownership and added a second mention of hands and
         // arms. Removing it measurably improved the images.
         parts.push(viewerBody);
+        // This branch returns, so the intimate modifier below never runs for
+        // an explicit shot — the NSFW scene note requires viewerBody, so
+        // every explicit shot exits here. That left those shots with no
+        // framing at all beyond "first person POV", and the model composed
+        // them like portraits: her head centred, and the viewer's anatomy
+        // stretched from the bottom edge to reach it.
+        if (isIntimateScene(scene, staging, nsfw)) parts.push(POV_INTIMATE_FRAMING);
         // What the viewer is wearing is decided by the tracked outfit, never
         // by the scene text: "naked" in a scene prompt is almost always
         // describing her, and reading it as the viewer's state stripped the
@@ -671,7 +687,7 @@ window.ImagePrompt = {
       // drop the act itself, so it is told to report what is happening. Gated on
       // the character's NSFW toggle like every other explicit path in the app.
       const actNote = character.nsfw
-        ? " State plainly what the two of them are physically doing to each other, including sexual acts where that is what is happening — do not soften it into mood, atmosphere or euphemism, and do not substitute a pose for the act. In an intimate scene viewerBody must name the viewer's own anatomy that is actually involved, and the frame edge it enters from. Give it a plain, ordinary size - write \"the viewer's normal sized penis\" rather than leaving the size unsaid, since unqualified the image model tends toward the exaggerated."
+        ? " State plainly what the two of them are physically doing to each other, including sexual acts where that is what is happening — do not soften it into mood, atmosphere or euphemism, and do not substitute a pose for the act. In an intimate scene viewerBody must name the viewer's own anatomy that is actually involved, and the frame edge it enters from."
         : "";
       // When she is wearing garments out of the wardrobe, their photographs go
       // to the image model and the prompt says nothing about them. What the

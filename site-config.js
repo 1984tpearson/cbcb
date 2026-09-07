@@ -1441,6 +1441,21 @@
       // against the body sliders — it is an instruction to draw the model's own
       // default figure, and it sat at the very end of the prompt where it had
       // the last word. What is actually needed here is the limb guard.
+      // Explicit POV shots kept coming out with the viewer's anatomy absurdly
+      // elongated, and the cause was composition rather than size. Nothing in
+      // the prompt said where in the frame she was, so the model fell back on
+      // its portrait habit and centred her head. With her head in the middle
+      // of a 9:16 frame and the viewer's body entering at the bottom edge,
+      // the only way to connect the two is to stretch what is between them.
+      // The scene note used to ask for "a normal sized penis" against this,
+      // which never worked and has been removed: an adjective cannot win an
+      // argument with a geometric constraint.
+      //
+      // This states the geometry instead: she is near, she is low in frame,
+      // and the gap is closed by the camera being close rather than by
+      // anything being longer than it is.
+      povIntimateFraming: "she is close to the camera, her head low in the frame rather than centred, the camera angled down towards her; the viewer's body enters from the bottom edge and meets her at its true size, foreshortened by how near she is, never elongated or stretched to reach her",
+
       proportionGuard: "two arms and two hands per person, no extra limbs, anatomically coherent",
       // Instruction sent to the extractor model that turns the recent
       // conversation into a Stable Diffusion prompt. {name}, {charDesc},
