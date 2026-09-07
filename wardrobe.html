@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Wardrobe</title>
-<script src="site-config.js?v=35"></script>
+<script src="site-config.js?v=36"></script>
 <script src="image-prompt.js?v=24"></script>
 <style>
   :root {
@@ -79,6 +79,9 @@
   #searchResults .card .meta { padding:6px 8px; }
   #searchResults .card .nm { font-size:11px; }
   #searchCloseBtn { width:100%; margin-top:10px; min-height:38px; }
+  #fitSets { margin:6px 0 12px; }
+  #fitSets .chip { padding:7px 13px; font-size:12px; }
+  #fitSets .chip.on { background:var(--pink); border-color:var(--pink); color:#fff; }
   .rowlabel { font-size:11px; font-weight:800; letter-spacing:.04em; text-transform:uppercase;
               color:var(--muted); margin-top:2px; }
   #fitResult img { width:100%; border-radius:12px; background:var(--bg3); }
@@ -167,6 +170,7 @@
   .card .meta { padding:9px 11px; }
   .card .nm { font-weight:800; font-size:13px; line-height:1.3; }
   .card .cat { font-size:11px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.04em; margin-top:2px; }
+  .card .setname { color:var(--pink); }
   .card .tags { margin-top:6px; display:flex; gap:4px; flex-wrap:wrap; }
   .card .tags span { font-size:10px; font-weight:700; background:var(--bg3); color:var(--muted); border-radius:999px; padding:2px 7px; }
   .empty { text-align:center; color:var(--muted); padding:60px 20px; line-height:1.6; }
@@ -301,6 +305,7 @@
   <div class="filters">
     <input type="search" id="search" placeholder="Search name, description, tag…" oninput="render()" />
     <select id="catFilter" onchange="render()"></select>
+    <select id="setFilter" onchange="render()"></select>
     <details class="tagbox" id="tagBox">
       <summary id="tagSummary"></summary>
       <div class="chips" id="tagChips"></div>
@@ -326,6 +331,10 @@
       <div class="card">
         <h2>What they wear</h2>
         <p class="hint" id="fitPickHint">Tap garments to put them on.</p>
+        <div id="fitSetsWrap" hidden>
+          <div class="rowlabel">Sets</div>
+          <div class="chips" id="fitSets"></div>
+        </div>
         <div id="fitRecentWrap" hidden>
           <div class="rowlabel">Just made</div>
           <div class="charrow" id="fitRecent"></div>
@@ -374,6 +383,9 @@
           <label class="field"><span>Tags (comma separated)</span>
             <input type="text" id="fTags" placeholder="evening, summer" /></label>
         </div>
+        <label class="field"><span>Set — worn together as an outfit</span>
+          <input type="text" id="fSet" list="setList" placeholder="e.g. navy work suit" />
+          <datalist id="setList"></datalist></label>
         <label class="field"><span>Description</span>
           <textarea id="fDescription" rows="4" oninput="refreshPromptView()"
             placeholder="Bias-cut black silk slip dress, thin spaghetti straps, cowl neck, mid-calf length, slight sheen."></textarea></label>
@@ -553,6 +565,19 @@
   // Ordered by how many garments carry each, not alphabetically. Alphabetical
   // puts "accessory, beach, belt" first, which is an accident of spelling; the
   // tag on twelve garments is the one worth reaching for.
+  // Every set that has at least one garment in it, most-populated first — the
+  // set with six things in it is the one being reached for.
+  function allSets() {
+    const counts = new Map();
+    items.forEach(it => {
+      const set = (it.set || "").trim();
+      if (set) counts.set(set, (counts.get(set) || 0) + 1);
+    });
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([set, n]) => ({ set, n }));
+  }
+
   function allTags() {
     const counts = new Map();
     items.forEach(it => (it.tags || []).forEach(t => counts.set(t, (counts.get(t) || 0) + 1)));
@@ -564,16 +589,30 @@
   function visibleItems() {
     const q = document.getElementById("search").value.trim().toLowerCase();
     const cat = document.getElementById("catFilter").value;
+    const set = document.getElementById("setFilter").value;
     return items.filter(it => {
       if (cat && it.category !== cat) return false;
+      if (set && (it.set || "") !== set) return false;
       if (activeTag && !(it.tags || []).includes(activeTag)) return false;
       if (!q) return true;
-      const hay = [it.name, it.description, it.category, (it.tags || []).join(" ")].join(" ").toLowerCase();
+      const hay = [it.name, it.description, it.category, it.set, (it.tags || []).join(" ")].join(" ").toLowerCase();
       return hay.includes(q);
     });
   }
 
   window.render = function () {
+    // Rebuilt from the wardrobe rather than a fixed list: a set exists because
+    // a garment says it belongs to one, so the options are whatever is in use.
+    const sets = allSets();
+    const setSel = document.getElementById("setFilter");
+    const keepSet = setSel.value;
+    setSel.innerHTML = '<option value="">All sets</option>' +
+      sets.map(({ set, n }) => '<option value="' + esc(set) + '">' + esc(set) + " (" + n + ")</option>").join("");
+    setSel.value = sets.some(x => x.set === keepSet) ? keepSet : "";
+    setSel.hidden = sets.length === 0;
+    document.getElementById("setList").innerHTML =
+      sets.map(({ set }) => '<option value="' + esc(set) + '"></option>').join("");
+
     const tags = allTags();
     const chips = document.getElementById("tagChips");
     chips.innerHTML = tags.map(({ tag, n }) =>
@@ -602,7 +641,8 @@
         "</div>" +
         '<div class="meta">' +
           '<div class="nm">' + esc(it.name || "Untitled") + "</div>" +
-          '<div class="cat">' + esc(it.category || "") + "</div>" +
+          '<div class="cat">' + esc(it.category || "") +
+            (it.set ? ' <span class="setname">· ' + esc(it.set) + "</span>" : "") + "</div>" +
           ((it.tags || []).length
             ? '<div class="tags">' + it.tags.map(t => "<span>" + esc(t) + "</span>").join("") + "</div>"
             : "") +
@@ -642,6 +682,7 @@
     document.getElementById("fName").value = draft.name || "";
     document.getElementById("fCategory").value = draft.category || w.categories[0];
     document.getElementById("fTags").value = (draft.tags || []).join(", ");
+    document.getElementById("fSet").value = draft.set || "";
     document.getElementById("fDescription").value = draft.description || "";
     document.getElementById("fProvider").value = draft.provider || w.provider;
     document.getElementById("fAspect").value = draft.aspectRatio || w.aspectRatio;
@@ -1394,6 +1435,7 @@
         "</div></details>";
     }).join("");
 
+    renderSetRow(withImages);
     renderRecentRow(withImages);
 
     box.querySelectorAll("[data-pick]").forEach(c => {
@@ -1439,6 +1481,56 @@
       b.onclick = () => toggleGarment(b.dataset.pick);
     });
   }
+
+  // A set is worn or taken off whole. That is the point of recording one: a
+  // work uniform is four garments that are only ever chosen together, and
+  // choosing them one at a time is the tapping this was meant to remove.
+  //
+  // Marked on when everything in it that can be worn is on, so the chip is
+  // telling the truth after a single garment is taken off again.
+  function renderSetRow(withImages) {
+    const sets = allSets().filter(({ set }) => withImages.some(i => (i.set || "") === set));
+    const wrap = document.getElementById("fitSetsWrap");
+    wrap.hidden = sets.length === 0;
+    if (wrap.hidden) return;
+
+    const box = document.getElementById("fitSets");
+    box.innerHTML = sets.map(({ set, n }) => {
+      const inSet = withImages.filter(i => (i.set || "") === set);
+      const on = inSet.filter(i => chosenGarments.has(i.id)).length;
+      return '<button class="chip' + (on && on === inSet.length ? " on" : "") +
+        '" data-set="' + esc(set) + '">' + esc(set) +
+        (on ? " · " + on + "/" + inSet.length : " · " + n) + "</button>";
+    }).join("");
+    box.querySelectorAll("[data-set]").forEach(b => {
+      b.onclick = () => toggleSet(b.dataset.set);
+    });
+  }
+
+  window.toggleSet = function (set) {
+    const withImages = items.filter(i => i.image && (i.set || "") === set);
+    const allOn = withImages.length && withImages.every(i => chosenGarments.has(i.id));
+    if (allOn) {
+      withImages.forEach(i => chosenGarments.delete(i.id));
+      fitStatus("", "");
+    } else {
+      const max = wardrobeCfg().fitting.maxGarments;
+      let added = 0, skipped = 0;
+      for (const it of withImages) {
+        if (chosenGarments.has(it.id)) continue;
+        // The cap still applies: a set larger than the model can hold is put
+        // on as far as it goes, and says so, rather than silently losing the
+        // last two garments or refusing the whole set over them.
+        if (chosenGarments.size >= max) { skipped += 1; continue; }
+        chosenGarments.add(it.id);
+        added += 1;
+      }
+      fitStatus(skipped
+        ? "Put on " + added + " of " + set + " — that is the most it can wear at once (" + max + ")."
+        : "", skipped ? "err" : "");
+    }
+    renderGarmentPicker();
+  };
 
   window.toggleGarment = function (id) {
     if (chosenGarments.has(id)) chosenGarments.delete(id);
@@ -1626,7 +1718,7 @@
     const gen = currentGenerator();
     return {
       id: "g_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-      name: "", category: w.categories[0], description: typed || "", tags: [],
+      name: "", category: w.categories[0], description: typed || "", tags: [], set: "",
       image: "", variants: [], prompt: "", source: "",
       provider: gen.provider,
       model: gen.id,
@@ -1655,6 +1747,9 @@
       next.tags = reading.tags.filter(t => typeof t === "string" && t.trim())
         .map(t => t.trim().toLowerCase()).slice(0, 6);
     }
+    // Only ever set, never cleared: a reading that does not mention a set is
+    // silent about it, not an instruction to forget the one it has.
+    if (typeof reading.set === "string" && reading.set.trim()) next.set = reading.set.trim();
     return next;
   }
 
@@ -1849,11 +1944,18 @@
       }],
     });
     const parsed = parseJsonReply(raw);
-    if (!Array.isArray(parsed)) throw new Error("could not read that photo — model said: " + String(raw).slice(0, 120));
+    // The reply is an object naming the outfit and listing its garments. A
+    // bare array is still accepted: that was the shape before sets existed,
+    // and a model answering in it is right about the garments and merely
+    // silent about the set.
+    const list = Array.isArray(parsed) ? parsed
+      : (parsed && Array.isArray(parsed.garments)) ? parsed.garments : null;
+    if (!list) throw new Error("could not read that photo — model said: " + String(raw).slice(0, 120));
+    const outfit = (parsed && typeof parsed.outfit === "string") ? parsed.outfit.trim() : "";
     // Kept whole. The name and category came from looking at the actual photo,
     // which is better grounded than anything a re-read of the flat lay we are
     // about to generate could say — and skips a vision call per garment.
-    return parsed
+    return list
       .filter(g => g && typeof g.description === "string" && g.description.trim())
       .map(g => ({
         typed: g.description.trim(),
@@ -1862,6 +1964,9 @@
           category: w.categories.includes(g.category) ? g.category : null,
           description: g.description.trim(),
           tags: Array.isArray(g.tags) ? g.tags : [],
+          // Everything out of one photograph belongs to the same set: those
+          // clothes were, demonstrably, worn together.
+          set: outfit,
         },
       }))
       .slice(0, w.maxBatch);
@@ -2220,6 +2325,7 @@
     draft.category = document.getElementById("fCategory").value;
     draft.description = document.getElementById("fDescription").value.trim();
     draft.tags = document.getElementById("fTags").value.split(",").map(t => t.trim()).filter(Boolean);
+    draft.set = document.getElementById("fSet").value.trim();
     draft.provider = document.getElementById("fProvider").value;
     draft.model = document.getElementById("fModel").value;
     draft.aspectRatio = document.getElementById("fAspect").value;
