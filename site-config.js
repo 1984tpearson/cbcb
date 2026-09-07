@@ -1180,6 +1180,28 @@
       // prompt still puts the word mannequin in front of the model.
       negativePrompt: "person, model, mannequin, human, body, face, hands, arms, legs, worn, being worn, dressing form, coat hanger, crumpled, folded pile",
 
+      // Used to turn one idea into several, and to read a photograph. Not the
+      // chat model: nothing here is a conversation, and both calls want plain
+      // repeatable JSON from something cheap and quick.
+      textModel: "meta-llama/llama-3.3-70b-instruct",
+
+      // How many variants one line may become. The cap is about money as much
+      // as patience — each one is a full generation, billed.
+      maxBatch: 8,
+
+      // One line in, several distinct garments out. {item} and {count} are
+      // substituted. The instruction leans hard on making them DIFFERENT:
+      // asked for six ball gowns a model will otherwise return six ways of
+      // saying "an elegant ball gown", and six near-identical pictures is the
+      // one outcome that wastes the whole batch.
+      variantInstruction: "Return {count} different versions of this garment: {item}\n\nReturn ONLY a JSON array of exactly {count} strings, no markdown and no commentary. Each string describes one version in 12 to 25 words, covering colour, fabric, cut and detailing, as a clothing catalogue would.\n\nMake them genuinely different from each other — vary the colour first, then the fabric, the silhouette and the detailing. Two versions that differ only in wording are a failure. Every one must still plainly be the garment asked for.",
+
+      // Pulls the clothes out of a photograph of someone wearing them. The
+      // model is asked for what the garment IS, not what the photo shows: a
+      // dress half hidden behind an arm still has a hem and a neckline, and
+      // guessing them is the job. {categories} is substituted.
+      extractInstruction: "Look at this photograph and list every distinct item of clothing or footwear worn in it.\n\nReturn ONLY a JSON array, no markdown and no commentary. Each element is an object:\n{\n  \"name\": a short specific name, 2-5 words,\n  \"category\": exactly one of [{categories}],\n  \"description\": 15 to 30 words describing the garment ALONE — colour, fabric, cut, length, neckline, sleeves, fastenings, pattern,\n  \"tags\": an array of 3 to 6 lowercase one-word tags covering colour, season, formality and occasion\n}\n\nDescribe each garment as it would look laid out flat on its own, not as it appears on the body. Where the photograph hides part of it, infer the most likely form rather than omitting it. Ignore jewellery, bags, glasses and anything that is not worn clothing or footwear. If no clothing is visible, return an empty array.",
+
       // Read back off the finished picture, so that naming and filing a garment
       // is not a form to fill in. {categories} is substituted with the list
       // above — the model must choose from it rather than inventing a category,

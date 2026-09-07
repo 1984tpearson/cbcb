@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Wardrobe</title>
-<script src="site-config.js?v=27"></script>
+<script src="site-config.js?v=28"></script>
 <style>
   :root {
     --pink: #d4547a; --pink-bg: #fdf1f4; --pink-border: #f0c4d1;
@@ -41,6 +41,9 @@
   .quickadd input[type=text] { font-size:15px; padding:11px 13px; }
   .qbtns { display:flex; gap:8px; margin-top:8px; }
   .qbtns button { flex:1; min-height:40px; }
+  /* Narrow: it is a count, not a sentence, and Generate should keep the room. */
+  .qbtns select { flex:0 0 76px; width:76px; text-align:center; }
+  .qhint { margin:8px 0 0; font-size:11px; line-height:1.5; color:var(--muted); }
   /* Which generator, kept out of the way but never more than one tap down.
      Collapsed it is a line of grey text naming the current choice, so the
      answer to "what is this about to use" is on screen without opening it. */
@@ -182,10 +185,17 @@
            onkeydown="if(event.key==='Enter')quickGenerate()" />
     <div class="qbtns">
       <button class="primary" id="qGenBtn" onclick="quickGenerate()">Generate</button>
+      <select id="quickCount" title="How many to make"></select>
+    </div>
+    <div class="qbtns">
       <button id="qUpBtn" onclick="document.getElementById('quickFile').click()">Upload</button>
       <button id="qLinkBtn" onclick="quickLink()">Link</button>
+      <button id="qExtractBtn" onclick="quickExtract()">Extract</button>
     </div>
+    <p class="qhint">Extract pulls the clothes out of a photo of someone wearing them — paste the photo's
+      URL above and press it, or press it with the box empty to pick a file.</p>
     <input type="file" id="quickFile" accept="image/png,image/jpeg,image/webp" hidden onchange="quickUpload(event)" />
+    <input type="file" id="extractFile" accept="image/png,image/jpeg,image/webp" hidden onchange="extractFromFile(event)" />
     <details class="genpick">
       <summary><span id="genPickLabel"></span></summary>
       <select id="genPick" onchange="chooseGenerator()"></select>
@@ -356,6 +366,9 @@
     }
     fillStaticSelects();
     refreshGeneratorPick();
+    document.getElementById("quickCount").innerHTML = Array.from(
+      { length: wardrobeCfg().maxBatch }, (_, i) => i + 1)
+      .map(n => '<option value="' + n + '">' + (n === 1 ? "1" : "\u00d7" + n) + "</option>").join("");
     try {
       items = await loadItems();
       status("", "");
@@ -842,7 +855,7 @@
   }
 
   function setQuickBusy(busy, label) {
-    for (const id of ["qGenBtn", "qUpBtn", "qLinkBtn"]) {
+    for (const id of ["qGenBtn", "qUpBtn", "qLinkBtn", "qExtractBtn"]) {
       document.getElementById(id).disabled = busy;
     }
     document.getElementById("qGenBtn").textContent = busy ? (label || "Working…") : "Generate";
@@ -879,12 +892,100 @@
     if (typeof reading.description === "string" && reading.description.trim()) {
       next.description = reading.description.trim();
     }
-    if (w.categories.includes(reading.category)) next.category = reading.category;
+    if (reading.category && w.categories.includes(reading.category)) next.category = reading.category;
     if (Array.isArray(reading.tags)) {
       next.tags = reading.tags.filter(t => typeof t === "string" && t.trim())
         .map(t => t.trim().toLowerCase()).slice(0, 6);
     }
     return next;
+  }
+
+  // One garment, start to finish: get a picture, read it, put it in the grid.
+  // Returns the saved item, or null if it never got a picture.
+  //
+  // The save happens per garment rather than once at the end, so a batch that
+  // fails on its fifth still leaves four in the wardrobe — and closing the tab
+  // half way through a batch of eight loses only the one in flight.
+  async function addOne({ typed, getImage, provider, model, known }) {
+    let item = newGarment(typed);
+    if (provider) { item.provider = provider; item.model = model; }
+    item.image = await getImage(item);   // throws: caller decides what that means
+    item.source = item.provider;
+
+    // From here the picture exists and is paid for, so nothing below may lose
+    // it — the reading is best effort and the save happens either way.
+    if (known) {
+      // Already known from the source this garment came from, so there is
+      // nothing to read: the flat lay was generated from this description, and
+      // asking a second model what it sees can only agree or contradict.
+      item = mergeReading(item, known);
+    } else {
+      try {
+        item = mergeReading(item, await readGarmentFromImage(item.image));
+      } catch (e) {
+        console.warn("Wardrobe: reading the picture failed", e);
+      }
+    }
+    if (!item.name) item.name = typed ? typed.trim() : "Untitled garment";
+
+    const before = items;
+    items = [item, ...items];
+    render();
+    try {
+      await saveItems();
+    } catch (e) {
+      items = before;
+      render();
+      throw new Error("Could not save: " + e.message);
+    }
+    return item;
+  }
+
+  // Runs a list of descriptions through addOne one at a time.
+  //
+  // Sequentially on purpose. Firing eight generations at once would be faster
+  // in the best case and rate-limited in the likely one, and a batch that
+  // trips a limit half way through has spent money on images it then drops.
+  // Each finished garment appears in the grid as it lands, so the wait shows
+  // its progress rather than just being long.
+  async function runBatch(lines, verb) {
+    const gen = currentGenerator();
+    let made = 0;
+    const failures = [];
+    for (let i = 0; i < lines.length; i++) {
+      const spec = typeof lines[i] === "string" ? { typed: lines[i], known: null } : lines[i];
+      const typed = spec.typed;
+      quickStatus(verb + " " + (i + 1) + " of " + lines.length + "… " +
+        ((spec.known && spec.known.name) || typed).slice(0, 60), "busy");
+      try {
+        const w = wardrobeCfg();
+        const prompt = fillTemplate(w.flatLayPrompt, { item: typed }) + ", " + w.styleModifiers;
+        await addOne({
+          typed, known: spec.known, provider: gen.provider, model: gen.id,
+          getImage: async (item) => {
+            item.prompt = prompt;
+            return gen.provider === "dezgo"
+              ? persistDataUrl(await generateDezgo({ prompt, modelId: gen.id }))
+              : persist(await generateFlatLay({ prompt, model: gen.id, aspectRatio: item.aspectRatio }));
+          },
+        });
+        made += 1;
+      } catch (e) {
+        // One bad generation does not end the batch — the rest may be fine,
+        // and stopping would waste the ones still to come.
+        failures.push(e.message);
+      }
+    }
+    if (made && !failures.length) {
+      quickStatus("Added " + made + " garment" + (made === 1 ? "" : "s") + ".", "ok");
+      document.getElementById("quickPrompt").value = "";
+    } else if (made) {
+      quickStatus("Added " + made + " of " + lines.length + ". " + failures.length +
+        " failed: " + failures[0], "err");
+    } else {
+      quickStatus(failures[0] || "Nothing was made.", "err");
+    }
+    return made;
   }
 
   async function quickAdd({ typed, getImage, verb }) {
@@ -925,21 +1026,140 @@
     setQuickBusy(false);
   }
 
-  window.quickGenerate = function () {
+  // One line becomes several distinct garments. Asked for one it is used as
+  // written — there is nothing to vary, and a round trip to a language model
+  // to rephrase three words would only make the picture less like the words.
+  async function expandToVariants(typed, count) {
+    if (count <= 1) return [typed];
+    const w = wardrobeCfg();
+    const raw = await aiComplete({
+      model: w.textModel,
+      // Enough for eight descriptions of up to 25 words, with room to spare;
+      // a reply cut off mid-array parses as nothing at all.
+      params: { max_tokens: 700, temperature: 1 },
+      messages: [{ role: "user", content: fillTemplate(w.variantInstruction, { item: typed, count }) }],
+    });
+    const parsed = parseJsonReply(raw);
+    const lines = Array.isArray(parsed)
+      ? parsed.filter(v => typeof v === "string" && v.trim()).map(v => v.trim())
+      : [];
+    // A short reply is used as far as it goes rather than refused: five good
+    // gowns are worth having when six were asked for. Nothing usable at all
+    // falls back to the typed line repeated, which at least generates.
+    if (!lines.length) throw new Error("could not think of variations — model said: " + String(raw).slice(0, 120));
+    return lines.slice(0, count);
+  }
+
+  window.quickGenerate = async function () {
     const typed = document.getElementById("quickPrompt").value.trim();
     if (!typed) { quickStatus("Type what the garment is first.", "err"); return; }
+    const count = Math.max(1, Math.min(wardrobeCfg().maxBatch, Number(document.getElementById("quickCount").value) || 1));
+    setQuickBusy(true, "Generating");
+    let lines;
+    try {
+      if (count > 1) quickStatus("Thinking up " + count + " versions…", "busy");
+      lines = await expandToVariants(typed, count);
+    } catch (e) {
+      quickStatus(e.message, "err");
+      setQuickBusy(false);
+      return;
+    }
+    await runBatch(lines, "Generating");
+    setQuickBusy(false);
+  };
+
+  // ── Extract ────────────────────────────────────────────────────────────────
+  // A photo of someone dressed, turned into the garments they are wearing.
+  //
+  // The photo itself is never stored. It is only ever read — and read straight
+  // from the data URL or the link, since the vision model takes either — so a
+  // photo of a person does not end up sitting in the wardrobe's bucket. What
+  // is kept is the flat lays generated from what it showed.
+  async function extractGarments(imageUrl) {
     const w = wardrobeCfg();
-    const prompt = fillTemplate(w.flatLayPrompt, { item: typed }) + ", " + w.styleModifiers;
-    return quickAdd({
-      typed, verb: "Generating",
-      getImage: async (item) => {
-        item.prompt = prompt;
-        const raw = item.provider === "dezgo"
-          ? await persistDataUrl(await generateDezgo({ prompt, modelId: item.model }))
-          : await persist(await generateFlatLay({ prompt, model: item.model, aspectRatio: item.aspectRatio }));
-        return raw;
-      },
+    const raw = await aiComplete({
+      model: CFG.models.vision,
+      params: { max_tokens: 700 },
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: fillTemplate(w.extractInstruction, {
+            categories: w.categories.map(c => JSON.stringify(c)).join(", "),
+          }) },
+          { type: "image_url", image_url: { url: imageUrl } },
+        ],
+      }],
     });
+    const parsed = parseJsonReply(raw);
+    if (!Array.isArray(parsed)) throw new Error("could not read that photo — model said: " + String(raw).slice(0, 120));
+    // Kept whole. The name and category came from looking at the actual photo,
+    // which is better grounded than anything a re-read of the flat lay we are
+    // about to generate could say — and skips a vision call per garment.
+    return parsed
+      .filter(g => g && typeof g.description === "string" && g.description.trim())
+      .map(g => ({
+        typed: g.description.trim(),
+        known: {
+          name: typeof g.name === "string" ? g.name.trim() : "",
+          category: w.categories.includes(g.category) ? g.category : null,
+          description: g.description.trim(),
+          tags: Array.isArray(g.tags) ? g.tags : [],
+        },
+      }))
+      .slice(0, w.maxBatch);
+  }
+
+  async function runExtract(imageUrl, label) {
+    setQuickBusy(true, "Extracting");
+    let lines;
+    try {
+      quickStatus("Looking at " + label + "…", "busy");
+      lines = await extractGarments(imageUrl);
+    } catch (e) {
+      quickStatus(e.message, "err");
+      setQuickBusy(false);
+      return;
+    }
+    if (!lines.length) {
+      quickStatus("No clothing found in that picture.", "err");
+      setQuickBusy(false);
+      return;
+    }
+    quickStatus("Found " + lines.length + " garment" + (lines.length === 1 ? "" : "s") + ". Generating…", "busy");
+    await runBatch(lines, "Generating");
+    setQuickBusy(false);
+  }
+
+  // A URL in the box is the thing to extract from; an empty box means the
+  // photo is on the phone, so ask for it.
+  window.quickExtract = function () {
+    const typed = document.getElementById("quickPrompt").value.trim();
+    if (/^https?:\/\//i.test(typed)) return runExtract(typed, "that photo");
+    if (typed) {
+      quickStatus("Extract needs a photo: paste an image URL in the box, or empty it to pick a file.", "err");
+      return;
+    }
+    document.getElementById("extractFile").click();
+  };
+
+  window.extractFromFile = async function (event) {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      // Read straight to a data URL and hand that to the vision model. The
+      // photo never touches Storage — see extractGarments.
+      const dataUrl = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = () => reject(new Error("Could not read that file"));
+        r.readAsDataURL(file);
+      });
+      await runExtract(dataUrl, "your photo");
+    } catch (e) {
+      quickStatus(e.message, "err");
+      setQuickBusy(false);
+    }
   };
 
   window.quickUpload = function (event) {
