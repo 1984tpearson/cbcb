@@ -1451,10 +1451,17 @@
       // which never worked and has been removed: an adjective cannot win an
       // argument with a geometric constraint.
       //
-      // This states the geometry instead: she is near, she is low in frame,
-      // and the gap is closed by the camera being close rather than by
-      // anything being longer than it is.
-      povIntimateFraming: "she is close to the camera, her head low in the frame rather than centred, the camera angled down towards her; the viewer's body enters from the bottom edge and meets her at its true size, foreshortened by how near she is, never elongated or stretched to reach her",
+      // This states the geometry instead: she is near, she is framed where she
+      // actually is, and the gap is closed by the camera being close rather
+      // than by anything being longer than it is.
+      //
+      // Deliberately says nothing about the camera pointing up or down. It
+      // once said "angled down towards her", which is right for oral and
+      // wrong for her riding the viewer — there the viewer is lying down and
+      // the camera looks up. The direction depends on the scene, and this
+      // clause does not know the scene; what it does know is that she is
+      // close, and that closeness is what removes the reason to stretch.
+      povIntimateFraming: "she is close enough to touch and fills much of the frame, framed by where she actually is rather than centred out of habit; the viewer's own body enters from the edge of frame and meets her at its true size, foreshortened by how near she is, never elongated or stretched to bridge a gap",
 
       proportionGuard: "two arms and two hands per person, no extra limbs, anatomically coherent",
       // Instruction sent to the extractor model that turns the recent

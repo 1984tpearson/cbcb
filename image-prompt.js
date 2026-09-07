@@ -93,7 +93,7 @@ window.ImagePrompt = {
     // the one term that did not register as intimate — which silently dropped
     // the user's own explicit detail from those shots, since this same test
     // gates it, and left them with no intimate framing either.
-    const POV_INTIMATE_RE = /\b(sex|sexual|fucking|fucks|thrust|thrusting|riding|rides|straddling|straddles|grinding|penetrat\w*|oral|blowjob|blow job|going down on|cock|dick|penis|erection|erect|cunnilingus|deepthroat|pussy|clit|nipples?|breasts?|tits|cum|climax|orgasm|moaning|naked|nude|undressed|topless|bare[- ]?chested)\b/i;
+    const POV_INTIMATE_RE = /\b(sex|sexual|fucking|fucks|thrust|thrusting|riding|rides|straddling|straddles|grinding|penetrat\w*|oral|blowjob|blow job|going down on|all fours|doggy|legs apart|legs spread|mounting|mounts|cock|dick|penis|erection|erect|cunnilingus|deepthroat|pussy|clit|nipples?|breasts?|tits|cum|climax|orgasm|moaning|naked|nude|undressed|topless|bare[- ]?chested)\b/i;
     // Whether the VIEWER is dressed is decided by the tracked userOutfit, never by
     // the scene text: "naked" and "undressed" in a scene prompt are almost always
     // describing the character, and reading them as the viewer's state stripped
