@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=25"></script>
+  <script src="site-config.js?v=26"></script>
   <script src="image-prompt.js?v=24"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -275,6 +275,18 @@
   // A proxy failure is not fatal: loadConfig falls back to the built-in
   // defaults and reports why, so the app still starts on a dead network.
   async function bootApp() {
+    // A cached site-config.js older than this page is served whenever the ?v=
+    // on its script tag has not moved with the file. The app then boots into a
+    // SiteConfig missing whatever was added last, and since aiComplete lives
+    // there now, the symptom would be every reply and every image failing with
+    // a TypeError rather than anything that names the cause.
+    if (!window.SiteConfig || typeof window.SiteConfig.aiComplete !== "function") {
+      document.body.innerHTML =
+        '<div style="padding:28px;font-family:system-ui,sans-serif;line-height:1.6;max-width:520px;margin:0 auto;color:#3a2b30">' +
+        '<h1 style="font-size:17px">Loading an old cached copy of site-config.js</h1>' +
+        '<p>Pull down to refresh, or close and reopen the tab.</p></div>';
+      return;
+    }
     const { config, error } = await window.SiteConfig.loadConfig();
     window.__SITE_CONFIG__ = config;
     window.__SITE_CONFIG_ERROR__ = error;

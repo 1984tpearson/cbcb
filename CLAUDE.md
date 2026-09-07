@@ -40,6 +40,26 @@ new default) and offer the two choices:
 
 Either way they decide, not you. If there is no clash, just make the change.
 
+## Changing site-config.js means bumping ?v= in all three pages
+
+`index.html`, `settings.html` and `wardrobe.html` each load it as
+`site-config.js?v=N`. That query string is the only cache key, so editing the
+file without moving N serves browsers a stale copy — they keep whatever they
+cached under that same N. The app then boots against a SiteConfig missing
+whatever was added last, and because `aiComplete` and `parseJsonReply` live
+there, the symptom is a TypeError naming a function rather than anything that
+points at caching.
+
+It has already happened once: a v= bumped in the first commit of a series and
+left alone through the next three.
+
+```
+sed -i 's|site-config.js?v=25|site-config.js?v=26|' index.html settings.html wardrobe.html
+```
+
+Both pages now refuse to boot with a plain message when a required export is
+missing, rather than failing at the first call site.
+
 ## Two images per character, and they must never swap
 
 - `referenceImage` — nude, 3/4 length. The **only** image passed to the image

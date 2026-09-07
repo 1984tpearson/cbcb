@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Wardrobe</title>
-<script src="site-config.js?v=25"></script>
+<script src="site-config.js?v=26"></script>
 <style>
   :root {
     --pink: #d4547a; --pink-bg: #fdf1f4; --pink-border: #f0c4d1;
@@ -214,6 +214,25 @@
 
   const CORRECT_PIN = "1555";
   const UNLOCK_KEY = "personachat_unlocked";
+
+  // site-config.js is cache-busted by the ?v= on its script tag, so a stale
+  // copy is served whenever that number does not move with the file. What the
+  // page then gets is a SiteConfig missing whatever was added last, and the
+  // first symptom is a TypeError naming a function nobody has heard of —
+  // unreadable on a phone, and indistinguishable from a broken deploy. So it
+  // is checked once, up front, and named for what it is.
+  const REQUIRED_EXPORTS = ["aiComplete", "parseJsonReply", "call", "WARDROBE_ROW_ID", "IMAGE_PROXY_URL"];
+  const missing = REQUIRED_EXPORTS.filter(k => !window.SiteConfig || window.SiteConfig[k] === undefined);
+  if (missing.length) {
+    document.body.innerHTML =
+      '<div style="padding:28px;font-family:system-ui,sans-serif;line-height:1.6;max-width:520px;margin:0 auto">' +
+      '<h1 style="font-size:17px">This page is loading an old cached copy of site-config.js</h1>' +
+      '<p>Missing: <code>' + missing.join("</code>, <code>") + '</code>.</p>' +
+      '<p>Pull down to refresh, or close and reopen the tab. If it keeps happening the ' +
+      '<code>?v=</code> on the script tag needs bumping.</p></div>';
+    return;
+  }
+
   const {
     DEFAULTS, clone, loadConfig, fillTemplate, call, aiComplete, parseJsonReply,
     WARDROBE_ROW_ID, ACCESS_TOKEN, IMAGE_PROXY_URL, UPLOAD_IMAGE_URL,
