@@ -779,7 +779,18 @@ window.ImagePrompt = {
       // wearing boxers, 19 year old, Female, ... wearing nothing" is two
       // people's clothing in one list with nothing saying which is whose.
       const viewerOrder = ["pov"];
-      const subjectOrder = ["name", "charDesc", "wardrobe", "staging", "scene", "explicit", "style"];
+      // Clothing sits before the scene when it is words, and after it when it
+      // is pictures.
+      //
+      // As words it is a short phrase that needs the weight an early position
+      // gives it. As pictures it needs the opposite: the flat lays are already
+      // the loudest thing in the call, and reading them out first as well cost
+      // the act entirely — she was rendered standing and dressed, modelling
+      // the clothes, in a scene that was nothing of the kind. Demoted to just
+      // before the style, the references still dress her and the act leads.
+      const subjectOrder = garmentRefs
+        ? ["name", "charDesc", "staging", "scene", "explicit", "wardrobe", "style"]
+        : ["name", "charDesc", "wardrobe", "staging", "scene", "explicit", "style"];
       // parts is returned alongside the finished string so the lab can show
       // which source each clause came from — the thing that was impossible to
       // see when this was a single joinPromptParts call inline in the app.

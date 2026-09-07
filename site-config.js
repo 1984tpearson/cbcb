@@ -1334,7 +1334,13 @@
         maxWorn: 5,
         // The only clothing wording in a chat image prompt when garments are
         // worn. It replaces "wearing {charOutfit}" entirely.
-        refClause: "wearing the clothes in the reference images",
+        // The last clause about her before the style, and deliberately the
+        // weakest thing in the prompt. Five flat lays are a loud instruction to
+        // show five garments clearly, and against fifteen words of scene text
+        // they win: the act stops happening and she stands there modelling.
+        // So this says outright that the clothes may be hidden and that the
+        // action outranks them.
+        refClause: "wearing the clothes in the reference images, which may be partly hidden, pushed aside or out of frame — what she is doing matters more than showing them, and the pose must never be changed to make them visible",
       },
 
       // What a generation costs, per endpoint family. Dezgo prices by family and
