@@ -5285,6 +5285,21 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     setImgLoading(false);
   };
 
+  // Removes one picture from the gallery. Matched on url and date rather than
+  // on the grid index: the grid is rendered from the same array, but a delete
+  // that lands while a generation is finishing would otherwise take whatever
+  // has just been unshifted to the front instead of the tile that was tapped.
+  //
+  // The stored image itself is left alone. It may be the background, or sit in
+  // the chat above as a message, and neither should vanish because the gallery
+  // copy was tidied away.
+  const handleDeleteGalleryImage = (item) => {
+    if (!confirm("Remove this image from the gallery? The picture stays in the chat where it was generated.")) return;
+    const next = gallery.filter(g => !(g.url === item.url && g.date === item.date));
+    setGallery(next);
+    dataApi.saveGallery(character.id, next).catch(e => setError(e.message));
+  };
+
   const handleSetBackground = (url) => {
     setBgImage(url);
     commitCharacter(prev => ({ ...prev, backgroundImage: url }));
@@ -5608,7 +5623,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
               ) : (
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(2, 1fr)", gap:10 }}>
                   {gallery.map((item, i) => (
-                    <div key={i} style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"2px solid var(--border)", cursor:"zoom-in" }}
+                    <div key={`${item.url}-${item.date || i}`} style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"2px solid var(--border)", cursor:"zoom-in" }}
                       onClick={() => setLightboxImg(item.url)}>
                       <img src={item.url} alt={item.prompt} style={{ width:"100%", display:"block", aspectRatio:"3/4", objectFit:"cover" }} />
                       <div style={{ position:"absolute", bottom:0, left:0, right:0, background:"rgba(0,0,0,0.6)", padding:"6px 8px" }}>
@@ -5622,6 +5637,11 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                         <button style={{ background:"rgba(0,0,0,0.5)", border:"none", borderRadius:6, padding:"4px 8px", fontSize:10, color:"white", cursor:"pointer", fontWeight:700 }}
                           onClick={e => { e.stopPropagation(); setLightboxImg(item.url); }}>
                           🔍
+                        </button>
+                        <button title="Remove from gallery"
+                          style={{ background:"rgba(0,0,0,0.5)", border:"none", borderRadius:6, padding:"4px 8px", fontSize:10, color:"white", cursor:"pointer", fontWeight:700 }}
+                          onClick={e => { e.stopPropagation(); handleDeleteGalleryImage(item); }}>
+                          🗑
                         </button>
                       </div>
                     </div>
