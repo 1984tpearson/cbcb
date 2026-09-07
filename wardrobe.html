@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Wardrobe</title>
+<script src="site-config.js?v=25"></script>
+<style>
+  :root {
+    --pink: #d4547a; --pink-bg: #fdf1f4; --pink-border: #f0c4d1;
+    --bg: #fdf6f8; --bg2: #ffffff; --bg3: #f7eef1;
+    --text: #3a2b30; --muted: #8b7379; --border: #ecd9df; --border2: #dcc2ca;
+    --ok: #2f8a5b; --err: #c0392b;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text); font-size:14px; }
+  header { position:sticky; top:0; z-index:20; background:rgba(253,246,248,.97); backdrop-filter:blur(10px);
+           border-bottom:1px solid var(--border); padding:12px 18px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  h1 { font-size:16px; margin:0; font-weight:800; letter-spacing:.01em; }
+  .spacer { flex:1; }
+  button { font-family:inherit; font-size:13px; font-weight:700; border-radius:10px; padding:8px 14px; cursor:pointer; border:1px solid var(--border2); background:var(--bg2); color:var(--text); }
+  button.primary { background:var(--pink); border-color:var(--pink); color:#fff; }
+  button.danger { color:var(--err); border-color:#e8b4ae; }
+  button:disabled { opacity:.5; cursor:default; }
+  #status { font-size:12px; font-weight:700; }
+  #status.ok { color:var(--ok); } #status.err { color:var(--err); } #status.busy { color:var(--muted); }
+  input[type=text], input[type=search], input[type=password], textarea, select {
+    width:100%; font-family:inherit; font-size:13px; padding:8px 10px; border-radius:9px;
+    border:1px solid var(--border2); background:var(--bg); color:var(--text); outline:none; }
+  input:focus, textarea:focus, select:focus { border-color:var(--pink); }
+  textarea { resize:vertical; line-height:1.5; }
+  label.field { display:block; margin-bottom:12px; }
+  label.field > span { display:block; font-size:12px; font-weight:700; color:var(--muted); margin-bottom:4px; }
+  .hint { color:var(--muted); font-size:12px; line-height:1.5; margin:0 0 12px; }
+
+  /* ── Filter bar ── */
+  .filters { display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding:10px 18px;
+             border-bottom:1px solid var(--border); background:var(--bg3); }
+  .filters input[type=search] { max-width:240px; }
+  .filters select { width:auto; min-width:140px; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; }
+  .chip { padding:5px 11px; font-size:12px; font-weight:700; border-radius:999px;
+          border:1px solid var(--border2); background:var(--bg2); cursor:pointer; }
+  .chip.on { background:var(--pink-bg); border-color:var(--pink-border); color:var(--pink); }
+
+  main { padding:18px; max-width:1200px; margin:0 auto 80px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:14px; }
+  .card { background:var(--bg2); border:1px solid var(--border); border-radius:14px; overflow:hidden;
+          cursor:pointer; display:flex; flex-direction:column; }
+  .card:hover { border-color:var(--pink-border); }
+  /* Square, and contained rather than cropped: a flat lay that has had its
+     sleeves cut off by the frame is no longer a usable reference. */
+  .card .shot { aspect-ratio:1/1; background:var(--bg3); display:flex; align-items:center; justify-content:center; }
+  .card .shot img { width:100%; height:100%; object-fit:contain; display:block; }
+  .card .shot .none { color:var(--muted); font-size:12px; font-weight:700; }
+  .card .meta { padding:9px 11px; }
+  .card .nm { font-weight:800; font-size:13px; line-height:1.3; }
+  .card .cat { font-size:11px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.04em; margin-top:2px; }
+  .card .tags { margin-top:6px; display:flex; gap:4px; flex-wrap:wrap; }
+  .card .tags span { font-size:10px; font-weight:700; background:var(--bg3); color:var(--muted); border-radius:999px; padding:2px 7px; }
+  .empty { text-align:center; color:var(--muted); padding:60px 20px; line-height:1.6; }
+
+  /* ── Editor ── */
+  #editor { position:fixed; inset:0; z-index:50; background:rgba(58,43,48,.45); display:none;
+            align-items:flex-start; justify-content:center; overflow-y:auto; padding:24px 14px 60px; }
+  #editor.open { display:flex; }
+  #editor .sheet { background:var(--bg2); border:1px solid var(--border); border-radius:16px;
+                   width:100%; max-width:760px; padding:18px; }
+  #editor h2 { font-size:15px; margin:0 0 14px; font-weight:800; }
+  .cols { display:grid; grid-template-columns:260px 1fr; gap:18px; }
+  .shotbox { aspect-ratio:1/1; border:1px solid var(--border); border-radius:12px; background:var(--bg3);
+             display:flex; align-items:center; justify-content:center; overflow:hidden; }
+  .shotbox img { width:100%; height:100%; object-fit:contain; }
+  .shotbox .none { color:var(--muted); font-size:12px; font-weight:700; text-align:center; padding:14px; line-height:1.5; }
+  .acquire { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+  .acquire button { flex:1; min-width:88px; padding:7px 8px; font-size:12px; }
+  .variants { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+  .variants img { width:46px; height:46px; object-fit:cover; border-radius:8px; border:1px solid var(--border2); cursor:pointer; }
+  .promptview { font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:11px; color:var(--muted);
+                background:var(--bg); border:1px solid var(--border); border-radius:9px; padding:8px 10px;
+                line-height:1.5; max-height:110px; overflow-y:auto; white-space:pre-wrap; }
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .foot { display:flex; gap:8px; margin-top:16px; align-items:center; flex-wrap:wrap; }
+
+  #gate { position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; z-index:100; }
+  #gate .box { background:var(--bg2); border:1px solid var(--border); border-radius:16px; padding:24px; width:280px; text-align:center; }
+  #gate input { text-align:center; letter-spacing:.5em; font-size:20px; margin:14px 0 10px; }
+  .gate-err { color:var(--err); font-size:12px; height:16px; }
+  .banner { border-radius:12px; padding:10px 14px; margin-bottom:14px; font-size:13px; font-weight:600; }
+  .banner.warn { background:#fff6e6; border:1px solid #f0d9a8; color:#8a6216; }
+
+  @media (max-width: 760px) {
+    header { padding:10px 12px; gap:8px; }
+    h1 { font-size:15px; }
+    .spacer { flex-basis:100%; height:0; }
+    header button { flex:1; min-height:40px; }
+    #status { order:3; flex-basis:100%; }
+    .filters { padding:8px 12px; }
+    .filters input[type=search], .filters select { max-width:none; width:100%; }
+    main { padding:12px; }
+    .grid { grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:10px; }
+    /* iOS zooms the page in when a focused field is under 16px. */
+    input[type=text], input[type=search], input[type=password], textarea, select { font-size:16px; }
+    .cols { grid-template-columns:1fr; }
+    #editor { padding:12px 8px 40px; }
+    #editor .sheet { padding:14px; }
+    .foot button { flex:1; min-height:42px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="box">
+    <div style="font-weight:800;">Wardrobe</div>
+    <input type="password" id="pin" maxlength="4" placeholder="····" />
+    <div class="gate-err" id="pinErr"></div>
+    <button class="primary" style="width:100%;" onclick="checkPin()">Unlock</button>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <h1>Wardrobe</h1>
+    <span id="status"></span>
+    <span class="spacer"></span>
+    <button onclick="exportJson()">Export</button>
+    <button class="primary" onclick="openEditor(null)">Add garment</button>
+  </header>
+
+  <div class="filters">
+    <input type="search" id="search" placeholder="Search name, description, tag…" oninput="render()" />
+    <select id="catFilter" onchange="render()"></select>
+    <div class="chips" id="tagChips"></div>
+  </div>
+
+  <main>
+    <div id="banner"></div>
+    <div class="grid" id="grid"></div>
+    <div class="empty" id="empty" hidden></div>
+  </main>
+</div>
+
+<div id="editor">
+  <div class="sheet">
+    <h2 id="editorTitle">Add garment</h2>
+    <div class="cols">
+      <div>
+        <div class="shotbox" id="shotbox"></div>
+        <div class="acquire">
+          <button class="primary" id="genBtn" onclick="generateShot()">Generate</button>
+          <button onclick="document.getElementById('uploadFile').click()">Upload</button>
+          <button onclick="fromUrl()">From URL</button>
+        </div>
+        <input type="file" id="uploadFile" accept="image/png,image/jpeg,image/webp" hidden onchange="uploadShot(event)" />
+        <div class="variants" id="variants"></div>
+      </div>
+      <div>
+        <label class="field"><span>Name</span>
+          <input type="text" id="fName" placeholder="Black silk slip dress" oninput="refreshPromptView()" /></label>
+        <div class="row2">
+          <label class="field"><span>Category</span><select id="fCategory"></select></label>
+          <label class="field"><span>Tags (comma separated)</span>
+            <input type="text" id="fTags" placeholder="evening, summer" /></label>
+        </div>
+        <label class="field"><span>Description</span>
+          <textarea id="fDescription" rows="4" oninput="refreshPromptView()"
+            placeholder="Bias-cut black silk slip dress, thin spaghetti straps, cowl neck, mid-calf length, slight sheen."></textarea></label>
+        <p class="hint">This is what the flat lay is generated from, and what would ground the wording if
+          this garment is later used in a chat image. Be specific — cut, fabric, colour, length, fastenings.
+          "A dress" produces a different dress every time.</p>
+        <div class="row2">
+          <label class="field"><span>Image model</span><select id="fModel"></select></label>
+          <label class="field"><span>Shape</span><select id="fAspect"></select></label>
+        </div>
+        <label class="field"><span>Prompt that will be sent</span>
+          <div class="promptview" id="promptView"></div></label>
+      </div>
+    </div>
+    <div class="foot">
+      <button class="primary" id="saveBtn" onclick="saveItem()">Save</button>
+      <button onclick="closeEditor()">Cancel</button>
+      <button id="copyBtn" onclick="copyUrl()">Copy image URL</button>
+      <span class="spacer"></span>
+      <button class="danger" id="deleteBtn" onclick="deleteItem()">Delete</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const CORRECT_PIN = "1555";
+  const UNLOCK_KEY = "personachat_unlocked";
+  const {
+    DEFAULTS, clone, loadConfig, fillTemplate, call,
+    WARDROBE_ROW_ID, ACCESS_TOKEN, IMAGE_PROXY_URL, UPLOAD_IMAGE_URL,
+  } = window.SiteConfig;
+
+  let CFG = clone(DEFAULTS);
+  // The whole library, newest first. Held in memory and written back whole:
+  // it is one document in one row, and a garment list is not big enough for
+  // partial writes to be worth the complexity.
+  let items = [];
+  // The garment being edited, or a blank one when adding. Edits land here and
+  // only reach `items` on Save, so Cancel really cancels.
+  let draft = null;
+  let draftIsNew = true;
+  let activeTag = "";
+
+  // ── Gate ───────────────────────────────────────────────────────────────────
+  window.checkPin = function () {
+    if (document.getElementById("pin").value === CORRECT_PIN) {
+      localStorage.setItem(UNLOCK_KEY, "true");
+      unlock();
+    } else {
+      document.getElementById("pinErr").textContent = "Incorrect code.";
+      document.getElementById("pin").value = "";
+    }
+  };
+  document.getElementById("pin").addEventListener("keydown", e => { if (e.key === "Enter") window.checkPin(); });
+
+  function unlock() {
+    document.getElementById("gate").remove();
+    document.getElementById("app").hidden = false;
+    boot();
+  }
+
+  function status(text, kind) {
+    const el = document.getElementById("status");
+    el.textContent = text;
+    el.className = kind || "";
+  }
+
+  const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  // ── Load / save ────────────────────────────────────────────────────────────
+  // The library rides in the chats table under a reserved id, the same way the
+  // site config does, so it needs no new data-proxy action and no deploy.
+  async function loadItems() {
+    const body = await call("get_chat", { characterId: WARDROBE_ROW_ID });
+    return Array.isArray(body.messages) ? body.messages : [];
+  }
+
+  async function saveItems() {
+    await call("save_chat", { characterId: WARDROBE_ROW_ID, messages: items });
+  }
+
+  async function boot() {
+    status("Loading…", "busy");
+    const { config, error } = await loadConfig();
+    CFG = config;
+    if (error) {
+      document.getElementById("banner").innerHTML =
+        '<div class="banner warn">Could not load saved settings (' + esc(error) + '). Built-in defaults are in use.</div>';
+    }
+    fillStaticSelects();
+    try {
+      items = await loadItems();
+      status("", "");
+    } catch (e) {
+      items = [];
+      status("Could not load the wardrobe: " + e.message, "err");
+    }
+    render();
+  }
+
+  function wardrobeCfg() { return CFG.wardrobe || DEFAULTS.wardrobe; }
+
+  function fillStaticSelects() {
+    const w = wardrobeCfg();
+    const cat = document.getElementById("catFilter");
+    cat.innerHTML = '<option value="">All categories</option>' +
+      w.categories.map(c => '<option value="' + esc(c) + '">' + esc(c) + "</option>").join("");
+    document.getElementById("fCategory").innerHTML =
+      w.categories.map(c => '<option value="' + esc(c) + '">' + esc(c) + "</option>").join("");
+    document.getElementById("fAspect").innerHTML =
+      w.aspectRatios.map(a => '<option value="' + esc(a) + '">' + esc(a) + "</option>").join("");
+    document.getElementById("fModel").innerHTML =
+      CFG.models.image.map(m => '<option value="' + esc(m.id) + '">' + esc(m.label) + "</option>").join("");
+  }
+
+  // ── Grid ───────────────────────────────────────────────────────────────────
+  function allTags() {
+    const seen = new Set();
+    items.forEach(it => (it.tags || []).forEach(t => seen.add(t)));
+    return [...seen].sort();
+  }
+
+  function visibleItems() {
+    const q = document.getElementById("search").value.trim().toLowerCase();
+    const cat = document.getElementById("catFilter").value;
+    return items.filter(it => {
+      if (cat && it.category !== cat) return false;
+      if (activeTag && !(it.tags || []).includes(activeTag)) return false;
+      if (!q) return true;
+      const hay = [it.name, it.description, it.category, (it.tags || []).join(" ")].join(" ").toLowerCase();
+      return hay.includes(q);
+    });
+  }
+
+  window.render = function () {
+    const chips = document.getElementById("tagChips");
+    chips.innerHTML = allTags().map(t =>
+      '<button class="chip' + (activeTag === t ? " on" : "") + '" data-tag="' + esc(t) + '">' + esc(t) + "</button>").join("");
+    chips.querySelectorAll("button").forEach(b => {
+      b.onclick = () => { activeTag = (activeTag === b.dataset.tag) ? "" : b.dataset.tag; render(); };
+    });
+
+    const list = visibleItems();
+    const grid = document.getElementById("grid");
+    grid.innerHTML = list.map(it =>
+      '<div class="card" data-id="' + esc(it.id) + '">' +
+        '<div class="shot">' + (it.image
+          ? '<img src="' + esc(it.image) + '" alt="' + esc(it.name) + '" loading="lazy" />'
+          : '<span class="none">No image yet</span>') + "</div>" +
+        '<div class="meta">' +
+          '<div class="nm">' + esc(it.name || "Untitled") + "</div>" +
+          '<div class="cat">' + esc(it.category || "") + "</div>" +
+          ((it.tags || []).length
+            ? '<div class="tags">' + it.tags.map(t => "<span>" + esc(t) + "</span>").join("") + "</div>"
+            : "") +
+        "</div></div>").join("");
+    grid.querySelectorAll(".card").forEach(c => {
+      c.onclick = () => openEditor(items.find(i => i.id === c.dataset.id));
+    });
+
+    const empty = document.getElementById("empty");
+    empty.hidden = list.length > 0;
+    empty.textContent = items.length === 0
+      ? "Nothing saved yet. Add a garment, describe it, and generate a flat lay."
+      : "No garment matches that filter.";
+  };
+
+  // ── Editor ─────────────────────────────────────────────────────────────────
+  window.openEditor = function (item) {
+    draftIsNew = !item;
+    const w = wardrobeCfg();
+    draft = item
+      ? clone(item)
+      : {
+          id: "g_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+          name: "", category: w.categories[0], description: "", tags: [],
+          image: "", variants: [], prompt: "", source: "",
+          model: CFG.models.image[0].id, aspectRatio: w.aspectRatio,
+          createdAt: Date.now(), updatedAt: Date.now(),
+        };
+
+    document.getElementById("editorTitle").textContent = draftIsNew ? "Add garment" : "Edit garment";
+    document.getElementById("fName").value = draft.name || "";
+    document.getElementById("fCategory").value = draft.category || w.categories[0];
+    document.getElementById("fTags").value = (draft.tags || []).join(", ");
+    document.getElementById("fDescription").value = draft.description || "";
+    document.getElementById("fModel").value = draft.model || CFG.models.image[0].id;
+    document.getElementById("fAspect").value = draft.aspectRatio || w.aspectRatio;
+    document.getElementById("deleteBtn").hidden = draftIsNew;
+    document.getElementById("editor").classList.add("open");
+    refreshShot();
+    refreshPromptView();
+  };
+
+  window.closeEditor = function () {
+    document.getElementById("editor").classList.remove("open");
+    draft = null;
+  };
+  document.getElementById("editor").addEventListener("click", e => {
+    if (e.target.id === "editor") closeEditor();
+  });
+
+  function refreshShot() {
+    const box = document.getElementById("shotbox");
+    box.innerHTML = draft.image
+      ? '<img src="' + esc(draft.image) + '" alt="" />'
+      : '<span class="none">No image yet.<br />Generate one from the description, or upload a photo.</span>';
+    document.getElementById("copyBtn").disabled = !draft.image;
+
+    // Previous shots are kept rather than thrown away: regenerating is cheap to
+    // do and expensive to undo, and the one you replaced is often the better one.
+    const vars = document.getElementById("variants");
+    vars.innerHTML = (draft.variants || []).map((u, i) =>
+      '<img src="' + esc(u) + '" data-i="' + i + '" title="Make this the saved image" />').join("");
+    vars.querySelectorAll("img").forEach(img => {
+      img.onclick = () => {
+        const i = Number(img.dataset.i);
+        const chosen = draft.variants[i];
+        draft.variants = draft.variants.slice();
+        draft.variants.splice(i, 1);
+        if (draft.image) draft.variants.unshift(draft.image);
+        draft.image = chosen;
+        refreshShot();
+      };
+    });
+  }
+
+  // What the garment is, in the words the image model gets. The name is worth
+  // including only when it says something the description does not.
+  function itemPhrase() {
+    const name = document.getElementById("fName").value.trim();
+    const desc = document.getElementById("fDescription").value.trim();
+    if (desc && name && !desc.toLowerCase().includes(name.toLowerCase())) return name + " — " + desc;
+    return desc || name;
+  }
+
+  function buildFlatLayPrompt() {
+    const w = wardrobeCfg();
+    const item = itemPhrase();
+    if (!item) return "";
+    return fillTemplate(w.flatLayPrompt, { item }) + ", " + w.styleModifiers;
+  }
+
+  window.refreshPromptView = function () {
+    const p = buildFlatLayPrompt();
+    document.getElementById("promptView").textContent = p || "Describe the garment and the prompt appears here.";
+    document.getElementById("genBtn").disabled = !p;
+  };
+
+  // ── Acquiring a picture ────────────────────────────────────────────────────
+  // Submit, then poll from here rather than holding the edge function open:
+  // it has a wall-clock limit, and a generation slower than its budget came
+  // back 504 while the image was produced and billed anyway. Same reasoning,
+  // and the same two-step protocol, as index.html.
+  const POLL_SCHEDULE_MS = [900, 900, 1200, 1500, 2000, 2000, 2000, 2500, 3000, 3000, 4000];
+  const MAX_POLLS = 120;
+
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  async function generateFlatLay({ prompt, model, aspectRatio }) {
+    const params = (CFG.models.imageParams || {})[model] || {};
+    const body = {
+      action: "submit",
+      model,
+      prompt,
+      resolution: params.resolution || "2k",
+      // The wardrobe's own shape wins over the model default, which is 9:16
+      // for chat images and wrong for a garment laid out flat.
+      aspectRatio: aspectRatio || wardrobeCfg().aspectRatio,
+      maxImages: 1,
+      watermark: "false",
+      seed: Math.floor(Math.random() * 2147483647),
+    };
+    if (params.outputFormat) body.outputFormat = params.outputFormat;
+
+    const res = await fetch(IMAGE_PROXY_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error("Image proxy: " + res.status + " " + (await res.text().catch(() => "")));
+    const { taskId } = await res.json();
+    if (!taskId) throw new Error("Image proxy returned no task id");
+
+    for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
+      await sleep(POLL_SCHEDULE_MS[Math.min(attempt, POLL_SCHEDULE_MS.length - 1)]);
+      let statusRes;
+      try {
+        statusRes = await fetch(IMAGE_PROXY_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "status", taskId, outputFormat: body.outputFormat }),
+        });
+      } catch { continue; } // transient blip — the task is still running
+      if (statusRes.status === 202) continue;
+      if (!statusRes.ok) throw new Error("Image proxy: " + statusRes.status + " " + (await statusRes.text().catch(() => "")));
+      const done = await statusRes.json();
+      if (done && done.imageUrl) return done.imageUrl;
+    }
+    throw new Error("The generation did not finish in time");
+  }
+
+  // Copy into Supabase Storage. Wiro's CDN is not somewhere to keep a
+  // wardrobe, and a garment is meant to still be there in six months.
+  async function persist(sourceUrl) {
+    const res = await fetch(UPLOAD_IMAGE_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceUrl, token: ACCESS_TOKEN, filename: "garment_" + Date.now() + "_" + Math.random().toString(36).slice(2) }),
+    });
+    if (!res.ok) throw new Error("Upload: " + res.status + " " + (await res.text().catch(() => "")));
+    const { url } = await res.json();
+    if (!url) throw new Error("Upload returned no URL");
+    return url;
+  }
+
+  function acceptImage(url, source, prompt) {
+    if (draft.image) draft.variants = [draft.image, ...(draft.variants || [])].slice(0, 8);
+    draft.image = url;
+    draft.source = source;
+    if (prompt) draft.prompt = prompt;
+    refreshShot();
+  }
+
+  window.generateShot = async function () {
+    const prompt = buildFlatLayPrompt();
+    if (!prompt) return;
+    const btn = document.getElementById("genBtn");
+    btn.disabled = true;
+    status("Generating…", "busy");
+    try {
+      const raw = await generateFlatLay({
+        prompt,
+        model: document.getElementById("fModel").value,
+        aspectRatio: document.getElementById("fAspect").value,
+      });
+      acceptImage(await persist(raw), "generated", prompt);
+      status("Generated.", "ok");
+    } catch (e) {
+      status(e.message, "err");
+    }
+    btn.disabled = false;
+  };
+
+  window.uploadShot = async function (event) {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = "";
+    if (!file) return;
+    status("Uploading…", "busy");
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = () => reject(new Error("Could not read that file"));
+        r.readAsDataURL(file);
+      });
+      const res = await fetch(UPLOAD_IMAGE_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl, token: ACCESS_TOKEN, filename: "garment_" + Date.now() + "_" + Math.random().toString(36).slice(2) }),
+      });
+      if (!res.ok) throw new Error("Upload: " + res.status + " " + (await res.text().catch(() => "")));
+      const { url } = await res.json();
+      if (!url) throw new Error("Upload returned no URL");
+      acceptImage(url, "upload", "");
+      status("Uploaded.", "ok");
+    } catch (e) {
+      status(e.message, "err");
+    }
+  };
+
+  window.fromUrl = async function () {
+    const src = prompt("Paste the image URL");
+    if (!src) return;
+    status("Fetching…", "busy");
+    try {
+      // Copied into Storage rather than linked: a URL on somebody else's site
+      // is a picture that disappears without warning.
+      acceptImage(await persist(src.trim()), "url", "");
+      status("Saved into storage.", "ok");
+    } catch (e) {
+      status(e.message, "err");
+    }
+  };
+
+  window.copyUrl = function () {
+    if (!draft || !draft.image) return;
+    navigator.clipboard.writeText(draft.image)
+      .then(() => status("Image URL copied.", "ok"))
+      .catch(() => status("Could not copy — the URL is " + draft.image, "err"));
+  };
+
+  // ── Persisting the library ─────────────────────────────────────────────────
+  window.saveItem = async function () {
+    const name = document.getElementById("fName").value.trim();
+    if (!name) { status("Give it a name first.", "err"); return; }
+    draft.name = name;
+    draft.category = document.getElementById("fCategory").value;
+    draft.description = document.getElementById("fDescription").value.trim();
+    draft.tags = document.getElementById("fTags").value.split(",").map(t => t.trim()).filter(Boolean);
+    draft.model = document.getElementById("fModel").value;
+    draft.aspectRatio = document.getElementById("fAspect").value;
+    draft.updatedAt = Date.now();
+
+    const before = items;
+    items = draftIsNew
+      ? [draft, ...items]
+      : items.map(i => (i.id === draft.id ? draft : i));
+
+    status("Saving…", "busy");
+    try {
+      await saveItems();
+      status("Saved.", "ok");
+      closeEditor();
+      render();
+    } catch (e) {
+      // Put the library back the way it was: the screen showing a garment that
+      // is not on the server is worse than the save having visibly failed.
+      items = before;
+      status("Could not save: " + e.message, "err");
+      render();
+    }
+  };
+
+  window.deleteItem = async function () {
+    if (!draft || draftIsNew) return;
+    if (!confirm('Delete "' + (draft.name || "this garment") + '"? The stored image file stays in the bucket.')) return;
+    const before = items;
+    items = items.filter(i => i.id !== draft.id);
+    status("Deleting…", "busy");
+    try {
+      await saveItems();
+      status("Deleted.", "ok");
+      closeEditor();
+    } catch (e) {
+      items = before;
+      status("Could not delete: " + e.message, "err");
+    }
+    render();
+  };
+
+  window.exportJson = function () {
+    const blob = new Blob([JSON.stringify(items, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "wardrobe.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  if (localStorage.getItem(UNLOCK_KEY) === "true") unlock();
+  else document.getElementById("pin").focus();
+})();
+</script>
+</body>
+</html>

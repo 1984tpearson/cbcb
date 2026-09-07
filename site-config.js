@@ -16,6 +16,16 @@
   // whose data-proxy predates the site_config actions. Prefixed so it can
   // never collide with a character id (those are timestamps/uuids).
   const CONFIG_ROW_ID = "__site_config__";
+  // Same trick for the clothing library: a single document, so it rides in the
+  // chats table under a reserved id rather than needing a table of its own.
+  // Using get_chat/save_chat means no data-proxy deploy is required for it.
+  const WARDROBE_ROW_ID = "__wardrobe__";
+
+  // wardrobe.html generates and stores garment photographs, so it needs the
+  // same two image endpoints index.html uses. Declared here rather than copied
+  // into a third file, where they would be one deploy away from being wrong.
+  const IMAGE_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/image-proxy";
+  const UPLOAD_IMAGE_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/upload-image";
 
   // ── Tier tables ────────────────────────────────────────────────────────────
   // One row per trait. Each tier is { max, preview, prompt }: the first tier
@@ -1134,6 +1144,29 @@
       userPersonaGender: "their gender is {gender}",
     },
 
+    // ── Wardrobe (wardrobe.html) ─────────────────────────────────────────────
+    // A library of clothing photographed flat, so that an outfit worn across
+    // many scenes is the same garment each time rather than a fresh guess from
+    // the words "a red dress". These are the settings for acquiring the
+    // pictures; nothing here reaches a chat prompt yet.
+    wardrobe: {
+      // Wrapped around whatever the garment is described as. Everything in it
+      // is there to stop the model doing the thing it would rather do: put the
+      // clothes on somebody. "no person, no mannequin" is stated twice over in
+      // different words for that reason — a garment rendered on a body is
+      // useless as a reference, because the body comes with it.
+      flatLayPrompt: "flat lay product photograph of {item}, the garment laid out flat and neatly arranged on a plain seamless light grey surface, photographed from directly overhead, soft even diffused studio lighting, no person, no mannequin, no model, nobody wearing it, empty clothing only, the whole garment inside the frame, sharp focus, true to life colour, clean e-commerce catalogue photography",
+      // Deliberately not the chat styleModifiers: those describe a photograph
+      // of a scene, and half of them (natural lighting) fight the studio look
+      // a reference garment wants.
+      styleModifiers: "high detail, accurate fabric texture, neutral white balance",
+      // Square by default. A flat lay is as wide as it is tall far more often
+      // than it is 9:16, and the reference is cropped to the garment anyway.
+      aspectRatio: "1:1",
+      aspectRatios: ["1:1", "4:5", "3:4", "9:16", "16:9"],
+      categories: ["Top", "Bottom", "Dress", "Outerwear", "Underwear", "Sleepwear", "Swimwear", "Shoes", "Accessory", "Full outfit"],
+    },
+
     // ── Image generation ─────────────────────────────────────────────────────
     image: {
       // Images generated during a chat are shot from the user's own eyes — the
@@ -1381,6 +1414,11 @@
   global.SiteConfig = {
     DEFAULTS,
     CONFIG_ROW_ID,
+    WARDROBE_ROW_ID,
+    ACCESS_TOKEN,
+    IMAGE_PROXY_URL,
+    UPLOAD_IMAGE_URL,
+    call,
     clone,
     deepMerge,
     loadConfig,
