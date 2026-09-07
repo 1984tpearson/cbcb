@@ -115,6 +115,17 @@ window.ImagePrompt = {
     // contact branch returns before the intimate one, so this is the only
     // framing an explicit shot ever gets.
     const POV_INTIMATE_FRAMING = CFG.image.povIntimateFraming;
+
+    // The viewer's own posture, turned into a camera height. Returns "" for a
+    // pose that does not classify: a guessed eye level is worse than none,
+    // because none leaves the decision to the rest of the prompt while a wrong
+    // one actively places the camera in the wrong room.
+    function povEyeLevel(userPose) {
+      const pose = String(userPose || "").trim();
+      if (!pose) return "";
+      const rule = (CFG.image.povEyeLevels || []).find(r => new RegExp(r.match, "i").test(pose));
+      return rule ? fillTemplate(CFG.image.povEyeLevelTemplate, { pose: rule.pose }) : "";
+    }
     function isIntimateScene(sceneText, staging, nsfw) {
       const userPose = (staging && staging.userPose) || "";
       return !!nsfw && POV_INTIMATE_RE.test(`${sceneText || ""} ${userPose}`);
@@ -186,7 +197,9 @@ window.ImagePrompt = {
     // stray limb, because nothing said which part or where it attached.
     function buildPovModifiers(sceneText, staging, nsfw, userOutfit, contact, viewerBody) {
       const scene = sceneText || "";
-      const parts = [POV_BASE];
+      // Straight after the base clause: it is a fact about the camera, and it
+      // belongs with the rest of what the camera is.
+      const parts = [POV_BASE, povEyeLevel(staging && staging.userPose)];
       if (contact && viewerBody) {
         // viewerBody already says whose the limb is and where it enters, so
         // "the foreground hand and arm belong to the viewer, one pair only"

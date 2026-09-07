@@ -1461,7 +1461,32 @@
       // the camera looks up. The direction depends on the scene, and this
       // clause does not know the scene; what it does know is that she is
       // close, and that closeness is what removes the reason to stretch.
-      povIntimateFraming: "she is close enough to touch and fills much of the frame, framed by where she actually is rather than centred out of habit; the viewer's own body enters from the edge of frame and meets her at its true size, foreshortened by how near she is, never elongated or stretched to bridge a gap",
+      povIntimateFraming: "she is close enough to touch and fills much of the frame, framed where she actually is rather than centred out of habit, and everything of the viewer's is true to size, foreshortened by how near she is and never elongated to bridge a gap",
+
+      // The viewer's own posture, as camera height. Without it the prompt says
+      // she is kneeling and says nothing about where the camera is, so the
+      // model puts it level with her — and then the viewer's body has to
+      // stretch up from the bottom edge to reach a head it has placed in the
+      // middle of the frame.
+      //
+      // Said as eye level rather than as a pose. An earlier version emitted
+      // "camera positioned as someone standing", which describes the camera as
+      // an object in the room and fights the clause saying it is the viewer's
+      // own eyes — one model drew the camera held out to one side. Eye level
+      // is the same fact in POV's own terms.
+      povEyeLevelTemplate: "seen from the eye level of someone {pose}",
+      // Free text in, one of these out. Anything unrecognised emits nothing:
+      // a guessed camera height is worse than none, since none at least lets
+      // the scene decide.
+      // First match wins, so the specific postures come before the loose
+      // furniture words: "lying back on the bed" is lying down, and the
+      // sitting rule's "on the bed" would otherwise claim it.
+      povEyeLevels: [
+        { match: "lying|lie down|lies down|lay back|flat on|on (?:his|her|their) back|reclin|propped", pose: "lying down" },
+        { match: "kneel|crouch|squat", pose: "kneeling" },
+        { match: "stand|upright|on (?:his|her|their) feet|leaning against", pose: "standing" },
+        { match: "sit|seated|perch|on the (?:sofa|couch|chair|bed|edge)", pose: "sitting" },
+      ],
 
       proportionGuard: "two arms and two hands per person, no extra limbs, anatomically coherent",
       // Instruction sent to the extractor model that turns the recent
