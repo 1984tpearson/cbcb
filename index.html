@@ -419,6 +419,10 @@ const {
 } = IMG;
 const DATA_PROXY_URL = "https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/data-proxy";
 const ACCESS_TOKEN = "pc_8f3a9d2e7b1c4f6a0d5e9c3b7a2f1e8d";
+// The reserved row the garment library lives in. Same id wardrobe.html uses —
+// read from SiteConfig so the two can never drift apart, with the literal only
+// as a fallback for a cached copy of site-config.js predating the export.
+const WARDROBE_ROW_ID = window.SiteConfig.WARDROBE_ROW_ID || "__wardrobe__";
 
 const dataApi = {
   call: async (action, payload = {}) => {
@@ -451,6 +455,31 @@ const dataApi = {
   saveChatSession: (sessionId, messages) => dataApi.call("save_chat", { characterId: sessionId, messages }),
   getGallery: (characterId) => dataApi.call("get_gallery", { characterId }).then(r => r.gallery || []),
   saveGallery: (characterId, gallery) => dataApi.call("save_gallery", { characterId, gallery }),
+  // The garment library wardrobe.html writes. It rides in the chats table
+  // under a reserved id, so this is get_chat with a different row and needs no
+  // new proxy action. Read-only here: garments are created and edited over
+  // there, and this app only ever picks from them.
+  getWardrobe: () => dataApi.call("get_chat", { characterId: WARDROBE_ROW_ID }).then(r => Array.isArray(r.messages) ? r.messages : []),
+};
+
+// The whole library in one row, so it is fetched once per page load rather
+// than every time a closet is opened. Held as the promise, not the result:
+// two panels opening at once must not become two fetches.
+let _wardrobePromise = null;
+const loadWardrobeLibrary = ({ refresh = false } = {}) => {
+  if (refresh || !_wardrobePromise) _wardrobePromise = dataApi.getWardrobe();
+  return _wardrobePromise;
+};
+
+// A character's closet, resolved against the library and in library order.
+// Ids that no longer resolve are dropped rather than shown as gaps: a garment
+// deleted in wardrobe.html is gone, and the closet is a list of references to
+// it, not a copy.
+const closetGarments = (character, library) => {
+  const ids = Array.isArray(character && character.closet) ? character.closet : [];
+  if (!ids.length || !Array.isArray(library)) return [];
+  const chosen = new Set(ids);
+  return library.filter(g => g && chosen.has(g.id));
 };
 
 
@@ -2261,6 +2290,144 @@ function SettingsPanel({ settings, onSave, onClose }) {
   );
 }
 
+// ─── CLOSET PICKER ────────────────────────────────────────────────────────────
+// Which garments out of the whole library this character owns. A closet is a
+// list of ids and nothing else: the pictures, names and descriptions stay in
+// wardrobe.html, so a garment edited there is edited everywhere at once.
+//
+// It exists so that nothing downstream ever has to search the whole library.
+// Matching what a character is wearing against two hundred garments is both
+// expensive and unreliable; matching it against the twenty they own is neither.
+function ClosetPicker({ selected, onChange, onClose }) {
+  const [library, setLibrary] = useState(null);
+  const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("");
+  const [set, setSet] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    loadWardrobeLibrary()
+      .then(items => { if (live) setLibrary(items); })
+      .catch(e => { if (live) { setLibrary([]); setError(e.message); } });
+    return () => { live = false; };
+  }, []);
+
+  // Only garments with a picture. One without is a half-finished row in
+  // wardrobe.html, and picking it would put something in the closet that
+  // cannot be shown or, later, handed to an image model.
+  const withImages = (library || []).filter(g => g && g.image);
+  const sets = [...new Set(withImages.map(g => (g.set || "").trim()).filter(Boolean))].sort();
+  const categories = [...new Set(withImages.map(g => g.category).filter(Boolean))];
+  const shown = withImages.filter(g => {
+    if (category && g.category !== category) return false;
+    if (set && (g.set || "").trim() !== set) return false;
+    if (!query.trim()) return true;
+    const hay = [g.name, g.description, g.category, g.set, (g.tags || []).join(" ")].join(" ").toLowerCase();
+    return query.toLowerCase().split(/\s+/).every(word => hay.includes(word));
+  });
+
+  const chosen = new Set(selected);
+  const toggle = (id) => onChange(chosen.has(id) ? selected.filter(x => x !== id) : [...selected, id]);
+
+  return (
+    <div style={S.overlay}>
+      <div style={{ ...S.modal, maxWidth: 560 }}>
+        <div style={S.modalHeader}>
+          <span style={S.modalTitle}>Choose clothes</span>
+          <button style={S.iconBtn} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalBody}>
+          {library === null && <p style={{ fontSize: 13, color: "var(--text3)" }}>Loading the wardrobe…</p>}
+          {error && <p style={{ fontSize: 13, color: "#c04060" }}>Couldn't load the wardrobe ({error}).</p>}
+          {library !== null && !error && withImages.length === 0 && (
+            <p style={{ fontSize: 13, color: "var(--text3)" }}>
+              No garments with pictures yet. Add some in the wardrobe page first.
+            </p>
+          )}
+          {withImages.length > 0 && (
+            <>
+              <input style={S.input} placeholder="Search clothes…" value={query} onChange={e => setQuery(e.target.value)} />
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <select style={S.select} value={category} onChange={e => setCategory(e.target.value)}>
+                  <option value="">All categories</option>
+                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                {sets.length > 0 && (
+                  <select style={S.select} value={set} onChange={e => setSet(e.target.value)}>
+                    <option value="">All sets</option>
+                    {sets.map(x => <option key={x} value={x}>{x}</option>)}
+                  </select>
+                )}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 8, marginTop: 12 }}>
+                {shown.map(g => {
+                  const on = chosen.has(g.id);
+                  return (
+                    <button key={g.id} onClick={() => toggle(g.id)} title={g.description || g.name}
+                      style={{ padding: 0, background: "var(--bg3)", cursor: "pointer", borderRadius: 10, overflow: "hidden",
+                        border: on ? "2px solid var(--pink)" : "1px solid var(--border2)", textAlign: "left" }}>
+                      <img src={g.image} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+                      <div style={{ fontSize: 11, fontWeight: 700, color: on ? "var(--pink)" : "var(--text2)", padding: "5px 6px" }}>
+                        {g.name || "Untitled"}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              {shown.length === 0 && <p style={{ fontSize: 13, color: "var(--text3)", marginTop: 10 }}>Nothing matches that.</p>}
+            </>
+          )}
+        </div>
+        <div style={S.modalFooter}>
+          <span style={{ flex: 1, fontSize: 12, color: "var(--text3)", alignSelf: "center" }}>
+            {selected.length} chosen
+          </span>
+          <button style={S.btnPrimary} onClick={onClose}>Done</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// The chosen garments, as thumbnails. Loads the library itself rather than
+// taking it as a prop, so the panel shows a closet without opening the picker.
+function ClosetStrip({ closet, onRemove }) {
+  const [library, setLibrary] = useState(null);
+  useEffect(() => {
+    let live = true;
+    loadWardrobeLibrary().then(items => { if (live) setLibrary(items); }).catch(() => { if (live) setLibrary([]); });
+    return () => { live = false; };
+  }, []);
+  if (!closet.length) return null;
+  const garments = closetGarments({ closet }, library || []);
+  if (library === null) return <p style={{ fontSize: 12, color: "var(--text3)" }}>Loading…</p>;
+  // Ids that resolved to nothing: the garment was deleted in wardrobe.html
+  // after it was picked. Said out loud rather than silently dropped, because
+  // the count in the closet would otherwise change on its own.
+  const missing = closet.length - garments.length;
+  return (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(78px, 1fr))", gap: 8, marginTop: 4 }}>
+        {garments.map(g => (
+          <div key={g.id} style={{ position: "relative", borderRadius: 10, overflow: "hidden", border: "1px solid var(--border2)", background: "var(--bg3)" }}>
+            <img src={g.image} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text2)", padding: "4px 5px" }}>{g.name || "Untitled"}</div>
+            <button onClick={() => onRemove(g.id)} title="Remove from closet"
+              style={{ position: "absolute", top: 3, right: 3, width: 20, height: 20, borderRadius: "50%", border: "none",
+                background: "rgba(0,0,0,0.55)", color: "white", fontSize: 12, lineHeight: "20px", padding: 0, cursor: "pointer" }}>×</button>
+          </div>
+        ))}
+      </div>
+      {missing > 0 && (
+        <p style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>
+          {missing} {missing === 1 ? "garment is" : "garments are"} no longer in the wardrobe.
+        </p>
+      )}
+    </>
+  );
+}
+
 // ─── CHARACTER PERSONALITY PANEL (in-chat) ────────────────────────────────────
 function CharacterPersonalityPanel({ character, onSave, onClose }) {
   const [sliders, setSliders] = useState(character.sliders || DEFAULT_SLIDERS);
@@ -2283,12 +2450,15 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
   const [userOutfit, setUserOutfit] = useState(character.userOutfit || "");
   const [staging, setStaging] = useState(character.staging || EMPTY_STAGING);
   const [explicitDetail, setExplicitDetail] = useState(character.explicitDetail || "");
+  const [closet, setCloset] = useState(Array.isArray(character.closet) ? character.closet : []);
+  const [showClosetPicker, setShowClosetPicker] = useState(false);
 
   // Re-sync wardrobe state if character prop updates while panel is open
   useEffect(() => { setCharOutfit(character.charOutfit || ""); }, [character.charOutfit]);
   useEffect(() => { setUserOutfit(character.userOutfit || ""); }, [character.userOutfit]);
   useEffect(() => { setStaging(character.staging || EMPTY_STAGING); }, [character.staging]);
   useEffect(() => { setExplicitDetail(character.explicitDetail || ""); }, [character.explicitDetail]);
+  useEffect(() => { setCloset(Array.isArray(character.closet) ? character.closet : []); }, [character.closet]);
   const setStagingField = (key, value) => setStaging(st => ({ ...(st || EMPTY_STAGING), [key]: value || null }));
   const [memoryGenLoading, setMemoryGenLoading] = useState(false);
   const [memoryGenError, setMemoryGenError] = useState("");
@@ -2358,6 +2528,23 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
             onClick={() => { setCharOutfit(""); setUserOutfit(""); }}>
             Clear Wardrobe
           </button>
+
+          <label style={S.label}>{character.name}'s closet</label>
+          <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>
+            The clothes {character.name} owns, picked from the wardrobe. Nothing else reads them yet — this is the shortlist that later matching and image references will work from, so keep it to what she'd actually wear.
+          </p>
+          <ClosetStrip closet={closet} onRemove={id => setCloset(c => c.filter(x => x !== id))} />
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button style={S.btnSecondary} onClick={() => setShowClosetPicker(true)}>
+              {closet.length ? `Edit closet (${closet.length})` : "Add clothes"}
+            </button>
+            {closet.length > 0 && (
+              <button style={{ ...S.btnSecondary, color: "#c04060" }} onClick={() => setCloset([])}>Empty closet</button>
+            )}
+          </div>
+          {showClosetPicker && (
+            <ClosetPicker selected={closet} onChange={setCloset} onClose={() => setShowClosetPicker(false)} />
+          )}
 
           <div style={S.divider} />
           <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Scene / Staging</span>
@@ -2598,7 +2785,7 @@ Return ONLY the JSON object, no other text.` }] });
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, disabledSliders, reactiveEnabled, intentionsEnabled, intentions: intentions.filter(i => (i.goal || "").trim()).map(i => ({ ...i, steps: (i.steps || []).filter(st => (st.text || "").trim()) })), memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, staging: hasStaging(staging) ? staging : null, explicitDetail: explicitDetail.trim() || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
+          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, disabledSliders, reactiveEnabled, intentionsEnabled, intentions: intentions.filter(i => (i.goal || "").trim()).map(i => ({ ...i, steps: (i.steps || []).filter(st => (st.text || "").trim()) })), memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, closet, staging: hasStaging(staging) ? staging : null, explicitDetail: explicitDetail.trim() || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
         </div>
       </div>
     </div>
