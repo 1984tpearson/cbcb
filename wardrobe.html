@@ -41,6 +41,17 @@
   .quickadd input[type=text] { font-size:15px; padding:11px 13px; }
   .qbtns { display:flex; gap:8px; margin-top:8px; }
   .qbtns button { flex:1; min-height:40px; }
+  /* Which generator, kept out of the way but never more than one tap down.
+     Collapsed it is a line of grey text naming the current choice, so the
+     answer to "what is this about to use" is on screen without opening it. */
+  .genpick { margin-top:8px; }
+  .genpick > summary { cursor:pointer; font-size:12px; color:var(--muted); font-weight:700;
+                       list-style:none; display:flex; align-items:center; gap:6px; padding:2px 0; }
+  .genpick > summary::-webkit-details-marker { display:none; }
+  .genpick > summary::before { content:"\25B8"; color:var(--pink); font-size:10px; }
+  .genpick[open] > summary::before { content:"\25BE"; }
+  .genpick select { margin-top:7px; }
+
   #quickStatus { margin-top:9px; font-size:12px; font-weight:700; line-height:1.5; overflow-wrap:anywhere; }
   #quickStatus:empty { display:none; }
   #quickStatus.ok { color:var(--ok); }
@@ -175,6 +186,10 @@
       <button id="qLinkBtn" onclick="quickLink()">Link</button>
     </div>
     <input type="file" id="quickFile" accept="image/png,image/jpeg,image/webp" hidden onchange="quickUpload(event)" />
+    <details class="genpick">
+      <summary><span id="genPickLabel"></span></summary>
+      <select id="genPick" onchange="chooseGenerator()"></select>
+    </details>
     <div id="quickStatus"></div>
   </div>
 
@@ -340,6 +355,7 @@
         '<div class="banner warn">Could not load saved settings (' + esc(error) + '). Built-in defaults are in use.</div>';
     }
     fillStaticSelects();
+    refreshGeneratorPick();
     try {
       items = await loadItems();
       status("", "");
@@ -752,6 +768,64 @@
     }
   }
 
+  // ── Which generator quick-add uses ─────────────────────────────────────────
+  // One list, both providers flattened into it. Choosing a provider and then a
+  // model is two decisions to express one, and the provider is only ever
+  // interesting as a property of the model — so it is shown as one.
+  //
+  // The choice sticks, because it is a preference rather than a per-garment
+  // decision: whoever switches to a better model wants the next twenty
+  // garments on it too, not to pick it again each time.
+  const GENERATOR_KEY = "wardrobe_generator";
+
+  // The provider is appended only when the label does not already say it —
+  // the Wiro entries are shared with the chat model dropdown and name their
+  // provider already, which would otherwise read "… (Wiro) (Wiro)".
+  function generatorLabel(label, provider) {
+    return new RegExp("\\(" + provider + "\\)", "i").test(label)
+      ? label
+      : label + " (" + provider.charAt(0).toUpperCase() + provider.slice(1) + ")";
+  }
+
+  function allGenerators() {
+    const w = wardrobeCfg();
+    return [
+      ...w.dezgoModels.map(m => ({ key: "dezgo:" + m.id, provider: "dezgo", id: m.id, label: generatorLabel(m.label, "dezgo") })),
+      ...CFG.models.image.map(m => ({ key: "wiro:" + m.id, provider: "wiro", id: m.id, label: generatorLabel(m.label, "wiro") })),
+    ];
+  }
+
+  // Falls back to the configured default whenever the stored choice names a
+  // model that no longer exists — a list this editable will lose entries, and
+  // a remembered one that is gone must not take the button down with it.
+  function currentGenerator() {
+    const list = allGenerators();
+    let stored = null;
+    try { stored = localStorage.getItem(GENERATOR_KEY); } catch {}
+    const found = list.find(g => g.key === stored);
+    if (found) return found;
+    const w = wardrobeCfg();
+    const fallbackKey = w.provider === "dezgo"
+      ? "dezgo:" + w.dezgoModels[0].id
+      : "wiro:" + CFG.models.image[0].id;
+    return list.find(g => g.key === fallbackKey) || list[0];
+  }
+
+  function refreshGeneratorPick() {
+    const list = allGenerators();
+    const current = currentGenerator();
+    const sel = document.getElementById("genPick");
+    sel.innerHTML = list.map(g =>
+      '<option value="' + esc(g.key) + '"' + (g.key === current.key ? " selected" : "") + ">" +
+      esc(g.label) + "</option>").join("");
+    document.getElementById("genPickLabel").textContent = "Using " + current.label;
+  }
+
+  window.chooseGenerator = function () {
+    try { localStorage.setItem(GENERATOR_KEY, document.getElementById("genPick").value); } catch {}
+    refreshGeneratorPick();
+  };
+
   // ── Quick add ──────────────────────────────────────────────────────────────
   // The whole flow in one call: get a picture, read it, save it. No editor, no
   // form, and nothing to confirm — the garment is in the grid when it is done,
@@ -778,12 +852,13 @@
   // a failed reading still leaves something legible rather than "Untitled".
   function newGarment(typed) {
     const w = wardrobeCfg();
+    const gen = currentGenerator();
     return {
       id: "g_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
       name: "", category: w.categories[0], description: typed || "", tags: [],
       image: "", variants: [], prompt: "", source: "",
-      provider: w.provider,
-      model: w.provider === "dezgo" ? w.dezgoModels[0].id : CFG.models.image[0].id,
+      provider: gen.provider,
+      model: gen.id,
       aspectRatio: w.aspectRatio,
       createdAt: Date.now(), updatedAt: Date.now(),
     };
