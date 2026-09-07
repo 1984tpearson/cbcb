@@ -68,7 +68,8 @@ Deno.serve(async (req: Request) => {
     return new Response('Method not allowed', { status: 405, headers: corsHeaders });
   }
 
-  let body: { dataUrl?: string; sourceUrl?: string; filename?: string; token?: string };
+  let body: { dataUrl?: string; sourceUrl?: string; filename?: string; token?: string;
+              action?: string; url?: string };
   try {
     body = await req.json();
   } catch {
@@ -84,6 +85,52 @@ Deno.serve(async (req: Request) => {
   if (!expectedToken || body.token !== expectedToken) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  // ── action: delete ──
+  // Removes one file this function previously stored. Added for the garment
+  // extractor, which has to put a photograph of a person in a public bucket so
+  // the image model can fetch it, and should not leave it there afterwards.
+  //
+  // Only ever this bucket, and only ever a bare filename derived from the URL:
+  // the path is never taken from the request, so no caller can walk out of the
+  // bucket or name a file it did not upload the shape of.
+  if (body.action === 'delete') {
+    const raw = typeof body.url === 'string' ? body.url : '';
+    // The last path segment of a public URL, and nothing else — so the name can
+    // never contain a slash or a traversal and cannot escape the bucket.
+    //
+    // It must also carry the extractor's own prefix. Taking any valid filename
+    // would let this delete a character's base image, which is the one file in
+    // this bucket that must never disappear; scoping it to what the extractor
+    // uploads means a wrong or stray call can only remove a scratch photo.
+    const name = raw.split('?')[0].split('/').pop() || '';
+    if (!name || !/^extract_[A-Za-z0-9_\-]+\.(png|jpe?g|webp)$/i.test(name)) {
+      return new Response(JSON.stringify({ error: 'Only extractor scratch files can be deleted' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    if (!supabaseUrl || !serviceKey) {
+      return new Response(JSON.stringify({ error: 'Server misconfiguration' }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const supabase = createClient(supabaseUrl, serviceKey);
+    const { error } = await supabase.storage.from(BUCKET).remove([name]);
+    if (error) {
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response(JSON.stringify({ ok: true, deleted: name }), {
+      status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }

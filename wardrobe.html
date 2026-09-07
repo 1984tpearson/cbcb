@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Wardrobe</title>
-<script src="site-config.js?v=31"></script>
+<script src="site-config.js?v=32"></script>
 <script src="image-prompt.js?v=24"></script>
 <style>
   :root {
@@ -873,10 +873,11 @@
     return url;
   }
 
-  async function persistDataUrl(dataUrl) {
+  async function persistDataUrl(dataUrl, prefix) {
     const res = await fetch(UPLOAD_IMAGE_URL, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dataUrl, token: ACCESS_TOKEN, filename: "garment_" + Date.now() + "_" + Math.random().toString(36).slice(2) }),
+      body: JSON.stringify({ dataUrl, token: ACCESS_TOKEN,
+        filename: (prefix || "garment_") + Date.now() + "_" + Math.random().toString(36).slice(2) }),
     });
     if (!res.ok) throw new Error("Upload: " + res.status + " " + (await res.text().catch(() => "")));
     const { url } = await res.json();
@@ -1118,8 +1119,18 @@
       // and every parameter omitted is one that cannot be wrong.
       const res = m.nativeResolution || m.native_resolution || {};
       const params = {};
-      const w = Number(res.width || res.w);
-      const h = Number(res.height || res.h);
+      let w = Number(res.width || res.w);
+      let h = Number(res.height || res.h);
+      // For SDXL and Flux the published native resolution is a floor, not a
+      // ceiling: flux_1_schnell says 512 and generates fine at 1024, which is
+      // what these flat lays were made at before the catalogue supplied a
+      // number and quietly halved them. SD1 and SD2 do degrade above native,
+      // so they keep what they are given.
+      const cfgW = wardrobeCfg();
+      if (cfgW.upscalableEndpoints.includes(endpoint) && cfgW.preferredSide) {
+        w = Math.max(w || 0, cfgW.preferredSide);
+        h = Math.max(h || 0, cfgW.preferredSide);
+      }
       if (w > 0 && h > 0) { params.width = w; params.height = h; }
 
       const family = typeof m.family === "string" ? m.family : "";
@@ -1815,24 +1826,101 @@
       .slice(0, w.maxBatch);
   }
 
-  async function runExtract(imageUrl, label) {
+  // Isolates one garment out of the photograph itself, rather than describing
+  // it and drawing a new one. The photo goes to the model as an input image, so
+  // a print or a logo comes back as the pixels that were there — which the
+  // describe-and-regenerate path could never do, however good the description.
+  async function isolateGarment(photoUrl, known) {
+    const w = wardrobeCfg();
+    const prompt = fillTemplate(w.isolatePrompt, {
+      garment: known.name || "garment",
+      description: known.description || "",
+    }) + ", " + w.styleModifiers;
+    const raw = await generateViaWiro({
+      prompt,
+      model: w.extractModel,
+      aspectRatio: w.extractAspectRatio,
+      resolution: w.extractResolution,
+      inputImage: photoUrl,
+    });
+    return { url: await persist(raw), prompt };
+  }
+
+  // The photograph has to be somewhere the image model can fetch, which means
+  // uploading it — a data URL is not a URL Wiro can resolve. It is removed
+  // again at the end: a picture of a person is not something to leave lying in
+  // a public bucket once the garments are out of it.
+  async function deletePhoto(url) {
+    try {
+      await fetch(UPLOAD_IMAGE_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", url, token: ACCESS_TOKEN }),
+      });
+    } catch (e) {
+      console.warn("Wardrobe: could not remove the source photo", e);
+    }
+  }
+
+  async function runExtract(photoUrl, label, { temporary }) {
     setQuickBusy(true, "Extracting");
-    let lines;
+    let found;
     try {
       quickStatus("Looking at " + label + "…", "busy");
-      lines = await extractGarments(imageUrl);
+      found = await extractGarments(photoUrl);
     } catch (e) {
       quickStatus(e.message, "err");
+      if (temporary) await deletePhoto(photoUrl);
       setQuickBusy(false);
       return;
     }
-    if (!lines.length) {
+    if (!found.length) {
       quickStatus("No clothing found in that picture.", "err");
+      if (temporary) await deletePhoto(photoUrl);
       setQuickBusy(false);
       return;
     }
-    quickStatus("Found " + lines.length + " garment" + (lines.length === 1 ? "" : "s") + ". Generating…", "busy");
-    await runBatch(lines, "Generating");
+
+    // One call per garment, each isolating a different one out of the same
+    // photograph. Sequential for the same reason every batch here is: eight at
+    // once is rate limited rather than fast, and a batch that trips a limit
+    // half way has paid for images it then drops.
+    let made = 0;
+    const failures = [];
+    for (let i = 0; i < found.length; i++) {
+      const spec = found[i];
+      quickStatus("Extracting " + (i + 1) + " of " + found.length + "… " +
+        (spec.known.name || spec.typed).slice(0, 60), "busy");
+      try {
+        await addOne({
+          typed: spec.typed,
+          known: spec.known,
+          provider: "wiro",
+          model: wardrobeCfg().extractModel,
+          getImage: async (item) => {
+            const { url, prompt } = await isolateGarment(photoUrl, spec.known);
+            item.prompt = prompt;
+            return url;
+          },
+        });
+        made += 1;
+      } catch (e) {
+        failures.push(e.message);
+      }
+    }
+
+    // Removed whatever happened: the photo was only ever scratch space, and
+    // leaving it behind because the extraction went badly is the worst case.
+    if (temporary) await deletePhoto(photoUrl);
+
+    if (made && !failures.length) {
+      quickStatus("Extracted " + made + " garment" + (made === 1 ? "" : "s") + ".", "ok");
+      document.getElementById("quickPrompt").value = "";
+    } else if (made) {
+      quickStatus("Extracted " + made + " of " + found.length + ". " +
+        failures.length + " failed: " + failures[0], "err");
+    } else {
+      quickStatus(failures[0] || "Nothing could be extracted.", "err");
+    }
     setQuickBusy(false);
   }
 
@@ -1840,7 +1928,9 @@
   // photo is on the phone, so ask for it.
   window.quickExtract = function () {
     const typed = document.getElementById("quickPrompt").value.trim();
-    if (/^https?:\/\//i.test(typed)) return runExtract(typed, "that photo");
+    // A link the model can already fetch needs no copy of its own, so nothing
+    // is uploaded and nothing has to be cleaned up afterwards.
+    if (/^https?:\/\//i.test(typed)) return runExtract(typed, "that photo", { temporary: false });
     if (typed) {
       quickStatus("Extract needs a photo: paste an image URL in the box, or empty it to pick a file.", "err");
       return;
@@ -1861,7 +1951,13 @@
         r.onerror = () => reject(new Error("Could not read that file"));
         r.readAsDataURL(file);
       });
-      await runExtract(dataUrl, "your photo");
+      setQuickBusy(true, "Extracting");
+      quickStatus("Uploading the photo…", "busy");
+      // The extract_ prefix is what lets it be deleted again: upload-image will
+      // only remove files named that way, so this cannot take out a character's
+      // base image by accident.
+      const photoUrl = await persistDataUrl(dataUrl, "extract_");
+      await runExtract(photoUrl, "your photo", { temporary: true });
     } catch (e) {
       quickStatus(e.message, "err");
       setQuickBusy(false);

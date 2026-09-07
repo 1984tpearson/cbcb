@@ -1196,6 +1196,27 @@
       // one outcome that wastes the whole batch.
       variantInstruction: "Return {count} different versions of this garment: {item}\n\nReturn ONLY a JSON array of exactly {count} strings, no markdown and no commentary. Each string describes one version in 12 to 25 words, covering colour, fabric, cut and detailing, as a clothing catalogue would.\n\nMake them genuinely different from each other — vary the colour first, then the fabric, the silhouette and the detailing. Two versions that differ only in wording are a failure. Every one must still plainly be the garment asked for.",
 
+      // ── Faithful extraction ────────────────────────────────────────────────
+      // Describing a garment and generating from the words cannot carry a
+      // print: "a black tee with a band logo" produces *a* logo, never *that*
+      // logo. So the photograph itself is handed to the image model and the
+      // garment is isolated out of it, which keeps the actual pixels of the
+      // graphic.
+      //
+      // Wiro, because Dezgo cannot do this. Its catalogue has image2image on
+      // 89 models but every one is sd1/sd2 at 512px, which transforms the whole
+      // picture rather than isolating anything, and 512px is where a printed
+      // logo dissolves. Its one instruction-following editor, instruct_pix2pix,
+      // is also sd1 at 512px. Checked against Dezgo's own model list.
+      extractModel: "seedream-v5-pro-uncensored",
+      extractResolution: "1k",
+      extractAspectRatio: "1:1",
+      // {garment} and {description} are substituted. The insistence on
+      // reproducing the graphic exactly is the whole point of this path — a
+      // model left to its own devices will happily redesign a print it can
+      // only half see.
+      isolatePrompt: "Using the attached photograph, produce a flat lay product photograph of ONLY the {garment} worn in it: {description}. Show that exact garment removed from the person and laid out flat on a plain seamless light grey surface, photographed from directly overhead. No person, no mannequin, no body, nobody wearing it. Reproduce its colour, pattern, print, logo, text and every graphic detail exactly as they appear in the photograph — do not redesign, restyle or invent any part of it. Show the whole garment inside the frame.",
+
       // Pulls the clothes out of a photograph of someone wearing them. The
       // model is asked for what the garment IS, not what the photo shows: a
       // dress half hidden behind an arm still has a hem and a neckline, and
@@ -1264,6 +1285,15 @@
       // is a table of four numbers rather than one per model in a list of
       // dozens. Approximate and published rather than measured — treat it as
       // the order of magnitude that decides which model to pick, not a bill.
+      // Dezgo publishes a native resolution per model, and for the newer
+      // families it is a floor rather than a ceiling — flux_1_schnell declares
+      // 512 but generates happily at 1024, which is what every flat lay here
+      // was made at before the catalogue started supplying the number. A
+      // garment reference is copied by everything downstream, so it wants the
+      // detail. SD1 and SD2 genuinely degrade above native and are left alone.
+      preferredSide: 1024,
+      upscalableEndpoints: ["text2image_sdxl", "text2image_flux"],
+
       dezgoPricing: {
         text2image: 0.0019,
         text2image_sdxl: 0.0075,
