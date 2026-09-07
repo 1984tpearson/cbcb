@@ -1493,31 +1493,22 @@
       // requirement: there is nothing here to satisfy, so nothing to invent.
       povBodyPermissive: "the viewer's own body may enter the frame where the action calls for it",
 
-      // The viewer's own posture, as camera height. Without it the prompt says
-      // she is kneeling and says nothing about where the camera is, so the
-      // model puts it level with her — and then the viewer's body has to
-      // stretch up from the bottom edge to reach a head it has placed in the
-      // middle of the frame.
+      // There was a povEyeLevel table here that turned the tracked userPose
+      // into "seen from the eye level of someone standing". It is gone, and
+      // the scene instruction now asks for the same thing instead.
       //
-      // Said as eye level rather than as a pose. An earlier version emitted
-      // "camera positioned as someone standing", which describes the camera as
-      // an object in the room and fights the clause saying it is the viewer's
-      // own eyes — one model drew the camera held out to one side. Eye level
-      // is the same fact in POV's own terms.
-      povEyeLevelTemplate: "seen from the eye level of someone {pose}",
-      // Free text in, one of these out. Anything unrecognised emits nothing:
-      // a guessed camera height is worse than none, since none at least lets
-      // the scene decide.
-      // First match wins, so the specific postures come before the loose
-      // furniture words: "lying back on the bed" is lying down, and the
-      // sitting rule's "on the bed" would otherwise claim it.
-      povEyeLevels: [
-        { match: "lying|lie down|lies down|lay back|flat on|on (?:his|her|their) back|reclin|propped", pose: "lying down" },
-        { match: "kneel|crouch|squat", pose: "kneeling" },
-        { match: "stand|upright|on (?:his|her|their) feet|leaning against", pose: "standing" },
-        { match: "sit|seated|perch|on the (?:sofa|couch|chair|bed|edge)", pose: "sitting" },
-      ],
-
+      // Two reasons it was the wrong source. It read staging.userPose, which
+      // is only rewritten when the conversation shows the viewer moving, so
+      // it could assert "standing" with total confidence four turns after he
+      // sat down — and a confident wrong camera height is exactly what the
+      // model bends the image to satisfy. And it was a keyword table, so it
+      // knew "leaning against the counter" and not whatever the next scene
+      // says.
+      //
+      // The extractor reads the last ten messages every time an image is
+      // made. It already leaked this through the ban — "eyes looking up" in a
+      // shot where she was kneeling — because it is the one component that
+      // actually knows.
       proportionGuard: "two arms and two hands per person, no extra limbs, anatomically coherent",
       // Instruction sent to the extractor model that turns the recent
       // conversation into a Stable Diffusion prompt. {name}, {charDesc},
@@ -1547,7 +1538,7 @@
       // to report — an optional field a model is told to ignore is one it
       // fills in anyway.
       clothingStateField: ", \"clothingState\": \"...\"",
-      scenePromptInstruction: "You are describing one moment from a roleplay conversation so that an image can be generated of it. The image is a first-person POV shot taken through the User's own eyes: the User is the camera.\n\nCharacter description: {charDesc}.\n\nConversation:\n{recent}\n\nDescribe the moment at the very END of the conversation - what is {name} doing RIGHT NOW.\n\nReturn ONLY a JSON object, with no other text and no code fences:\n{\"scene\": \"...\", \"touching\": true or false, \"viewerBody\": \"...\"{clothingField}}\n\nscene - 15 to 25 words: {name}'s action, pose and expression in this moment. Put the most important action or pose FIRST. Be concrete and literal. Do NOT include names. Do NOT use abstract words like \"mood\" or \"atmosphere\". The location, both people's clothing and the camera framing are all added separately, so do NOT restate or decide any of them here.\n\ntouching - true if {name} and the User are in physical contact at this moment, false if they are not. Judge it from what the text actually describes, however slight the contact is and however it is worded. Being undressed, or nearby, or talking, is not contact; any part of one of them against the other is.\n\nviewerBody - when touching is true, which of the User's OWN body parts are in the shot and where they enter the frame, as a short phrase: for example \"the viewer's hand in her hair, entering from the top of the frame\". Name the part and the frame edge it comes in from, so it is not drawn floating. When touching is false, use an empty string.\n\nThe User is the camera. Never describe the User's face, head, hair or back - the camera cannot see itself. Never refer to the User in the third person: not \"him\", \"his\", \"the man\", nor by any name - always \"the viewer\". {name}'s own body belongs in scene; only the User's body belongs in viewerBody. Where scene has to mention a part of the User's body - what her mouth or hands are on - name it as the viewer's: \"mouth covering the viewer's penis\", never a bare \"mouth on penis\", which leaves the image model to decide whose it is.{actNote}{clothingNote}",
+      scenePromptInstruction: "You are describing one moment from a roleplay conversation so that an image can be generated of it. The image is a first-person POV shot taken through the User's own eyes: the User is the camera.\n\nCharacter description: {charDesc}.\n\nConversation:\n{recent}\n\nDescribe the moment at the very END of the conversation - what is {name} doing RIGHT NOW.\n\nReturn ONLY a JSON object, with no other text and no code fences:\n{\"scene\": \"...\", \"touching\": true or false, \"viewerBody\": \"...\"{clothingField}}\n\nscene - 15 to 30 words: {name}'s action, pose and expression in this moment. Put the most important action or pose FIRST. Be concrete and literal. Do NOT include names. Do NOT use abstract words like \"mood\" or \"atmosphere\". The location and both people's clothing are added separately, so do NOT restate or decide either of them here. Do say where {name} is in relation to the viewer when the action puts them at different heights or distances — kneeling below them, leaning over them, face to face — and which way they are looking. That is what tells the camera where it is, and only you can know it, because only you have read what just happened.\n\ntouching - true if {name} and the User are in physical contact at this moment, false if they are not. Judge it from what the text actually describes, however slight the contact is and however it is worded. Being undressed, or nearby, or talking, is not contact; any part of one of them against the other is.\n\nviewerBody - when touching is true, which of the User's OWN body parts are in the shot and where they enter the frame, as a short phrase: for example \"the viewer's hand in her hair, entering from the top of the frame\". Name the part and the frame edge it comes in from, so it is not drawn floating. When touching is false, use an empty string.\n\nThe User is the camera. Never describe the User's face, head, hair or back - the camera cannot see itself. Never refer to the User in the third person: not \"him\", \"his\", \"the man\", nor by any name - always \"the viewer\". {name}'s own body belongs in scene; only the User's body belongs in viewerBody. Where scene has to mention a part of the User's body - what her mouth or hands are on - name it as the viewer's: \"mouth covering the viewer's penis\", never a bare \"mouth on penis\", which leaves the image model to decide whose it is.{actNote}{clothingNote}",
     },
 
     // ── Models & defaults ────────────────────────────────────────────────────
