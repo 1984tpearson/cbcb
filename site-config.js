@@ -1475,6 +1475,24 @@
       // names any part of the viewer.
       povIntimateFraming: "close to her, she fills much of the frame",
 
+      // What the POV clause says about the viewer's own body in an explicit
+      // shot: that it may be there, and nothing more.
+      //
+      // The specific version — the extractor naming the part and the frame
+      // edge, "the viewer's penis entering from the bottom of the frame" —
+      // is kept for ordinary contact, where it works. In explicit shots it
+      // was one instruction too many: the scene text already says what her
+      // mouth is on, so naming the same anatomy again as a placed object in
+      // the frame gave the model two accounts of one thing to reconcile, and
+      // it reconciled them into a tangle.
+      //
+      // This is NOT the clause that was removed for producing stray limbs.
+      // That one — "the viewer's own body framing the bottom of the shot" —
+      // asserted that a body WAS there without saying which part, so the
+      // model had to invent something to satisfy it. Permission is not a
+      // requirement: there is nothing here to satisfy, so nothing to invent.
+      povBodyPermissive: "the viewer's own body may enter the frame where the action calls for it",
+
       // The viewer's own posture, as camera height. Without it the prompt says
       // she is kneeling and says nothing about where the camera is, so the
       // model puts it level with her — and then the viewer's body has to

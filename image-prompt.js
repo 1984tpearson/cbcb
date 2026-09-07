@@ -115,6 +115,7 @@ window.ImagePrompt = {
     // contact branch returns before the intimate one, so this is the only
     // framing an explicit shot ever gets.
     const POV_INTIMATE_FRAMING = CFG.image.povIntimateFraming;
+    const POV_BODY_PERMISSIVE = CFG.image.povBodyPermissive;
 
     // The viewer's own posture, turned into a camera height. Returns "" for a
     // pose that does not classify: a guessed eye level is worse than none,
@@ -205,14 +206,22 @@ window.ImagePrompt = {
         // "the foreground hand and arm belong to the viewer, one pair only"
         // only repeated the ownership and added a second mention of hands and
         // arms. Removing it measurably improved the images.
-        parts.push(viewerBody);
-        // This branch returns, so the intimate modifier below never runs for
-        // an explicit shot — the NSFW scene note requires viewerBody, so
-        // every explicit shot exits here. That left those shots with no
-        // framing at all beyond "first person POV", and the model composed
-        // them like portraits: her head centred, and the viewer's anatomy
-        // stretched from the bottom edge to reach it.
-        if (isIntimateScene(scene, staging, nsfw)) parts.push(POV_INTIMATE_FRAMING);
+        // Two ways of putting the viewer in the shot, and which one depends on
+        // how much else in the prompt is already talking about the same body.
+        //
+        // In an ordinary contact shot the scene says nothing about the
+        // viewer's anatomy, so viewerBody naming the part and the edge is the
+        // only thing placing it, and it works.
+        //
+        // In an explicit one the scene already says what she is doing and to
+        // what. Repeating it as a placed object gave the model two accounts
+        // of one thing, and the specifics were what it bent the image to
+        // satisfy. So there it is told only that the body may be there.
+        if (isIntimateScene(scene, staging, nsfw)) {
+          parts.push(POV_BODY_PERMISSIVE, POV_INTIMATE_FRAMING);
+        } else {
+          parts.push(viewerBody);
+        }
         // What the viewer is wearing is decided by the tracked outfit, never
         // by the scene text: "naked" in a scene prompt is almost always
         // describing her, and reading it as the viewer's state stripped the
