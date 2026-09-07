@@ -1334,7 +1334,7 @@
         maxWorn: 5,
         // The only clothing wording in a chat image prompt when garments are
         // worn. It replaces "wearing {charOutfit}" entirely.
-        refClause: "wearing exactly the clothes in the reference images after the first, which show those garments laid out flat",
+        refClause: "wearing the clothes in the reference images",
       },
 
       // What a generation costs, per endpoint family. Dezgo prices by family and
