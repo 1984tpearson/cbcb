@@ -1835,6 +1835,61 @@ async function suggestAvatarOutfit({ character, model }) {
   } catch { return ""; }
 }
 
+// Stocks a character's closet out of the wardrobe library. Returns the ids it
+// chose and whatever it could not find, so a character the wardrobe cannot
+// dress says so rather than quietly ending up in the wrong clothes.
+//
+// The chat model, not the wardrobe's own small one: this is a judgement about
+// a person — what a night-shift nurse owns besides scrubs — and the 8B model
+// is the one that could not tell two people's clothing apart in the tracker.
+//
+// Only garments with a picture are offered. One without cannot be worn: its
+// whole purpose downstream is to be handed to the image model.
+async function suggestCloset({ character, model }) {
+  const cfg = (CFG.wardrobe.closet || {});
+  if (!cfg.instruction) return { closet: [], missing: [] };
+  const library = (await loadWardrobeLibrary()).filter(g => g && g.id && g.image);
+  if (!library.length) return { closet: [], missing: [] };
+
+  const desc = [
+    character.name ? `Name: ${character.name}` : "",
+    character.age ? `Age: ${character.age}` : "",
+    character.gender ? `Gender: ${character.gender === "Custom" ? (character.customGender || "") : character.gender}` : "",
+    character.maritalStatus ? `Marital status: ${character.maritalStatus}` : "",
+    character.relationship ? `Relationship to the viewer: ${character.relationship === "Custom" ? (character.relationshipCustom || "") : character.relationship}` : "",
+    character.persona ? `Personality and background: ${character.persona}` : "",
+  ].filter(Boolean).join("\n");
+  if (!desc.trim()) return { closet: [], missing: [] };
+
+  // One line per garment. Deliberately not the descriptions: sixty-one
+  // catalogue paragraphs is most of the context window spent before the
+  // question is even asked, and the name, category and tags are what the
+  // choice actually turns on.
+  const catalogue = library.map(g => [
+    g.id, g.name || "untitled", g.category || "", (g.set || ""), (g.tags || []).join(" "),
+  ].join(" | ")).join("\n");
+
+  const raw = await aiComplete({
+    model,
+    messages: [{ role: "user", content: fillTemplate(cfg.instruction, {
+      desc, catalogue, count: cfg.targetCount || 12,
+    }) }],
+  });
+  const parsed = parseJsonReply(raw);
+  if (!parsed) return { closet: [], missing: [] };
+
+  // Only ids that are really in the library, de-duplicated, capped. A model
+  // asked to choose from a list will occasionally return an id that is not on
+  // it, and an invented id in a closet is a garment that can never resolve.
+  const known = new Set(library.map(g => g.id));
+  const closet = [...new Set((parsed.closet || []).filter(id => known.has(id)))]
+    .slice(0, cfg.maxCount || 24);
+  const missing = (parsed.missing || [])
+    .filter(m => typeof m === "string" && m.trim())
+    .map(m => m.trim()).slice(0, 8);
+  return { closet, missing };
+}
+
 async function autoGenerateCharacter({ vibe, model, constraints = {} }) {
   // Build constraint instructions from any pre-filled fields
   const constraintLines = [];
@@ -2491,7 +2546,7 @@ function ClosetStrip({ closet, worn, onRemove, onToggleWorn, maxWorn }) {
 }
 
 // ─── CHARACTER PERSONALITY PANEL (in-chat) ────────────────────────────────────
-function CharacterPersonalityPanel({ character, onSave, onClose }) {
+function CharacterPersonalityPanel({ character, onSave, onClose, model }) {
   const [sliders, setSliders] = useState(character.sliders || DEFAULT_SLIDERS);
   const [disabledSliders, setDisabledSliders] = useState(character.disabledSliders || []);
   const [reactiveEnabled, setReactiveEnabled] = useState(character.reactiveEnabled !== false);
@@ -2514,6 +2569,8 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
   const [explicitDetail, setExplicitDetail] = useState(character.explicitDetail || "");
   const [closet, setCloset] = useState(Array.isArray(character.closet) ? character.closet : []);
   const [worn, setWorn] = useState(Array.isArray(character.worn) ? character.worn : []);
+  const [closetBusy, setClosetBusy] = useState(false);
+  const [closetNote, setClosetNote] = useState("");
   const [showClosetPicker, setShowClosetPicker] = useState(false);
 
   // Re-sync wardrobe state if character prop updates while panel is open
@@ -2609,6 +2666,28 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
               <button style={{ ...S.btnSecondary, color: "#c04060" }} onClick={() => { setCloset([]); setWorn([]); }}>Empty closet</button>
             )}
           </div>
+          {/* For characters built before the wardrobe existed, and for one
+              whose persona has moved on from the clothes she was given.
+              Replaces the closet rather than adding to it — a restock is a
+              fresh answer to "what does this person own", and merging it with
+              the old one would leave the previous job's uniform in there
+              forever. Nothing is saved until Save Changes. */}
+          <button style={{ ...S.btnSecondary, marginTop: 8 }} disabled={closetBusy}
+            onClick={async () => {
+              setClosetBusy(true); setClosetNote("");
+              try {
+                const { closet: picked, missing } = await suggestCloset({
+                  character: { ...character, closet }, model });
+                if (picked.length) { setCloset(picked); setWorn(w => w.filter(id => picked.includes(id))); }
+                setClosetNote(picked.length
+                  ? `Picked ${picked.length} garments.${missing.length ? ` Nothing in the wardrobe for: ${missing.join(", ")}.` : ""} Save to keep them.`
+                  : "Couldn't pick anything — check there are garments in the wardrobe.");
+              } catch (e) { setClosetNote(`Failed: ${e.message}`); }
+              setClosetBusy(false);
+            }}>
+            {closetBusy ? "Choosing…" : (closet.length ? "Regenerate closet from wardrobe" : "Stock closet from wardrobe")}
+          </button>
+          {closetNote && <p style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>{closetNote}</p>}
           {showClosetPicker && (
             <ClosetPicker selected={closet} onChange={setCloset} onClose={() => setShowClosetPicker(false)} />
           )}
@@ -3582,6 +3661,10 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   });
   const [vibe, setVibe] = useState("");
   const [vibeLoading, setVibeLoading] = useState(false);
+  // What the closet stocker found, and what it could not — shown rather than
+  // swallowed, so a character the wardrobe cannot dress says so.
+  const [closetNote, setClosetNote] = useState("");
+  const [closetLoading, setClosetLoading] = useState(false);
   const [imgPrompt, setImgPrompt] = useState("");
   // Two generations per click now, so the button says which one is running.
   const [imgStage, setImgStage] = useState("");
@@ -3657,6 +3740,18 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       if (!String(merged.appearance.avatar.outfit || "").trim()) {
         const outfit = await suggestAvatarOutfit({ character: merged, model: settings.selectedModel });
         if (outfit) merged.appearance = { ...merged.appearance, avatar: { ...merged.appearance.avatar, outfit } };
+      }
+      // Same reasoning as the outfit above: asked once she exists, so it is
+      // answering about this person rather than an empty form. Left alone if
+      // clothes have already been picked by hand.
+      if (!(merged.closet || []).length) {
+        try {
+          const { closet, missing } = await suggestCloset({ character: merged, model: settings.selectedModel });
+          if (closet.length) merged.closet = closet;
+          setClosetNote(missing.length
+            ? `Stocked ${closet.length} garments. Nothing in the wardrobe for: ${missing.join(", ")}.`
+            : (closet.length ? `Stocked ${closet.length} garments from the wardrobe.` : ""));
+        } catch (e) { console.warn("Closet suggestion failed:", e.message); }
       }
       setForm(merged);
     } catch (e) { setError("Failed to generate character. Try again."); }
@@ -3977,6 +4072,30 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
           <label style={S.label}>Personality / System Prompt</label>
           <textarea style={{ ...S.input, height: 90, resize: "vertical" }} placeholder="Describe how this character speaks, their backstory, personality..."
             value={form.persona} onChange={e => setForm(f => ({ ...f, persona: e.target.value }))} />
+
+          {/* Closet. Stocked automatically by the vibe generator; the button is
+              for a persona written by hand, which never went through it. */}
+          <label style={S.label}>Closet</label>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button style={S.btnSecondary} disabled={closetLoading}
+              onClick={async () => {
+                setClosetLoading(true); setClosetNote("");
+                try {
+                  const { closet, missing } = await suggestCloset({ character: form, model: settings.selectedModel });
+                  if (closet.length) setForm(f => ({ ...f, closet }));
+                  setClosetNote(closet.length
+                    ? `Stocked ${closet.length} garments.${missing.length ? ` Nothing in the wardrobe for: ${missing.join(", ")}.` : ""}`
+                    : "Couldn't pick anything — is there a persona, and are there garments in the wardrobe?");
+                } catch (e) { setClosetNote(`Failed: ${e.message}`); }
+                setClosetLoading(false);
+              }}>
+              {closetLoading ? "Choosing…" : ((form.closet || []).length ? "Restock from wardrobe" : "Stock from wardrobe")}
+            </button>
+            <span style={{ fontSize: 12, color: "var(--text3)" }}>
+              {(form.closet || []).length ? `${form.closet.length} garments` : "empty"}
+            </span>
+          </div>
+          {closetNote && <p style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>{closetNote}</p>}
 
           {/* Sliders toggle */}
           <button style={{ ...S.btnSecondary, marginTop: 8, width: "100%", textAlign: "center" }}
@@ -5515,7 +5634,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       )}
 
       {showPersonality && (
-        <CharacterPersonalityPanel character={character} onSave={handlePersonalitySave} onClose={() => setShowPersonality(false)} />
+        <CharacterPersonalityPanel character={character} model={settings.selectedModel} onSave={handlePersonalitySave} onClose={() => setShowPersonality(false)} />
       )}
 
       {/* Opened from the header avatar. commitCharacter both updates the chat's

@@ -1297,6 +1297,25 @@
         promptTemplate: "Full length fashion photograph of the person in the first reference image{charDesc}, wearing {garments}. The reference images after the first are the garments, photographed flat — dress the person in exactly those garments, matching their colour, cut, fabric and detailing precisely. {scene}",
       },
 
+      // ── Stocking a closet ──────────────────────────────────────────────────
+      // Which of the library's garments a character owns, decided from who
+      // they are. A nurse owns scrubs AND the clothes she wears the rest of
+      // the time: a closet holding only the uniform is a costume, and one
+      // holding only jeans forgets the job she does all day.
+      //
+      // It picks from what is already in the wardrobe and never invents. What
+      // it could not find is reported instead, so the answer to a firefighter
+      // with no turnout gear is a note saying so, not a silently wrong closet.
+      closet: {
+        // Enough for a week, a job and a night in. Well past this and the
+        // model starts picking everything that matches rather than choosing.
+        targetCount: 12,
+        // Hard ceiling on what is accepted back, whatever it returns.
+        maxCount: 24,
+        // {desc}, {catalogue} and {count} are substituted.
+        instruction: "Here is a character:\n\n{desc}\n\nHere is every garment in the wardrobe. One per line, as: id | name | category | set | tags\n\n{catalogue}\n\nChoose the garments this person owns and would actually be seen in. Aim for about {count}.\n\nThink about who they are before you pick. Cover, where the wardrobe has something suitable:\n- everyday clothes they would wear most days\n- anything their job, role or circumstances require — a nurse owns scrubs, a runner owns running kit — but never ONLY that\n- something to sleep in\n- underwear\n- shoes\n- a coat or jacket if they would own one\n- one thing for a night out or an occasion\n\nRules:\n- Only ids from the list. Never invent a garment, a name or an id.\n- A closet is one person's taste, not a catalogue. Do not pick everything that matches — pick what THIS person would own, given their age, their build, their circumstances and how they carry themselves.\n- Garments sharing a set name are one outfit. Take the whole set or none of it.\n- Do not pick two of something they would only own one of.\n\nReturn ONLY a JSON object, no markdown and no commentary:\n{\"closet\": [\"id\", ...], \"missing\": [\"...\"]}\n\n\"missing\" is for things this character plainly should own that the wardrobe has nothing suitable for, each 2-5 words, like \"police uniform\" or \"walking boots\". Use an empty array when the wardrobe covered them.",
+      },
+
       // ── Worn in chat ───────────────────────────────────────────────────────
       // A character wearing closet garments in an ordinary chat image. The
       // same trick as the fitting room, with none of its wording about
