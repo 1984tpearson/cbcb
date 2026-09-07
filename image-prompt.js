@@ -673,7 +673,18 @@ window.ImagePrompt = {
       const actNote = character.nsfw
         ? " State plainly what the two of them are physically doing to each other, including sexual acts where that is what is happening — do not soften it into mood, atmosphere or euphemism, and do not substitute a pose for the act. In an intimate scene viewerBody must name the viewer's own anatomy that is actually involved, and the frame edge it enters from. Give it a plain, ordinary size - write \"the viewer's normal sized penis\" rather than leaving the size unsaid, since unqualified the image model tends toward the exaggerated."
         : "";
-      const content = await aiComplete({ model, messages: [{ role: "user", content: fillTemplate(CFG.image.scenePromptInstruction, { name: character.name, charDesc: charDesc || "not specified", recent, actNote }) }] });
+      // When she is wearing garments out of the wardrobe, their photographs go
+      // to the image model and the prompt says nothing about them. What the
+      // photographs cannot show is what has happened to them since she put
+      // them on, so that is asked for here — and only when there is a garment
+      // for it to be about, since an unused field is one a model fills in
+      // anyway.
+      const wornNames = (character.wornNames || []).filter(Boolean);
+      const clothingField = wornNames.length ? CFG.image.clothingStateField : "";
+      const clothingNote = wornNames.length
+        ? fillTemplate(CFG.image.clothingStateNote, { name: character.name, garments: wornNames.join(", ") })
+        : "";
+      const content = await aiComplete({ model, messages: [{ role: "user", content: fillTemplate(CFG.image.scenePromptInstruction, { name: character.name, charDesc: charDesc || "not specified", recent, actNote, clothingField, clothingNote }) }] });
       return parseSceneExtraction(content, messages, character.name);
     }
 
@@ -694,6 +705,7 @@ window.ImagePrompt = {
               // requiring a real true silently reported touching scenes as not.
               touching: parsed.touching === true || /^(true|yes)$/i.test(String(parsed.touching)),
               viewerBody: String(parsed.viewerBody || "").trim(),
+              clothingState: String(parsed.clothingState || "").trim(),
             };
           }
         } catch {} // fall through to the plain-text reading below
@@ -726,6 +738,7 @@ window.ImagePrompt = {
       scenePrompt, charDesc, charOutfit, userOutfit, staging, nsfw,
       explicitDetail, messages, characterName, styleModifiers,
       contact: contactOverride, name, keepSceneVerbatim, viewerBody, subjectNoun,
+      garmentRefs, clothingState,
     }) {
       const contact = contactOverride !== undefined
         ? contactOverride
@@ -741,7 +754,21 @@ window.ImagePrompt = {
         pov: buildPovModifiers(scene, staging, nsfw, userOutfit, contact, viewerBody),
         name: name || "",
         charDesc: charDesc || "",
-        wardrobe: charOutfit ? `wearing ${charOutfit}` : "",
+        // Two ways to say what she has on, and only ever one of them.
+        //
+        // garmentRefs means her clothes are being sent as pictures, appended
+        // to the reference image. Then the prompt must not describe them: the
+        // model can see them, and words about colour and cut can only argue
+        // with what it is looking at. All the prompt says is which references
+        // are the clothes, plus whatever the conversation has done to them
+        // since — hanging open, pushed up, taken off.
+        //
+        // Without garments it falls back to the tracked sentence, which is
+        // all there was before the wardrobe existed and all there is for a
+        // character with no closet.
+        wardrobe: garmentRefs
+          ? joinPromptParts([CFG.wardrobe.chat.refClause, clothingState || ""])
+          : (charOutfit ? `wearing ${charOutfit}` : ""),
         staging: buildStagingImageDesc(staging),
         scene: scene || "",
         explicit: isIntimateScene(scene, staging, nsfw) ? (explicitDetail || "") : "",

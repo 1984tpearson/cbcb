@@ -475,6 +475,24 @@ const loadWardrobeLibrary = ({ refresh = false } = {}) => {
 // Ids that no longer resolve are dropped rather than shown as gaps: a garment
 // deleted in wardrobe.html is gone, and the closet is a list of references to
 // it, not a copy.
+// The garments to hand the image model, as pictures. Async because the library
+// is fetched once per page load; a failure resolves to nothing worn rather than
+// taking the whole generation down with it — an image of her in the wrong
+// clothes beats no image at all.
+const resolveWornGarments = async (character) => {
+  const ids = Array.isArray(character && character.worn) ? character.worn : [];
+  if (!ids.length) return [];
+  try {
+    const library = await loadWardrobeLibrary();
+    return closetGarments({ closet: ids }, library)
+      .filter(g => g.image)
+      .slice(0, (CFG.wardrobe.chat && CFG.wardrobe.chat.maxWorn) || 5);
+  } catch (e) {
+    console.warn("Wardrobe unavailable, generating without garments:", e.message);
+    return [];
+  }
+};
+
 const closetGarments = (character, library) => {
   const ids = Array.isArray(character && character.closet) ? character.closet : [];
   if (!ids.length || !Array.isArray(library)) return [];
@@ -2417,7 +2435,7 @@ function ClosetPicker({ selected, onChange, onClose }) {
 
 // The chosen garments, as thumbnails. Loads the library itself rather than
 // taking it as a prop, so the panel shows a closet without opening the picker.
-function ClosetStrip({ closet, onRemove }) {
+function ClosetStrip({ closet, worn, onRemove, onToggleWorn, maxWorn }) {
   const [library, setLibrary] = useState(null);
   useEffect(() => {
     let live = true;
@@ -2431,18 +2449,37 @@ function ClosetStrip({ closet, onRemove }) {
   // after it was picked. Said out loud rather than silently dropped, because
   // the count in the closet would otherwise change on its own.
   const missing = closet.length - garments.length;
+  const wornSet = new Set(worn);
+  // The names go up with the ids because only this component has the library
+  // resolved. They are what the chat model is told she has on — short names,
+  // never the catalogue description: the description is what the picture is
+  // for, and the chat model is the one reader that cannot see the picture.
+  const toggle = (id) => {
+    const next = wornSet.has(id) ? worn.filter(x => x !== id) : [...worn, id];
+    onToggleWorn(next, garments.filter(g => next.includes(g.id)).map(g => g.name || "").filter(Boolean));
+  };
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(78px, 1fr))", gap: 8, marginTop: 4 }}>
-        {garments.map(g => (
-          <div key={g.id} style={{ position: "relative", borderRadius: 10, overflow: "hidden", border: "1px solid var(--border2)", background: "var(--bg3)" }}>
-            <img src={g.image} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
-            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text2)", padding: "4px 5px" }}>{g.name || "Untitled"}</div>
-            <button onClick={() => onRemove(g.id)} title="Remove from closet"
-              style={{ position: "absolute", top: 3, right: 3, width: 20, height: 20, borderRadius: "50%", border: "none",
-                background: "rgba(0,0,0,0.55)", color: "white", fontSize: 12, lineHeight: "20px", padding: 0, cursor: "pointer" }}>×</button>
-          </div>
-        ))}
+        {garments.map(g => {
+          const on = wornSet.has(g.id);
+          const full = !on && worn.length >= maxWorn;
+          return (
+            <div key={g.id} onClick={() => { if (!full) toggle(g.id); }}
+              title={full ? `Only ${maxWorn} garments can be worn at once` : (on ? "Take off" : "Wear")}
+              style={{ position: "relative", borderRadius: 10, overflow: "hidden", background: "var(--bg3)",
+                border: on ? "2px solid var(--pink)" : "1px solid var(--border2)",
+                opacity: full ? 0.45 : 1, cursor: full ? "default" : "pointer" }}>
+              <img src={g.image} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+              <div style={{ fontSize: 10, fontWeight: 700, color: on ? "var(--pink)" : "var(--text2)", padding: "4px 5px" }}>
+                {on ? "● " : ""}{g.name || "Untitled"}
+              </div>
+              <button onClick={e => { e.stopPropagation(); onRemove(g.id); }} title="Remove from closet"
+                style={{ position: "absolute", top: 3, right: 3, width: 20, height: 20, borderRadius: "50%", border: "none",
+                  background: "rgba(0,0,0,0.55)", color: "white", fontSize: 12, lineHeight: "20px", padding: 0, cursor: "pointer" }}>×</button>
+            </div>
+          );
+        })}
       </div>
       {missing > 0 && (
         <p style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>
@@ -2476,6 +2513,7 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
   const [staging, setStaging] = useState(character.staging || EMPTY_STAGING);
   const [explicitDetail, setExplicitDetail] = useState(character.explicitDetail || "");
   const [closet, setCloset] = useState(Array.isArray(character.closet) ? character.closet : []);
+  const [worn, setWorn] = useState(Array.isArray(character.worn) ? character.worn : []);
   const [showClosetPicker, setShowClosetPicker] = useState(false);
 
   // Re-sync wardrobe state if character prop updates while panel is open
@@ -2484,6 +2522,7 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
   useEffect(() => { setStaging(character.staging || EMPTY_STAGING); }, [character.staging]);
   useEffect(() => { setExplicitDetail(character.explicitDetail || ""); }, [character.explicitDetail]);
   useEffect(() => { setCloset(Array.isArray(character.closet) ? character.closet : []); }, [character.closet]);
+  useEffect(() => { setWorn(Array.isArray(character.worn) ? character.worn : []); }, [character.worn]);
   const setStagingField = (key, value) => setStaging(st => ({ ...(st || EMPTY_STAGING), [key]: value || null }));
   const [memoryGenLoading, setMemoryGenLoading] = useState(false);
   const [memoryGenError, setMemoryGenError] = useState("");
@@ -2550,21 +2589,24 @@ function CharacterPersonalityPanel({ character, onSave, onClose }) {
           <input style={S.input} placeholder="e.g. jeans and a grey t-shirt"
             value={userOutfit} onChange={e => setUserOutfit(e.target.value)} />
           <button style={{ ...S.btnSecondary, marginTop: 4, color: "#c04060" }}
-            onClick={() => { setCharOutfit(""); setUserOutfit(""); }}>
+            onClick={() => { setCharOutfit(""); setUserOutfit(""); setWorn([]); }}>
             Clear Wardrobe
           </button>
 
           <label style={S.label}>{character.name}'s closet</label>
           <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>
-            The clothes {character.name} owns, picked from the wardrobe. Nothing else reads them yet — this is the shortlist that later matching and image references will work from, so keep it to what she'd actually wear.
+            The clothes {character.name} owns, picked from the wardrobe. Tap one to put it on: worn garments are outlined, their photographs are sent to the image model so it draws those exact clothes, and their names go into the box above so she knows what she has on.
           </p>
-          <ClosetStrip closet={closet} onRemove={id => setCloset(c => c.filter(x => x !== id))} />
+          <ClosetStrip closet={closet} worn={worn}
+            maxWorn={(CFG.wardrobe.chat && CFG.wardrobe.chat.maxWorn) || 5}
+            onRemove={id => { setCloset(c => c.filter(x => x !== id)); setWorn(w => w.filter(x => x !== id)); }}
+            onToggleWorn={(ids, names) => { setWorn(ids); setCharOutfit(names.join(", ")); }} />
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <button style={S.btnSecondary} onClick={() => setShowClosetPicker(true)}>
               {closet.length ? `Edit closet (${closet.length})` : "Add clothes"}
             </button>
             {closet.length > 0 && (
-              <button style={{ ...S.btnSecondary, color: "#c04060" }} onClick={() => setCloset([])}>Empty closet</button>
+              <button style={{ ...S.btnSecondary, color: "#c04060" }} onClick={() => { setCloset([]); setWorn([]); }}>Empty closet</button>
             )}
           </div>
           {showClosetPicker && (
@@ -2810,7 +2852,7 @@ Return ONLY the JSON object, no other text.` }] });
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, disabledSliders, reactiveEnabled, intentionsEnabled, intentions: intentions.filter(i => (i.goal || "").trim()).map(i => ({ ...i, steps: (i.steps || []).filter(st => (st.text || "").trim()) })), memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, closet, staging: hasStaging(staging) ? staging : null, explicitDetail: explicitDetail.trim() || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
+          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, disabledSliders, reactiveEnabled, intentionsEnabled, intentions: intentions.filter(i => (i.goal || "").trim()).map(i => ({ ...i, steps: (i.steps || []).filter(st => (st.text || "").trim()) })), memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, closet, worn, staging: hasStaging(staging) ? staging : null, explicitDetail: explicitDetail.trim() || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
         </div>
       </div>
     </div>
@@ -4566,7 +4608,16 @@ No other text.` }]
         const charOutfit = charProposed ?? prev.charOutfit ?? null;
         const userOutfit = userProposed ?? prev.userOutfit ?? null;
         if (charOutfit === prev.charOutfit && userOutfit === prev.userOutfit) return prev;
-        return { ...prev, charOutfit, userOutfit };
+        // The tracker writes prose, so once it has changed what she is wearing
+        // the worn garments no longer describe her and their photographs must
+        // stop being sent — a picture of the dress she just took off is the
+        // one thing that would put it straight back on her.
+        //
+        // Blunt on purpose: a change of any kind drops all of them, rather
+        // than trying to work out which garment came off. Working that out is
+        // the next piece of this, and guessing it here would be wrong quietly.
+        const worn = charProposed ? [] : (prev.worn || []);
+        return { ...prev, charOutfit, userOutfit, worn };
       });
     } catch (e) {
       console.warn("Wardrobe tracking failed:", e.message);
@@ -4957,6 +5008,9 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // what says how she looks. See buildChatCharDesc.
       const charDesc = buildChatCharDesc(character);
       const styleModifiers = CFG.image.styleModifiers;
+      // Her clothes as pictures. When there are any, the prompt says nothing
+      // about them — see assembleImagePrompt.
+      const worn = await resolveWornGarments(character);
       // Ground the outfit in the tracked wardrobe state rather than leaving
       // it to the model's default — a specific custom prompt (e.g. "wearing
       // a red dress") will still tend to win out since it's more specific
@@ -4977,13 +5031,17 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         characterName: character.name,
         styleModifiers,
         keepSceneVerbatim: true,
+        garmentRefs: worn.length > 0,
       });
       const url = await generateImageWiro({
         prompt: fullPrompt,
         model: settings.imageModel,
         // Reference image anchors identity — Wiro handles the consistency,
         // so there's no seed juggling needed the way Dezgo's img2img required.
-        initImage: character.referenceImage,
+        // Her photograph first, the garment flat lays after it — the order the
+        // prompt refers to them by, and the same list the fitting room builds.
+        // Wiro takes a comma-joined list here.
+        initImage: [character.referenceImage, ...worn.map(g => g.image)].join(","),
         // Chat images are the ones worth recovering: they are the ones you set
         // going and then put the phone down.
         track: { characterId: character.id, label: customImgPrompt },
@@ -5053,8 +5111,15 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       // Timed separately: this is a full LLM call that runs before the image is
       // even submitted, so it is part of the wait, and it is ours to fix.
       const promptStartedAt = Date.now();
+      // Resolved before the extractor runs: it is told which garments she has
+      // on, so that it reports what has happened to them rather than
+      // describing them.
+      const worn = await resolveWornGarments(character);
+      const charForScene = worn.length
+        ? { ...character, wornNames: worn.map(g => g.name).filter(Boolean) }
+        : character;
       const extracted = messages.length > 0
-        ? await buildImagePromptFromContext({ messages, character, model: settings.selectedModel })
+        ? await buildImagePromptFromContext({ messages, character: charForScene, model: settings.selectedModel })
         : { scene: `${character.name}, looking at the viewer, character art`, touching: false, viewerBody: "" };
       const prompt = extracted.scene;
       console.info(`[image] scene prompt built in ${((Date.now() - promptStartedAt) / 1000).toFixed(1)}s` +
@@ -5084,11 +5149,13 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         styleModifiers,
         contact: extracted.touching,
         viewerBody: extracted.viewerBody,
+        garmentRefs: worn.length > 0,
+        clothingState: extracted.clothingState,
       });
       const url = await generateImageWiro({
         prompt: fullImgPrompt,
         model: settings.imageModel,
-        initImage: character.referenceImage,
+        initImage: [character.referenceImage, ...worn.map(g => g.image)].join(","),
         track: { characterId: character.id, label: prompt },
       });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);

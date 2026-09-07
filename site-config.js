@@ -1297,6 +1297,27 @@
         promptTemplate: "Full length fashion photograph of the person in the first reference image{charDesc}, wearing {garments}. The reference images after the first are the garments, photographed flat — dress the person in exactly those garments, matching their colour, cut, fabric and detailing precisely. {scene}",
       },
 
+      // ── Worn in chat ───────────────────────────────────────────────────────
+      // A character wearing closet garments in an ordinary chat image. The
+      // same trick as the fitting room, with none of its wording about
+      // studios: her reference photograph first, the garment flat lays after
+      // it, and a prompt that says which is which and nothing else about the
+      // clothes.
+      //
+      // Nothing here describes a garment, and nothing here should ever start
+      // to. The picture is the description; words repeating it can only
+      // disagree with it, and a paragraph of catalogue prose in an image
+      // prompt costs the scene the attention it needs.
+      chat: {
+        // Her photograph takes one of Wiro's 15 input slots, and coherence
+        // falls off long before the other fourteen are used. Same number the
+        // fitting room settled on.
+        maxWorn: 5,
+        // The only clothing wording in a chat image prompt when garments are
+        // worn. It replaces "wearing {charOutfit}" entirely.
+        refClause: "wearing exactly the clothes in the reference images after the first, which show those garments laid out flat",
+      },
+
       // What a generation costs, per endpoint family. Dezgo prices by family and
       // resolution rather than per model, and steps scale it linearly, so this
       // is a table of four numbers rather than one per model in a list of
@@ -1412,7 +1433,19 @@
       // the bottom of the shot", the image model filled that space with
       // whatever limb it liked - repeatedly a foot. Naming the part and the
       // frame edge it enters from leaves nothing to invent.
-      scenePromptInstruction: "You are describing one moment from a roleplay conversation so that an image can be generated of it. The image is a first-person POV shot taken through the User's own eyes: the User is the camera.\n\nCharacter description: {charDesc}.\n\nConversation:\n{recent}\n\nDescribe the moment at the very END of the conversation - what is {name} doing RIGHT NOW.\n\nReturn ONLY a JSON object, with no other text and no code fences:\n{\"scene\": \"...\", \"touching\": true or false, \"viewerBody\": \"...\"}\n\nscene - 15 to 25 words: {name}'s action, pose and expression in this moment. Put the most important action or pose FIRST. Be concrete and literal. Do NOT include names. Do NOT use abstract words like \"mood\" or \"atmosphere\". The location, both people's clothing and the camera framing are all added separately, so do NOT restate or decide any of them here.\n\ntouching - true if {name} and the User are in physical contact at this moment, false if they are not. Judge it from what the text actually describes, however slight the contact is and however it is worded. Being undressed, or nearby, or talking, is not contact; any part of one of them against the other is.\n\nviewerBody - when touching is true, which of the User's OWN body parts are in the shot and where they enter the frame, as a short phrase: for example \"the viewer's hand in her hair, entering from the top of the frame\". Name the part and the frame edge it comes in from, so it is not drawn floating. When touching is false, use an empty string.\n\nThe User is the camera. Never describe the User's face, head, hair or back - the camera cannot see itself. Never refer to the User in the third person: not \"him\", \"his\", \"the man\", nor by any name - always \"the viewer\". {name}'s own body belongs in scene; only the User's body belongs in viewerBody. Where scene has to mention a part of the User's body - what her mouth or hands are on - name it as the viewer's: \"mouth covering the viewer's penis\", never a bare \"mouth on penis\", which leaves the image model to decide whose it is.{actNote}",
+      // Added to the scene instruction only when the character is wearing
+      // garments out of the wardrobe. Their pictures are sent to the image
+      // model, so the prompt must not describe them — describing a garment the
+      // model can already see can only contradict it. What the picture cannot
+      // say is what has happened to it since: a jacket hanging open, a hem
+      // pulled up, a shoe off. That, and only that, is what this asks for.
+      // {garments} is the list of garment names.
+      clothingStateNote: "\n\n{name} is wearing: {garments}. Photographs of those garments are supplied to the image model, so NEVER describe them — not their colour, fabric, cut or detailing. clothingState is only for how they are being worn RIGHT NOW where that differs from simply having them on: \"the denim jacket hanging open\", \"the skirt pushed up round her waist\", \"one shoe off\", \"the sunglasses in her hand\". Where a garment has come off entirely, say so: \"the jacket off, dropped on the floor\". If they are all simply being worn as normal, use an empty string.",
+      // The field, kept out of the JSON shape entirely when there is nothing
+      // to report — an optional field a model is told to ignore is one it
+      // fills in anyway.
+      clothingStateField: ", \"clothingState\": \"...\"",
+      scenePromptInstruction: "You are describing one moment from a roleplay conversation so that an image can be generated of it. The image is a first-person POV shot taken through the User's own eyes: the User is the camera.\n\nCharacter description: {charDesc}.\n\nConversation:\n{recent}\n\nDescribe the moment at the very END of the conversation - what is {name} doing RIGHT NOW.\n\nReturn ONLY a JSON object, with no other text and no code fences:\n{\"scene\": \"...\", \"touching\": true or false, \"viewerBody\": \"...\"{clothingField}}\n\nscene - 15 to 25 words: {name}'s action, pose and expression in this moment. Put the most important action or pose FIRST. Be concrete and literal. Do NOT include names. Do NOT use abstract words like \"mood\" or \"atmosphere\". The location, both people's clothing and the camera framing are all added separately, so do NOT restate or decide any of them here.\n\ntouching - true if {name} and the User are in physical contact at this moment, false if they are not. Judge it from what the text actually describes, however slight the contact is and however it is worded. Being undressed, or nearby, or talking, is not contact; any part of one of them against the other is.\n\nviewerBody - when touching is true, which of the User's OWN body parts are in the shot and where they enter the frame, as a short phrase: for example \"the viewer's hand in her hair, entering from the top of the frame\". Name the part and the frame edge it comes in from, so it is not drawn floating. When touching is false, use an empty string.\n\nThe User is the camera. Never describe the User's face, head, hair or back - the camera cannot see itself. Never refer to the User in the third person: not \"him\", \"his\", \"the man\", nor by any name - always \"the viewer\". {name}'s own body belongs in scene; only the User's body belongs in viewerBody. Where scene has to mention a part of the User's body - what her mouth or hands are on - name it as the viewer's: \"mouth covering the viewer's penis\", never a bare \"mouth on penis\", which leaves the image model to decide whose it is.{actNote}{clothingNote}",
     },
 
     // ── Models & defaults ────────────────────────────────────────────────────
