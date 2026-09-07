@@ -45,8 +45,34 @@
   .grid.picker .card.chosen .shot::after { content:"\2713"; position:absolute; top:6px; left:6px;
     width:26px; height:26px; border-radius:50%; background:var(--pink); color:#fff;
     font-weight:800; font-size:15px; display:flex; align-items:center; justify-content:center; }
-  #fitCharPreview img { width:110px; height:110px; object-fit:cover; border-radius:12px;
-                        border:1px solid var(--border); margin-top:10px; background:var(--bg3); }
+  /* The five most recent, as faces. Picking a character by looking at them is
+     the whole point of having avatars, and a name in a dropdown is the one
+     form of that information that cannot be recognised at a glance. */
+  .charrow { display:flex; gap:9px; margin:10px 0; overflow-x:auto; padding-bottom:4px;
+             scrollbar-width:none; }
+  .charrow::-webkit-scrollbar { display:none; }
+  .chartile { flex:0 0 74px; width:74px; border:none; background:none; padding:0; cursor:pointer; }
+  .chartile img, .chartile .noimg { width:74px; height:74px; border-radius:14px; object-fit:cover;
+    border:2px solid var(--border); background:var(--bg3); display:block; }
+  .chartile .noimg { display:flex; align-items:center; justify-content:center;
+    color:var(--muted); font-size:20px; font-weight:800; }
+  .chartile.on img, .chartile.on .noimg { border-color:var(--pink); }
+  .chartile span { display:block; font-size:11px; font-weight:700; margin-top:4px; line-height:1.3;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .chartile.on span { color:var(--pink); }
+  .chartile.nobase img, .chartile.nobase .noimg { opacity:.42; }
+
+  /* One block per category, shut until wanted. A wardrobe of any size is
+     unusable as one flat grid on a phone. */
+  .catgroup { border:1px solid var(--border); border-radius:12px; margin-bottom:9px; overflow:hidden; }
+  .catgroup > summary { cursor:pointer; padding:11px 13px; font-weight:800; font-size:13px;
+    background:var(--bg3); list-style:none; display:flex; align-items:center; gap:8px; }
+  .catgroup > summary::-webkit-details-marker { display:none; }
+  .catgroup > summary::before { content:"\25B8"; color:var(--pink); font-size:10px; }
+  .catgroup[open] > summary::before { content:"\25BE"; }
+  .catgroup .count { margin-left:auto; font-weight:700; color:var(--muted); font-size:12px; }
+  .catgroup .count.on { color:var(--pink); }
+  .catgroup .grid { padding:11px; }
   #fitResult img { width:100%; border-radius:12px; background:var(--bg3); }
   #fitResult .acts { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
   #fitResult .acts button { flex:1; min-height:40px; }
@@ -264,14 +290,14 @@
       <div class="card">
         <h2>Who</h2>
         <p class="hint" id="fitCharHint">Loading characters…</p>
-        <select id="fitChar" onchange="pickCharacter()"></select>
-        <div id="fitCharPreview"></div>
+        <div class="charrow" id="fitCharTiles"></div>
+        <select id="fitCharMore" onchange="pickCharacterFromMore()"></select>
       </div>
 
       <div class="card">
         <h2>What they wear</h2>
         <p class="hint" id="fitPickHint">Tap garments to put them on.</p>
-        <div class="grid picker" id="fitGarments"></div>
+        <div id="fitGarments"></div>
       </div>
 
       <div class="card">
@@ -1080,6 +1106,7 @@
   // this is Wiro and not the generator picked upstairs: Dezgo's text2image
   // endpoints take no input image at all, so nothing it offers can do this.
   let characters = [];
+  let selectedCharId = null;
   let chosenGarments = new Set();
   let lastFitting = null;
 
@@ -1104,6 +1131,13 @@
     if (fitting) openFitting();
   };
 
+  // Ordered the way the app orders its own character list, by the same rule —
+  // characters made before lastUsedAt existed fall back to their id, which is
+  // a timestamp. Copied deliberately: two lists of the same people in two
+  // different orders is worse than either order.
+  const lastUsedOf = (c) => c.lastUsedAt || Number(c.id) || 0;
+  const TILE_COUNT = 5;
+
   async function openFitting() {
     document.getElementById("fitScene").value =
       document.getElementById("fitScene").value || wardrobeCfg().fitting.scene;
@@ -1112,46 +1146,127 @@
     try {
       const body = await call("get_characters");
       characters = (body.characters || []).filter(Boolean)
-        .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+        .sort((a, b) => lastUsedOf(b) - lastUsedOf(a));
     } catch (e) {
       document.getElementById("fitCharHint").textContent = "Could not load characters: " + e.message;
       return;
     }
-    // A character with no reference image cannot be dressed: there is nothing
-    // to hand the model as the person. Listed but marked, rather than hidden,
-    // so the absence is explained instead of looking like a missing character.
-    const hint = document.getElementById("fitCharHint");
-    document.getElementById("fitChar").innerHTML = characters.map((c, i) =>
-      '<option value="' + i + '">' + esc(c.name || "Unnamed") +
-      (c.referenceImage ? "" : " — no base image") + "</option>").join("");
-    hint.textContent = characters.length
+    document.getElementById("fitCharHint").textContent = characters.length
       ? "Their base image is what the outfit gets put on."
       : "No characters found.";
-    pickCharacter();
+    // The most recent one, already selected: it is overwhelmingly the one
+    // being dressed, and picking it again every visit is a tap for nothing.
+    selectedCharId = characters.length ? characters[0].id : null;
+    renderCharacterPick();
   }
 
-  window.pickCharacter = function () {
-    const c = characters[Number(document.getElementById("fitChar").value)];
-    const box = document.getElementById("fitCharPreview");
-    box.innerHTML = (c && charAvatar(c))
-      ? '<img src="' + esc(charAvatar(c)) + '" alt="' + esc(c.name || "") + '" />'
-      : "";
+  function selectedCharacter() {
+    return characters.find(c => c.id === selectedCharId) || null;
+  }
+
+  function renderCharacterPick() {
+    // The five most recent, plus whoever is selected if they are not among
+    // them — a selection you cannot see is a selection you cannot trust.
+    const recent = characters.slice(0, TILE_COUNT);
+    const sel = selectedCharacter();
+    const tiles = (sel && !recent.some(c => c.id === sel.id)) ? [...recent, sel] : recent;
+
+    document.getElementById("fitCharTiles").innerHTML = tiles.map(c => {
+      const img = charAvatar(c);
+      // Marked, not hidden: a character with no base image cannot be dressed,
+      // and leaving them out looks like they have gone missing.
+      const cls = "chartile" + (c.id === selectedCharId ? " on" : "") + (c.referenceImage ? "" : " nobase");
+      return '<button class="' + cls + '" data-char="' + esc(c.id) + '" title="' + esc(c.name || "") + '">' +
+        (img ? '<img src="' + esc(img) + '" alt="" />'
+             : '<span class="noimg">' + esc((c.name || "?").slice(0, 1).toUpperCase()) + "</span>") +
+        "<span>" + esc(c.name || "Unnamed") + "</span></button>";
+    }).join("");
+    document.getElementById("fitCharTiles").querySelectorAll("[data-char]").forEach(b => {
+      b.onclick = () => { selectedCharId = b.dataset.char; renderCharacterPick(); };
+    });
+
+    // Everyone else, alphabetical — a dropdown is a list you read rather than
+    // recognise, so recency does not help in it.
+    const rest = characters.filter(c => !tiles.some(t => t.id === c.id))
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+    const more = document.getElementById("fitCharMore");
+    more.hidden = rest.length === 0;
+    more.innerHTML = '<option value="">' + (rest.length ? "More characters…" : "No others") + "</option>" +
+      rest.map(c => '<option value="' + esc(c.id) + '">' + esc(c.name || "Unnamed") +
+        (c.referenceImage ? "" : " — no base image") + "</option>").join("");
+
+    const c = sel;
     document.getElementById("fitGenBtn").disabled = !(c && c.referenceImage);
-    if (c && !c.referenceImage) fitStatus(esc(c.name || "That character") + " has no base image to dress.", "err");
+    if (c && !c.referenceImage) fitStatus((c.name || "That character") + " has no base image to dress.", "err");
     else fitStatus("", "");
+  }
+
+  window.pickCharacterFromMore = function () {
+    const id = document.getElementById("fitCharMore").value;
+    if (!id) return;
+    selectedCharId = id;
+    // Rendered back as a tile, so the chosen character is visible in the same
+    // place as any other choice rather than only as a dropdown value.
+    renderCharacterPick();
   };
+
+  // Which category blocks are open, remembered between visits: whoever keeps
+  // dresses open wants them open next time too, and a picker that resets to
+  // all-shut every visit makes you re-open the same two every time.
+  const OPEN_CATS_KEY = "wardrobe_open_categories";
+
+  function openCategories() {
+    try {
+      const raw = localStorage.getItem(OPEN_CATS_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return new Set(Array.isArray(parsed) ? parsed : []);
+    } catch { return new Set(); }
+  }
+
+  function rememberCategory(cat, isOpen) {
+    const open = openCategories();
+    if (isOpen) open.add(cat); else open.delete(cat);
+    try { localStorage.setItem(OPEN_CATS_KEY, JSON.stringify([...open])); } catch {}
+  }
 
   function renderGarmentPicker() {
     const withImages = items.filter(i => i.image);
-    const grid = document.getElementById("fitGarments");
-    grid.innerHTML = withImages.map(it =>
-      '<div class="card' + (chosenGarments.has(it.id) ? " chosen" : "") + '" data-pick="' + esc(it.id) + '">' +
-        '<div class="shot"><img src="' + esc(it.image) + '" alt="" loading="lazy" /></div>' +
-        '<div class="meta"><div class="nm">' + esc(it.name || "Untitled") + "</div></div></div>").join("");
-    grid.querySelectorAll("[data-pick]").forEach(c => {
+    const box = document.getElementById("fitGarments");
+    const max = wardrobeCfg().fitting.maxGarments;
+
+    // Config order, so the blocks appear in the same sequence every time
+    // rather than shuffling as the wardrobe fills up. Only categories that
+    // actually hold something are drawn; an empty Swimwear block is a row of
+    // nothing to scroll past. Anything with a category no longer in the config
+    // still gets a block, or it would be invisible and unwearable.
+    const cats = wardrobeCfg().categories.filter(c => withImages.some(i => i.category === c));
+    const others = [...new Set(withImages.map(i => i.category).filter(c => !cats.includes(c)))];
+
+    const open = openCategories();
+    box.innerHTML = [...cats, ...others].map(cat => {
+      const inCat = withImages.filter(i => i.category === cat);
+      const chosen = inCat.filter(i => chosenGarments.has(i.id)).length;
+      // A shut block still says how many of its garments are on, or putting on
+      // a coat and collapsing the block would hide that it is being worn.
+      return '<details class="catgroup"' + (open.has(cat) || chosen ? " open" : "") +
+        ' data-cat="' + esc(cat) + '">' +
+        "<summary>" + esc(cat || "Uncategorised") +
+        '<span class="count' + (chosen ? " on" : "") + '">' +
+        (chosen ? chosen + " on · " : "") + inCat.length + "</span></summary>" +
+        '<div class="grid picker">' + inCat.map(it =>
+          '<div class="card' + (chosenGarments.has(it.id) ? " chosen" : "") + '" data-pick="' + esc(it.id) + '">' +
+            '<div class="shot"><img src="' + esc(it.image) + '" alt="" loading="lazy" /></div>' +
+            '<div class="meta"><div class="nm">' + esc(it.name || "Untitled") + "</div></div></div>").join("") +
+        "</div></details>";
+    }).join("");
+
+    box.querySelectorAll("[data-pick]").forEach(c => {
       c.onclick = () => toggleGarment(c.dataset.pick);
     });
-    const max = wardrobeCfg().fitting.maxGarments;
+    box.querySelectorAll("details[data-cat]").forEach(d => {
+      d.ontoggle = () => rememberCategory(d.dataset.cat, d.open);
+    });
+
     document.getElementById("fitPickHint").textContent = withImages.length
       ? chosenGarments.size + " of " + max + " chosen. Tap garments to put them on."
       : "No garments with pictures yet — make some in the Wardrobe first.";
@@ -1175,7 +1290,7 @@
   };
 
   window.generateFitting = async function () {
-    const c = characters[Number(document.getElementById("fitChar").value)];
+    const c = selectedCharacter();
     if (!c || !c.referenceImage) { fitStatus("Pick a character with a base image.", "err"); return; }
     const garments = items.filter(i => chosenGarments.has(i.id) && i.image);
     if (!garments.length) { fitStatus("Pick at least one garment.", "err"); return; }
