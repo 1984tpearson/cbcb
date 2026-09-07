@@ -58,6 +58,8 @@
 
   #quickStatus { margin-top:9px; font-size:12px; font-weight:700; line-height:1.5; overflow-wrap:anywhere; }
   #quickStatus:empty { display:none; }
+  #quickStatus .undo { padding:3px 10px; min-height:0; font-size:12px; margin-left:2px;
+                       border-radius:8px; vertical-align:baseline; }
   #quickStatus.ok { color:var(--ok); }
   #quickStatus.busy { color:var(--muted); }
   #quickStatus.err { color:var(--err); background:#fdf0ee; border:1px solid #e8b4ae;
@@ -83,6 +85,15 @@
   .card .shot { aspect-ratio:1/1; background:var(--bg3); display:flex; align-items:center; justify-content:center; }
   .card .shot img { width:100%; height:100%; object-fit:contain; display:block; }
   .card .shot .none { color:var(--muted); font-size:12px; font-weight:700; }
+  .card .shot { position:relative; }
+  /* A 32px target in the corner of the picture. Deliberately understated until
+     touched — it sits on top of every garment in the wardrobe, and a row of
+     red crosses would read as a list of problems. */
+  .carddel { position:absolute; top:5px; right:5px; width:32px; height:32px; padding:0;
+            border-radius:50%; border:1px solid var(--border2); background:rgba(255,255,255,.86);
+            color:var(--muted); font-size:17px; font-weight:800; line-height:1;
+            display:flex; align-items:center; justify-content:center; }
+  .carddel:hover, .carddel:active { background:#fff; color:var(--err); border-color:#e8b4ae; }
   .card .meta { padding:9px 11px; }
   .card .nm { font-weight:800; font-size:13px; line-height:1.3; }
   .card .cat { font-size:11px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.04em; margin-top:2px; }
@@ -451,7 +462,10 @@
       '<div class="card" data-id="' + esc(it.id) + '">' +
         '<div class="shot">' + (it.image
           ? '<img src="' + esc(it.image) + '" alt="' + esc(it.name) + '" loading="lazy" />'
-          : '<span class="none">No image yet</span>') + "</div>" +
+          : '<span class="none">No image yet</span>') +
+          '<button class="carddel" data-del="' + esc(it.id) + '" ' +
+          'title="Delete" aria-label="Delete ' + esc(it.name) + '">\u00d7</button>' +
+        "</div>" +
         '<div class="meta">' +
           '<div class="nm">' + esc(it.name || "Untitled") + "</div>" +
           '<div class="cat">' + esc(it.category || "") + "</div>" +
@@ -461,6 +475,11 @@
         "</div></div>").join("");
     grid.querySelectorAll(".card").forEach(c => {
       c.onclick = () => openEditor(items.find(i => i.id === c.dataset.id));
+    });
+    // stopPropagation, or deleting would also open the editor of the garment
+    // that is on its way out.
+    grid.querySelectorAll("button[data-del]").forEach(b => {
+      b.onclick = (e) => { e.stopPropagation(); quickDelete(b.dataset.del); };
     });
 
     const empty = document.getElementById("empty");
@@ -930,6 +949,66 @@
     }
     btn.disabled = false;
   };
+
+  // ── Deleting from the grid ─────────────────────────────────────────────────
+  // One tap, no confirmation dialog. A dialog on every deletion is a tax paid
+  // by the many obviously-bad garments to protect the rare good one, and it is
+  // the wrong way round: the deletion is cheap to undo, so let it happen and
+  // offer the undo.
+  //
+  // The undo stays until something else is done, rather than expiring on a
+  // timer — a timer that runs out while the phone is in a pocket has protected
+  // nobody, and this is the only route back once the row is written.
+  let lastDeleted = null;
+
+  function quickStatusWithUndo(text) {
+    const el = document.getElementById("quickStatus");
+    el.className = "ok";
+    el.textContent = text + " ";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "undo";
+    btn.textContent = "Undo";
+    btn.onclick = undoDelete;
+    el.appendChild(btn);
+  }
+
+  window.quickDelete = async function (id) {
+    const index = items.findIndex(i => i.id === id);
+    if (index < 0) return;
+    const item = items[index];
+    const before = items;
+    items = items.filter(i => i.id !== id);
+    render();
+    try {
+      await saveItems();
+      // Remembered with its position, so undo puts it back where it was rather
+      // than at the top, which would quietly reorder the wardrobe.
+      lastDeleted = { item, index };
+      quickStatusWithUndo('Deleted "' + (item.name || "garment") + '".');
+    } catch (e) {
+      items = before;
+      render();
+      quickStatus("Could not delete: " + e.message, "err");
+    }
+  };
+
+  async function undoDelete() {
+    if (!lastDeleted) return;
+    const { item, index } = lastDeleted;
+    const before = items;
+    items = [...items.slice(0, index), item, ...items.slice(index)];
+    lastDeleted = null;
+    render();
+    try {
+      await saveItems();
+      quickStatus('Put "' + (item.name || "garment") + '" back.', "ok");
+    } catch (e) {
+      items = before;
+      render();
+      quickStatus("Could not restore: " + e.message, "err");
+    }
+  }
 
   window.chooseGenerator = function () {
     try { localStorage.setItem(GENERATOR_KEY, document.getElementById("genPick").value); } catch {}
