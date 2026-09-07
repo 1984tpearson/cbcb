@@ -1509,6 +1509,18 @@
       // made. It already leaked this through the ban — "eyes looking up" in a
       // shot where she was kneeling — because it is the one component that
       // actually knows.
+      // How many pictures a character's gallery keeps. It was 20, hardcoded at
+      // three call sites, and nobody asked for a limit — a gallery that had
+      // reached it dropped its oldest entry every time a new image was made,
+      // silently. Nothing was ever deleted: the files stay in storage and the
+      // pictures stay in the chat where they were generated, so a dropped
+      // entry is a picture the gallery stopped pointing at rather than one
+      // that is gone.
+      //
+      // Still a number rather than no limit, because the gallery rides in one
+      // row as a JSON array and is rewritten whole on every new image.
+      galleryLimit: 200,
+
       proportionGuard: "two arms and two hands per person, no extra limbs, anatomically coherent",
       // Instruction sent to the extractor model that turns the recent
       // conversation into a Stable Diffusion prompt. {name}, {charDesc},

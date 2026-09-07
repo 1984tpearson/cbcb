@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=45"></script>
+  <script src="site-config.js?v=46"></script>
   <script src="image-prompt.js?v=24"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -423,6 +423,11 @@ const ACCESS_TOKEN = "pc_8f3a9d2e7b1c4f6a0d5e9c3b7a2f1e8d";
 // read from SiteConfig so the two can never drift apart, with the literal only
 // as a fallback for a cached copy of site-config.js predating the export.
 const WARDROBE_ROW_ID = window.SiteConfig.WARDROBE_ROW_ID || "__wardrobe__";
+
+// How many pictures a gallery keeps. See site-config: it was 20 and nobody
+// asked for it, so a busy character quietly shed its oldest entry on every
+// new image.
+const GALLERY_LIMIT = (CFG.image && CFG.image.galleryLimit) || 200;
 
 const dataApi = {
   call: async (action, payload = {}) => {
@@ -1435,7 +1440,7 @@ async function collectPendingImages({ onCollected } = {}) {
     try {
       const url = await persistWiroImage(imageUrl);
       const gallery = await dataApi.getGallery(p.characterId);
-      const next = [{ url, prompt: p.label || "Recovered generation", date: Date.now() }, ...gallery].slice(0, 20);
+      const next = [{ url, prompt: p.label || "Recovered generation", date: Date.now() }, ...gallery].slice(0, GALLERY_LIMIT);
       await dataApi.saveGallery(p.characterId, next);
       collected += 1;
       if (onCollected) onCollected({ ...p, url });
@@ -5166,7 +5171,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         track: { characterId: character.id, label: customImgPrompt },
       });
       setMessages(m => [...m, { role: "image", content: url, prompt: customImgPrompt }]);
-      const newGallery2 = [{ url, prompt: customImgPrompt, date: Date.now() }, ...gallery].slice(0, 20);
+      const newGallery2 = [{ url, prompt: customImgPrompt, date: Date.now() }, ...gallery].slice(0, GALLERY_LIMIT);
       setGallery(newGallery2);
       dataApi.saveGallery(character.id, newGallery2).catch(e => setError(e.message));
       setCustomImgPrompt("");
@@ -5278,7 +5283,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         track: { characterId: character.id, label: prompt },
       });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);
-      const newGallery3 = [{ url, prompt, date: Date.now() }, ...gallery].slice(0, 20);
+      const newGallery3 = [{ url, prompt, date: Date.now() }, ...gallery].slice(0, GALLERY_LIMIT);
       setGallery(newGallery3);
       dataApi.saveGallery(character.id, newGallery3).catch(e => { if (!auto) setError(e.message); });
     } catch (e) { if (!auto) setError(e.message); }
