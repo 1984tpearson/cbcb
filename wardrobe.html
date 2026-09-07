@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Wardrobe</title>
-<script src="site-config.js?v=32"></script>
+<script src="site-config.js?v=33"></script>
 <script src="image-prompt.js?v=24"></script>
 <style>
   :root {
@@ -126,6 +126,18 @@
   .chip { padding:5px 11px; font-size:12px; font-weight:700; border-radius:999px;
           border:1px solid var(--border2); background:var(--bg2); cursor:pointer; }
   .chip.on { background:var(--pink-bg); border-color:var(--pink-border); color:var(--pink); }
+
+  /* Shut by default. Every garment arrives with three to six tags of its own,
+     so this list grows without limit while the thing it filters is below it —
+     sixty tags is nine rows of chips before a single garment is on screen. */
+  .tagbox { width:100%; }
+  .tagbox > summary { cursor:pointer; list-style:none; font-size:12px; font-weight:700;
+    color:var(--muted); padding:7px 0; display:flex; align-items:center; gap:6px; }
+  .tagbox > summary::-webkit-details-marker { display:none; }
+  .tagbox > summary::before { content:"\25B8"; color:var(--pink); font-size:10px; }
+  .tagbox[open] > summary::before { content:"\25BE"; }
+  .tagbox > summary .active { color:var(--pink); }
+  .tagbox .chips { padding-bottom:8px; max-height:38vh; overflow-y:auto; }
 
   main { padding:18px; max-width:1200px; margin:0 auto 80px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:14px; }
@@ -277,7 +289,10 @@
   <div class="filters">
     <input type="search" id="search" placeholder="Search name, description, tag…" oninput="render()" />
     <select id="catFilter" onchange="render()"></select>
-    <div class="chips" id="tagChips"></div>
+    <details class="tagbox" id="tagBox">
+      <summary id="tagSummary"></summary>
+      <div class="chips" id="tagChips"></div>
+    </details>
   </div>
 
   <main>
@@ -523,10 +538,15 @@
   }
 
   // ── Grid ───────────────────────────────────────────────────────────────────
+  // Ordered by how many garments carry each, not alphabetically. Alphabetical
+  // puts "accessory, beach, belt" first, which is an accident of spelling; the
+  // tag on twelve garments is the one worth reaching for.
   function allTags() {
-    const seen = new Set();
-    items.forEach(it => (it.tags || []).forEach(t => seen.add(t)));
-    return [...seen].sort();
+    const counts = new Map();
+    items.forEach(it => (it.tags || []).forEach(t => counts.set(t, (counts.get(t) || 0) + 1)));
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([tag, n]) => ({ tag, n }));
   }
 
   function visibleItems() {
@@ -542,12 +562,21 @@
   }
 
   window.render = function () {
+    const tags = allTags();
     const chips = document.getElementById("tagChips");
-    chips.innerHTML = allTags().map(t =>
-      '<button class="chip' + (activeTag === t ? " on" : "") + '" data-tag="' + esc(t) + '">' + esc(t) + "</button>").join("");
+    chips.innerHTML = tags.map(({ tag, n }) =>
+      '<button class="chip' + (activeTag === tag ? " on" : "") + '" data-tag="' + esc(tag) + '">' +
+      esc(tag) + " " + n + "</button>").join("");
     chips.querySelectorAll("button").forEach(b => {
       b.onclick = () => { activeTag = (activeTag === b.dataset.tag) ? "" : b.dataset.tag; render(); };
     });
+    // The summary carries the active tag, so a filter that is on is visible
+    // without opening anything — otherwise closing the box would hide the
+    // reason half the wardrobe had vanished.
+    document.getElementById("tagBox").hidden = tags.length === 0;
+    document.getElementById("tagSummary").innerHTML = activeTag
+      ? 'Tag: <span class="active">' + esc(activeTag) + "</span> — tap to change or clear"
+      : "Filter by tag (" + tags.length + ")";
 
     const list = visibleItems();
     const grid = document.getElementById("grid");
