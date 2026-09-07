@@ -81,6 +81,19 @@
                 line-height:1.5; max-height:110px; overflow-y:auto; white-space:pre-wrap; }
   .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
   .foot { display:flex; gap:8px; margin-top:16px; align-items:center; flex-wrap:wrap; }
+  /* The header's status line sits at z-index 20 and the editor covers it at 50,
+     so anything reported while the editor is open was being written to a part
+     of the page nobody could see — on a phone that is indistinguishable from
+     the button doing nothing at all. Errors have to appear where the work was
+     started. Wrapped, not truncated: the useful half of an API error is
+     usually the end of it. */
+  #editorStatus { margin-top:14px; font-size:12px; font-weight:700; line-height:1.5;
+                  overflow-wrap:anywhere; }
+  #editorStatus:empty { display:none; }
+  #editorStatus.ok { color:var(--ok); }
+  #editorStatus.err { color:var(--err); background:#fdf0ee; border:1px solid #e8b4ae;
+                      border-radius:9px; padding:9px 11px; }
+  #editorStatus.busy { color:var(--muted); }
 
   #gate { position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; z-index:100; }
   #gate .box { background:var(--bg2); border:1px solid var(--border); border-radius:16px; padding:24px; width:280px; text-align:center; }
@@ -180,6 +193,7 @@
           <div class="promptview" id="promptView"></div></label>
       </div>
     </div>
+    <div id="editorStatus"></div>
     <div class="foot">
       <button class="primary" id="saveBtn" onclick="saveItem()">Save</button>
       <button onclick="closeEditor()">Cancel</button>
@@ -230,10 +244,15 @@
     boot();
   }
 
+  // Written to both lines, because which one the reader can actually see
+  // depends on whether the editor is open over the top of the header.
   function status(text, kind) {
-    const el = document.getElementById("status");
-    el.textContent = text;
-    el.className = kind || "";
+    for (const id of ["status", "editorStatus"]) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.textContent = text;
+      el.className = kind || "";
+    }
   }
 
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c =>
@@ -383,6 +402,7 @@
     document.getElementById("fAspect").value = draft.aspectRatio || w.aspectRatio;
     refreshProvider();
     document.getElementById("deleteBtn").hidden = draftIsNew;
+    status("", "");
     document.getElementById("editor").classList.add("open");
     refreshShot();
     refreshPromptView();
@@ -566,7 +586,8 @@
     const modelId = document.getElementById("fModel").value;
     const btn = document.getElementById("genBtn");
     btn.disabled = true;
-    status("Generating…", "busy");
+    btn.textContent = "Generating…";
+    status("Generating… this can take up to a minute.", "busy");
     try {
       const stored = provider === "dezgo"
         ? await persistDataUrl(await generateDezgo({ prompt, modelId }))
@@ -581,6 +602,7 @@
       status(e.message, "err");
     }
     btn.disabled = false;
+    btn.textContent = "Generate";
   };
 
   window.uploadShot = async function (event) {
