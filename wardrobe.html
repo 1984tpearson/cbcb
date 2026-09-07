@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Wardrobe</title>
-<script src="site-config.js?v=33"></script>
+<script src="site-config.js?v=34"></script>
 <script src="image-prompt.js?v=24"></script>
 <style>
   :root {
@@ -73,6 +73,12 @@
   .catgroup .count { margin-left:auto; font-weight:700; color:var(--muted); font-size:12px; }
   .catgroup .count.on { color:var(--pink); }
   .catgroup .grid { padding:11px; }
+  #searchResults { margin-top:12px; border-top:1px solid var(--border); padding-top:10px; }
+  #searchResults .grid { grid-template-columns:repeat(auto-fill, minmax(110px, 1fr)); gap:8px;
+                         max-height:52vh; overflow-y:auto; padding:2px; }
+  #searchResults .card .meta { padding:6px 8px; }
+  #searchResults .card .nm { font-size:11px; }
+  #searchCloseBtn { width:100%; margin-top:10px; min-height:38px; }
   .rowlabel { font-size:11px; font-weight:800; letter-spacing:.04em; text-transform:uppercase;
               color:var(--muted); margin-top:2px; }
   #fitResult img { width:100%; border-radius:12px; background:var(--bg3); }
@@ -273,6 +279,12 @@
       <button id="qUpBtn" onclick="document.getElementById('quickFile').click()">Upload</button>
       <button id="qLinkBtn" onclick="quickLink()">Link</button>
       <button id="qExtractBtn" onclick="quickExtract()">Extract</button>
+      <button id="qSearchBtn" onclick="quickSearch()">Search</button>
+    </div>
+    <div id="searchResults" hidden>
+      <div class="rowlabel" id="searchLabel"></div>
+      <div class="grid picker" id="searchGrid"></div>
+      <button id="searchCloseBtn" onclick="closeSearch()">Close results</button>
     </div>
     <p class="qhint">Extract pulls the clothes out of a photo of someone wearing them — paste the photo's
       URL above and press it, or press it with the box empty to pick a file.</p>
@@ -1601,7 +1613,7 @@
   }
 
   function setQuickBusy(busy, label) {
-    for (const id of ["qGenBtn", "qUpBtn", "qLinkBtn", "qExtractBtn"]) {
+    for (const id of ["qGenBtn", "qUpBtn", "qLinkBtn", "qExtractBtn", "qSearchBtn"]) {
       document.getElementById(id).disabled = busy;
     }
     document.getElementById("qGenBtn").textContent = busy ? (label || "Working…") : "Generate";
@@ -1955,6 +1967,88 @@
 
   // A URL in the box is the thing to extract from; an empty box means the
   // photo is on the phone, so ask for it.
+  // ── Web search ─────────────────────────────────────────────────────────────
+  // The fourth way to get a garment picture, and the only one that finds a
+  // photograph somebody else already took. Results are shown, not saved: what
+  // comes back is a list of candidates, and most of a search is wrong.
+  let searchHits = [];
+
+  window.quickSearch = async function () {
+    const typed = document.getElementById("quickPrompt").value.trim();
+    if (!typed) { quickStatus("Type what you are looking for first.", "err"); return; }
+    const w = wardrobeCfg();
+    // The suffix goes on unless it is already in what was typed, so searching
+    // "ball gown flat lay" does not ask for a flat lay twice.
+    const query = /flat\s*lay/i.test(typed) ? typed : typed + " " + w.searchSuffix;
+
+    setQuickBusy(true, "Searching");
+    quickStatus("Searching for “" + query + "”…", "busy");
+    try {
+      const res = await proxyPost({
+        action: "imagesearch", query,
+        provider: w.searchProvider, limit: w.searchCount,
+      });
+      const body = await res.json();
+      searchHits = Array.isArray(body.results) ? body.results : [];
+      renderSearchResults(query, body.provider);
+    } catch (e) {
+      quickStatus("Search failed: " + e.message, "err");
+    }
+    setQuickBusy(false);
+  };
+
+  function renderSearchResults(query, provider) {
+    const box = document.getElementById("searchResults");
+    if (!searchHits.length) {
+      box.hidden = true;
+      quickStatus("Nothing found for “" + query + "”. " +
+        "Openverse only indexes openly-licensed pictures, so it is thin on product photography — " +
+        "try plainer words, or generate one instead.", "err");
+      return;
+    }
+    box.hidden = false;
+    document.getElementById("searchLabel").textContent =
+      searchHits.length + " results from " + (provider || "the web") + " — tap one to keep it";
+    // Thumbnails in the grid: the full image can be several megabytes and only
+    // the one that gets kept is worth downloading at full size.
+    document.getElementById("searchGrid").innerHTML = searchHits.map((r, i) =>
+      '<div class="card" data-hit="' + i + '">' +
+        '<div class="shot"><img src="' + esc(r.thumbnail) + '" alt="" loading="lazy" /></div>' +
+        '<div class="meta"><div class="nm">' + esc(r.title || "Untitled") + "</div>" +
+        '<div class="cat">' + esc([r.source, r.license].filter(Boolean).join(" · ")) + "</div>" +
+      "</div></div>").join("");
+    document.getElementById("searchGrid").querySelectorAll("[data-hit]").forEach(c => {
+      c.onclick = () => keepSearchHit(Number(c.dataset.hit));
+    });
+    quickStatus("", "");
+  }
+
+  window.closeSearch = function () {
+    document.getElementById("searchResults").hidden = true;
+    searchHits = [];
+  };
+
+  // Copied into Storage rather than linked, like every other picture here: an
+  // image on somebody else's site is one that disappears without warning, and
+  // a wardrobe of dead links is worse than an empty one.
+  async function keepSearchHit(index) {
+    const hit = searchHits[index];
+    if (!hit) return;
+    const typed = document.getElementById("quickPrompt").value.trim();
+    setQuickBusy(true, "Saving");
+    quickStatus("Saving that picture…", "busy");
+    try {
+      await addOne({
+        typed,
+        getImage: () => persist(hit.url),
+      });
+      quickStatus("Saved. Tap another, or close the results.", "ok");
+    } catch (e) {
+      quickStatus("Could not save that one: " + e.message, "err");
+    }
+    setQuickBusy(false);
+  }
+
   window.quickExtract = function () {
     const typed = document.getElementById("quickPrompt").value.trim();
     // A link the model can already fetch needs no copy of its own, so nothing

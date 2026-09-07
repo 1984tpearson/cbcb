@@ -1196,6 +1196,19 @@
       // one outcome that wastes the whole batch.
       variantInstruction: "Return {count} different versions of this garment: {item}\n\nReturn ONLY a JSON array of exactly {count} strings, no markdown and no commentary. Each string describes one version in 12 to 25 words, covering colour, fabric, cut and detailing, as a clothing catalogue would.\n\nMake them genuinely different from each other — vary the colour first, then the fabric, the silhouette and the detailing. Two versions that differ only in wording are a failure. Every one must still plainly be the garment asked for.",
 
+      // ── Web search ─────────────────────────────────────────────────────────
+      // Finding a flat lay somebody has already photographed. Openverse needs
+      // no key and no card, which is the only reason it is the default: it
+      // indexes openly-licensed material, so its coverage of commercial-style
+      // product photography is thinner than a general image search would be.
+      // The proxy also speaks SerpApi if a key is ever set for it.
+      searchProvider: "openverse",
+      searchCount: 24,
+      // Appended to whatever is typed. Searching an image index for "ball
+      // gown" returns people wearing ball gowns; the words that find a
+      // photograph of the garment by itself are worth adding every time.
+      searchSuffix: "flat lay",
+
       // ── Faithful extraction ────────────────────────────────────────────────
       // Describing a garment and generating from the words cannot carry a
       // print: "a black tee with a band logo" produces *a* logo, never *that*

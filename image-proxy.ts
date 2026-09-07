@@ -11,6 +11,7 @@
 //   submit  → start a Wiro task, return { taskId } immediately
 //   status  → check a task: 202 while running, { imageUrl } when done
 //   dezgo   → run a Dezgo generation and return { dataUrl } in one call
+//   imagesearch → search the web for images, return { results }
 //   (none)  → legacy blocking mode: submit, then poll inline until done
 //
 // The split exists because this function has a wall-clock limit. Blocking mode
@@ -54,6 +55,54 @@ const DEZGO_DEFAULT_ENDPOINT = 'text2image_flux';
 // visible instead of silent. Hardcoded, never taken from the request: a
 // caller-supplied path would make this an open proxy for the API key.
 const DEZGO_INFO_PATHS = ['/info', '/models'];
+
+// ── Image search ───────────────────────────────────────────────────────
+// Finding a flat lay that already exists, rather than generating one. Behind a
+// provider switch because the free search landscape is unstable: Google's
+// Custom Search is closed to new signups and ends in 2027, and Brave dropped
+// its free tier. Openverse needs no key at all, which is why it is the
+// default; a keyed provider can be added here without touching the client.
+//
+// SERPAPI_KEY is optional. When it is absent the provider simply is not
+// offered, rather than the whole action failing.
+const SEARCH_PROVIDERS = ['openverse', 'serpapi'] as const;
+
+async function searchOpenverse(query: string, limit: number) {
+  const url = 'https://api.openverse.org/v1/images/?q=' + encodeURIComponent(query) +
+    '&page_size=' + limit + '&license_type=all';
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!res.ok) throw new Error(`Openverse returned HTTP ${res.status}`);
+  const body = await res.json();
+  const results = Array.isArray(body?.results) ? body.results : [];
+  return results.map((r: Record<string, unknown>) => ({
+    // thumbnail for the picker, url for the copy that gets kept: the full
+    // image can be many megabytes and the grid only needs something small.
+    url: r.url as string,
+    thumbnail: (r.thumbnail as string) || (r.url as string),
+    title: (r.title as string) || '',
+    source: (r.source as string) || '',
+    license: (r.license as string) || '',
+    // Where the image actually lives, so its terms can be checked by a human.
+    page: (r.foreign_landing_url as string) || '',
+  })).filter((r: { url: string }) => typeof r.url === 'string' && r.url);
+}
+
+async function searchSerpapi(query: string, limit: number, key: string) {
+  const url = 'https://serpapi.com/search.json?engine=google_images&ijn=0&q=' +
+    encodeURIComponent(query) + '&api_key=' + encodeURIComponent(key);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`SerpApi returned HTTP ${res.status}`);
+  const body = await res.json();
+  const results = Array.isArray(body?.images_results) ? body.images_results : [];
+  return results.slice(0, limit).map((r: Record<string, unknown>) => ({
+    url: (r.original as string) || (r.thumbnail as string),
+    thumbnail: (r.thumbnail as string) || (r.original as string),
+    title: (r.title as string) || '',
+    source: (r.source as string) || '',
+    license: '',
+    page: (r.link as string) || '',
+  })).filter((r: { url: string }) => typeof r.url === 'string' && r.url);
+}
 
 // Which body parameters may be forwarded. The client decides the values and
 // which of them apply to the model it picked — that table lives in
@@ -204,6 +253,42 @@ Deno.serve(async (req: Request) => {
   }
 
   const action = typeof payload.action === 'string' ? payload.action : '';
+
+  // ── action: imagesearch ──────────────────────────
+  // Ahead of every provider key check: this one may need no key at all.
+  if (action === 'imagesearch') {
+    const query = typeof payload.query === 'string' ? payload.query.trim() : '';
+    if (!query) {
+      return new Response('query is required', { status: 400, headers: corsHeaders() });
+    }
+    const requested = typeof payload.provider === 'string' ? payload.provider : 'openverse';
+    if (!SEARCH_PROVIDERS.includes(requested as typeof SEARCH_PROVIDERS[number])) {
+      return new Response(`Unknown search provider: ${requested}`, { status: 400, headers: corsHeaders() });
+    }
+    // Bounded here rather than trusted from the request: this is a page size
+    // sent to somebody else's API, and an unbounded one is their problem
+    // becoming ours.
+    const limit = Math.max(1, Math.min(40, Number(payload.limit) || 20));
+
+    try {
+      if (requested === 'serpapi') {
+        const key = Deno.env.get('SERPAPI_KEY');
+        if (!key) {
+          return new Response('SerpApi is not configured on the server (SERPAPI_KEY is not set)', {
+            status: 503,
+            headers: corsHeaders(),
+          });
+        }
+        return json({ provider: 'serpapi', results: await searchSerpapi(query, limit, key) }, 200);
+      }
+      return json({ provider: 'openverse', results: await searchOpenverse(query, limit) }, 200);
+    } catch (e) {
+      return new Response(`Image search failed: ${e instanceof Error ? e.message : String(e)}`, {
+        status: 502,
+        headers: corsHeaders(),
+      });
+    }
+  }
 
   // ── action: dezgo ────────────────────────────────
   // One call in, one image out. Handled before the Wiro key is looked at, so a
