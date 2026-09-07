@@ -54,6 +54,7 @@
   .genpick > summary::before { content:"\25B8"; color:var(--pink); font-size:10px; }
   .genpick[open] > summary::before { content:"\25BE"; }
   .genpick select { margin-top:7px; }
+  .genpick button { margin-top:7px; width:100%; min-height:36px; font-size:12px; }
 
   #quickStatus { margin-top:9px; font-size:12px; font-weight:700; line-height:1.5; overflow-wrap:anywhere; }
   #quickStatus:empty { display:none; }
@@ -199,6 +200,7 @@
     <details class="genpick">
       <summary><span id="genPickLabel"></span></summary>
       <select id="genPick" onchange="chooseGenerator()"></select>
+      <button id="refreshModelsBtn" onclick="refreshDezgoModels()">Refresh list from Dezgo</button>
     </details>
     <div id="quickStatus"></div>
   </div>
@@ -412,7 +414,7 @@
   };
 
   function dezgoModel(id) {
-    const list = wardrobeCfg().dezgoModels;
+    const list = cachedDezgoModels() || wardrobeCfg().dezgoModels;
     return list.find(m => m.id === id) || list[0];
   }
 
@@ -802,8 +804,11 @@
 
   function allGenerators() {
     const w = wardrobeCfg();
+    // Whatever Dezgo said it has, if anyone has asked it; the configured list
+    // otherwise, so the page works before the first fetch and after a failed one.
+    const dezgo = cachedDezgoModels() || w.dezgoModels;
     return [
-      ...w.dezgoModels.map(m => ({ key: "dezgo:" + m.id, provider: "dezgo", id: m.id, label: generatorLabel(m.label, "dezgo") })),
+      ...dezgo.map(m => ({ key: "dezgo:" + m.id, provider: "dezgo", id: m.id, label: generatorLabel(m.label, "dezgo") })),
       ...CFG.models.image.map(m => ({ key: "wiro:" + m.id, provider: "wiro", id: m.id, label: generatorLabel(m.label, "wiro") })),
     ];
   }
@@ -833,6 +838,98 @@
       esc(g.label) + "</option>").join("");
     document.getElementById("genPickLabel").textContent = "Using " + current.label;
   }
+
+  // ── Dezgo's own model list ─────────────────────────────────────────────────
+  // Fetched rather than remembered. Every hardcoded id in this file has been a
+  // guess, and one of them (flux_1_dev) was simply wrong — Dezgo publishes the
+  // real catalogue, so the dropdown should be built from that and not from
+  // anyone's recollection.
+  //
+  // Cached in this browser once fetched, because it changes about as often as
+  // Dezgo adds a model and a page load should not wait on it.
+  const DEZGO_LIST_KEY = "wardrobe_dezgo_models";
+
+  function cachedDezgoModels() {
+    try {
+      const raw = localStorage.getItem(DEZGO_LIST_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return Array.isArray(parsed) && parsed.length ? parsed : null;
+    } catch { return null; }
+  }
+
+  // The response shape is not something this code has ever seen, so every step
+  // is defensive: the list may be the body, or under .models, or under
+  // .info.models, and a model may describe its endpoints as `function`,
+  // `functions` or `endpoints`. Anything that does not yield an id and a
+  // text2image endpoint we support is skipped rather than guessed at.
+  const SUPPORTED_ENDPOINTS = ["text2image_flux", "text2image_sdxl", "text2image"];
+
+  function normaliseDezgoList(info) {
+    const root = info && info.info !== undefined ? info.info : info;
+    const arr = Array.isArray(root) ? root
+      : (root && Array.isArray(root.models)) ? root.models
+      : (root && Array.isArray(root.data)) ? root.data
+      : null;
+    if (!arr) return [];
+
+    const out = [];
+    for (const m of arr) {
+      if (!m || typeof m !== "object") continue;
+      const id = typeof m.id === "string" ? m.id : (typeof m.name === "string" ? m.name : null);
+      if (!id) continue;
+      const fns = [].concat(m.function || m.functions || m.endpoints || []);
+      const endpoint = SUPPORTED_ENDPOINTS.find(e => fns.includes(e));
+      if (!endpoint) continue;   // image2image / inpainting only — not our use
+
+      // Native resolution when it says one, otherwise let Dezgo default. Sending
+      // a width the model does not take is how a model becomes a dead button,
+      // and every parameter omitted is one that cannot be wrong.
+      const res = m.nativeResolution || m.native_resolution || {};
+      const params = {};
+      const w = Number(res.width || res.w);
+      const h = Number(res.height || res.h);
+      if (w > 0 && h > 0) { params.width = w; params.height = h; }
+
+      const family = typeof m.family === "string" ? m.family : "";
+      const label = (typeof m.name === "string" && m.name.trim() ? m.name.trim() : id) +
+        (family ? " — " + family : "");
+      out.push({
+        id, label, endpoint, params,
+        // Flux has no CFG and so takes no negative prompt; the others do.
+        negative: endpoint !== "text2image_flux",
+      });
+    }
+    // Flux first, then SDXL, then SD1 — cheapest-capable order, matching how
+    // the hardcoded list was arranged.
+    out.sort((a, b) => SUPPORTED_ENDPOINTS.indexOf(a.endpoint) - SUPPORTED_ENDPOINTS.indexOf(b.endpoint)
+      || a.label.localeCompare(b.label));
+    return out;
+  }
+
+  window.refreshDezgoModels = async function () {
+    const btn = document.getElementById("refreshModelsBtn");
+    btn.disabled = true;
+    quickStatus("Asking Dezgo what it has…", "busy");
+    try {
+      const res = await fetch(IMAGE_PROXY_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "dezgo", list: true }),
+      });
+      if (!res.ok) throw new Error(await res.text().catch(() => "HTTP " + res.status));
+      const body = await res.json();
+      const list = normaliseDezgoList(body);
+      if (!list.length) {
+        throw new Error("Dezgo answered from " + (body.source || "?") +
+          " but nothing in it looked like a text-to-image model.");
+      }
+      try { localStorage.setItem(DEZGO_LIST_KEY, JSON.stringify(list)); } catch {}
+      refreshGeneratorPick();
+      quickStatus("Found " + list.length + " Dezgo models.", "ok");
+    } catch (e) {
+      quickStatus("Could not fetch the model list: " + e.message, "err");
+    }
+    btn.disabled = false;
+  };
 
   window.chooseGenerator = function () {
     try { localStorage.setItem(GENERATOR_KEY, document.getElementById("genPick").value); } catch {}

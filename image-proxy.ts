@@ -48,6 +48,13 @@ const DEZGO_ENDPOINTS: Record<string, string> = {
 };
 const DEZGO_DEFAULT_ENDPOINT = 'text2image_flux';
 
+// Where Dezgo publishes its own model catalogue. Tried in order, because the
+// path is documented rather than verified from here — the first one that
+// answers with JSON wins, and the response says which did, so a wrong guess is
+// visible instead of silent. Hardcoded, never taken from the request: a
+// caller-supplied path would make this an open proxy for the API key.
+const DEZGO_INFO_PATHS = ['/info', '/models'];
+
 // Which body parameters may be forwarded. The client decides the values and
 // which of them apply to the model it picked — that table lives in
 // site-config.js, so a parameter Dezgo renames or a model that turns out not
@@ -207,6 +214,35 @@ Deno.serve(async (req: Request) => {
     if (!dezgoKey) {
       return new Response('Dezgo is not configured on the server (DEZGO_API_KEY is not set)', {
         status: 503,
+        headers: corsHeaders(),
+      });
+    }
+
+    // ── dezgo: list ──
+    // Dezgo's own catalogue, so the model dropdown stops being a list of ids
+    // someone remembered. Returned as-is for the client to normalise: the
+    // shape is not verified from here, and reshaping something unseen would
+    // just hide whatever it actually is.
+    if (payload.list === true) {
+      const tried: string[] = [];
+      for (const path of DEZGO_INFO_PATHS) {
+        let infoRes: Response;
+        try {
+          infoRes = await fetch('https://api.dezgo.com' + path, { headers: { 'X-Dezgo-Key': dezgoKey } });
+        } catch (e) {
+          tried.push(path + ': ' + (e instanceof Error ? e.message : String(e)));
+          continue;
+        }
+        if (!infoRes.ok) { tried.push(path + ': HTTP ' + infoRes.status); continue; }
+        const text = await infoRes.text();
+        try {
+          return json({ source: path, info: JSON.parse(text) }, 200);
+        } catch {
+          tried.push(path + ': not JSON');
+        }
+      }
+      return new Response('Could not read Dezgo\'s model list. Tried ' + tried.join('; '), {
+        status: 502,
         headers: corsHeaders(),
       });
     }
