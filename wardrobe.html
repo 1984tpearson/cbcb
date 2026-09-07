@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Wardrobe</title>
-<script src="site-config.js?v=34"></script>
+<script src="site-config.js?v=35"></script>
 <script src="image-prompt.js?v=24"></script>
 <style>
   :root {
@@ -1990,20 +1990,24 @@
       });
       const body = await res.json();
       searchHits = Array.isArray(body.results) ? body.results : [];
-      renderSearchResults(query, body.provider);
+      renderSearchResults(query, body.provider, body.tried);
     } catch (e) {
       quickStatus("Search failed: " + e.message, "err");
     }
     setQuickBusy(false);
   };
 
-  function renderSearchResults(query, provider) {
+  function renderSearchResults(query, provider, tried) {
     const box = document.getElementById("searchResults");
     if (!searchHits.length) {
       box.hidden = true;
-      quickStatus("Nothing found for “" + query + "”. " +
-        "Openverse only indexes openly-licensed pictures, so it is thin on product photography — " +
-        "try plainer words, or generate one instead.", "err");
+      // What each provider said, not just that there was nothing. "No results"
+      // and "the API refused us" look identical from here otherwise, and only
+      // one of them is fixed by choosing different words.
+      const why = Array.isArray(tried) && tried.length ? " (" + tried.join("; ") + ")" : "";
+      quickStatus("Nothing found for “" + query + "”" + why +
+        ". These indexes only carry openly-licensed pictures, so they are thin on product " +
+        "photography — try plainer words, or generate one instead.", "err");
       return;
     }
     box.hidden = false;

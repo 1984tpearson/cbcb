@@ -65,13 +65,46 @@ const DEZGO_INFO_PATHS = ['/info', '/models'];
 //
 // SERPAPI_KEY is optional. When it is absent the provider simply is not
 // offered, rather than the whole action failing.
-const SEARCH_PROVIDERS = ['openverse', 'serpapi'] as const;
+const SEARCH_PROVIDERS = ['auto', 'openverse', 'wikimedia', 'serpapi'] as const;
+
+// Sent on every search. An API refusing an unidentified caller is ordinary,
+// and Deno's default agent string is exactly the kind a WAF turns away — which
+// is one of the two explanations for Openverse answering 401 to a request its
+// own documentation says should work anonymously.
+const SEARCH_UA = 'ValdenmereWardrobe/1.0 (personal wardrobe tool)';
 
 async function searchOpenverse(query: string, limit: number) {
   const url = 'https://api.openverse.org/v1/images/?q=' + encodeURIComponent(query) +
-    '&page_size=' + limit + '&license_type=all';
-  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
-  if (!res.ok) throw new Error(`Openverse returned HTTP ${res.status}`);
+    '&page_size=' + limit;
+  const headers: Record<string, string> = { 'Accept': 'application/json', 'User-Agent': SEARCH_UA };
+  // Optional: registering an Openverse application is free and raises the rate
+  // limit. If the credentials are present they are exchanged for a bearer
+  // token; if they are not, the request goes out anonymously as before.
+  const clientId = Deno.env.get('OPENVERSE_CLIENT_ID');
+  const clientSecret = Deno.env.get('OPENVERSE_CLIENT_SECRET');
+  if (clientId && clientSecret) {
+    try {
+      const tokenRes = await fetch('https://api.openverse.org/v1/auth_tokens/token/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': SEARCH_UA },
+        body: new URLSearchParams({
+          grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret,
+        }).toString(),
+      });
+      if (tokenRes.ok) {
+        const t = await tokenRes.json();
+        if (t?.access_token) headers['Authorization'] = 'Bearer ' + t.access_token;
+      }
+    } catch { /* anonymous is still worth trying */ }
+  }
+  const res = await fetch(url, { headers });
+  if (!res.ok) {
+    // The body is the diagnosis. A 401 that says "invalid token" is a
+    // different problem from one that says nothing at all, and without it the
+    // only way to tell them apart is another deploy.
+    const detail = (await res.text().catch(() => '')).slice(0, 200);
+    throw new Error(`Openverse returned HTTP ${res.status}${detail ? ': ' + detail : ''}`);
+  }
   const body = await res.json();
   const results = Array.isArray(body?.results) ? body.results : [];
   return results.map((r: Record<string, unknown>) => ({
@@ -85,6 +118,40 @@ async function searchOpenverse(query: string, limit: number) {
     // Where the image actually lives, so its terms can be checked by a human.
     page: (r.foreign_landing_url as string) || '',
   })).filter((r: { url: string }) => typeof r.url === 'string' && r.url);
+}
+
+// Wikimedia Commons. No key, no account, no token — the one image source that
+// cannot develop an authentication requirement, which after Openverse is worth
+// something. Coverage of commercial-style product photography is thin, but a
+// thin result beats a 401.
+async function searchWikimedia(query: string, limit: number) {
+  const url = 'https://commons.wikimedia.org/w/api.php?' + new URLSearchParams({
+    action: 'query', format: 'json', origin: '*',
+    generator: 'search', gsrsearch: 'filetype:bitmap ' + query,
+    gsrnamespace: '6', gsrlimit: String(limit),
+    prop: 'imageinfo', iiprop: 'url|extmetadata', iiurlwidth: '320',
+  }).toString();
+  const res = await fetch(url, { headers: { 'Accept': 'application/json', 'User-Agent': SEARCH_UA } });
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => '')).slice(0, 200);
+    throw new Error(`Wikimedia returned HTTP ${res.status}${detail ? ': ' + detail : ''}`);
+  }
+  const body = await res.json();
+  const pages = body?.query?.pages && typeof body.query.pages === 'object'
+    ? Object.values(body.query.pages) as Array<Record<string, unknown>>
+    : [];
+  return pages.map((p) => {
+    const info = (p.imageinfo as Array<Record<string, unknown>>)?.[0] || {};
+    const meta = (info.extmetadata as Record<string, { value?: string }>) || {};
+    return {
+      url: (info.url as string) || '',
+      thumbnail: (info.thumburl as string) || (info.url as string) || '',
+      title: String(p.title || '').replace(/^File:/, ''),
+      source: 'wikimedia',
+      license: meta.LicenseShortName?.value || '',
+      page: (info.descriptionurl as string) || '',
+    };
+  }).filter((r) => r.url);
 }
 
 async function searchSerpapi(query: string, limit: number, key: string) {
@@ -281,7 +348,33 @@ Deno.serve(async (req: Request) => {
         }
         return json({ provider: 'serpapi', results: await searchSerpapi(query, limit, key) }, 200);
       }
-      return json({ provider: 'openverse', results: await searchOpenverse(query, limit) }, 200);
+      if (requested === 'openverse') {
+        return json({ provider: 'openverse', results: await searchOpenverse(query, limit) }, 200);
+      }
+      if (requested === 'wikimedia') {
+        return json({ provider: 'wikimedia', results: await searchWikimedia(query, limit) }, 200);
+      }
+
+      // auto: the keyless providers in turn. One of them refusing should not
+      // be the end of a search when the other is sitting there working, and
+      // which one answered is reported rather than hidden — a result set is
+      // only judgeable if you know where it came from. Every failure along the
+      // way is carried, so a total miss says what each one actually said
+      // instead of just "nothing".
+      const tried: string[] = [];
+      for (const [name, run] of [
+        ['openverse', () => searchOpenverse(query, limit)],
+        ['wikimedia', () => searchWikimedia(query, limit)],
+      ] as Array<[string, () => Promise<unknown[]>]>) {
+        try {
+          const results = await run();
+          if (results.length) return json({ provider: name, results, tried }, 200);
+          tried.push(`${name}: no results`);
+        } catch (e) {
+          tried.push(`${name}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      return json({ provider: 'auto', results: [], tried }, 200);
     } catch (e) {
       return new Response(`Image search failed: ${e instanceof Error ? e.message : String(e)}`, {
         status: 502,

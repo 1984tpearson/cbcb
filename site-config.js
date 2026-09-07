@@ -1202,7 +1202,11 @@
       // indexes openly-licensed material, so its coverage of commercial-style
       // product photography is thinner than a general image search would be.
       // The proxy also speaks SerpApi if a key is ever set for it.
-      searchProvider: "openverse",
+      // "auto" walks the keyless providers in turn and reports which answered.
+      // Openverse first for its larger index, Wikimedia Commons behind it —
+      // Wikimedia needs no key, no account and no token at all, which after
+      // Openverse started answering 401 to anonymous requests is worth having.
+      searchProvider: "auto",
       searchCount: 24,
       // Appended to whatever is typed. Searching an image index for "ball
       // gown" returns people wearing ball gowns; the words that find a
