@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Wardrobe</title>
-<script src="site-config.js?v=30"></script>
+<script src="site-config.js?v=31"></script>
 <script src="image-prompt.js?v=24"></script>
 <style>
   :root {
@@ -73,6 +73,8 @@
   .catgroup .count { margin-left:auto; font-weight:700; color:var(--muted); font-size:12px; }
   .catgroup .count.on { color:var(--pink); }
   .catgroup .grid { padding:11px; }
+  .rowlabel { font-size:11px; font-weight:800; letter-spacing:.04em; text-transform:uppercase;
+              color:var(--muted); margin-top:2px; }
   #fitResult img { width:100%; border-radius:12px; background:var(--bg3); }
   #fitResult .acts { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
   #fitResult .acts button { flex:1; min-height:40px; }
@@ -297,6 +299,10 @@
       <div class="card">
         <h2>What they wear</h2>
         <p class="hint" id="fitPickHint">Tap garments to put them on.</p>
+        <div id="fitRecentWrap" hidden>
+          <div class="rowlabel">Just made</div>
+          <div class="charrow" id="fitRecent"></div>
+        </div>
         <div id="fitGarments"></div>
       </div>
 
@@ -1336,6 +1342,8 @@
         "</div></details>";
     }).join("");
 
+    renderRecentRow(withImages);
+
     box.querySelectorAll("[data-pick]").forEach(c => {
       c.onclick = () => toggleGarment(c.dataset.pick);
     });
@@ -1346,6 +1354,38 @@
     document.getElementById("fitPickHint").textContent = withImages.length
       ? chosenGarments.size + " of " + max + " chosen. Tap garments to put them on."
       : "No garments with pictures yet — make some in the Wardrobe first.";
+  }
+
+  // The newest garments, as a row, so a batch just generated can be tried on
+  // without first working out which category each one landed in — which is the
+  // one thing you do not know about a garment the model named and filed itself.
+  //
+  // Ordered by when it was made, falling back to position for anything saved
+  // before createdAt was recorded. The same garments also appear in their
+  // category below; both are drawn from the same selection, so putting one on
+  // here marks it in both places.
+  function renderRecentRow(withImages) {
+    const n = wardrobeCfg().fitting.recentCount;
+    const recent = withImages
+      .map((it, i) => ({ it, i }))
+      .sort((a, b) => (b.it.createdAt || 0) - (a.it.createdAt || 0) || a.i - b.i)
+      .slice(0, n)
+      .map(x => x.it);
+
+    // Hidden when it would only repeat what is already on screen: a "just
+    // made" row listing the entire wardrobe is a second copy of the wardrobe.
+    const wrap = document.getElementById("fitRecentWrap");
+    wrap.hidden = recent.length === 0 || recent.length === withImages.length;
+    if (wrap.hidden) return;
+
+    document.getElementById("fitRecent").innerHTML = recent.map(it =>
+      '<button class="chartile' + (chosenGarments.has(it.id) ? " on" : "") +
+      '" data-pick="' + esc(it.id) + '" title="' + esc(it.name || "") + '">' +
+      '<img src="' + esc(it.image) + '" alt="" loading="lazy" />' +
+      "<span>" + esc(it.name || "Untitled") + "</span></button>").join("");
+    document.getElementById("fitRecent").querySelectorAll("[data-pick]").forEach(b => {
+      b.onclick = () => toggleGarment(b.dataset.pick);
+    });
   }
 
   window.toggleGarment = function (id) {

@@ -1244,6 +1244,10 @@
         // off long before that: each garment is another thing the model has to
         // keep faithful while also composing a person.
         maxGarments: 5,
+        // The recent row holds a whole batch on purpose: generating eight and
+        // then trying them on is the reason the row exists, and a row that
+        // shows five of the eight just made sends you hunting for the rest.
+        recentCount: 8,
         // The default scene. Deliberately plain — a fitting room shot is for
         // seeing the clothes, and a busy background is the model's attention
         // going somewhere other than the outfit.
