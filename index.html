@@ -138,7 +138,14 @@
     .discreet-app * { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif !important; }
     .discreet-header { background: #f5f5f5 !important; border-bottom: 1px solid #e0e0e0 !important; backdrop-filter: none !important; box-shadow: none !important; padding: 10px 14px !important; }
     @media (max-width: 480px) {
-      .chat-icon-btn { padding: 6px 9px !important; font-size: 13px !important; }
+      /* Two short rows beat one row plus an empty gap: the controls ride up
+         alongside Back, and the name/sliders block takes the line below. */
+      .chat-header { padding: 6px 10px !important; gap: 4px !important; }
+      .chat-back-btn { order: 0; }
+      .chat-header-btns { order: 1; flex: 1 1 auto; }
+      .chat-header-info { order: 2; flex: 1 1 100% !important; justify-content: flex-start !important; }
+      .chat-icon-btn { padding: 5px 8px !important; font-size: 13px !important; }
+      .chat-header .discreet-toggle { padding: 5px 7px !important; font-size: 13px !important; }
     }
     .discreet-chat-header { background: #f5f5f5 !important; border-bottom: 1px solid #e0e0e0 !important; backdrop-filter: none !important; box-shadow: none !important; }
     .discreet-char-name { color: #000000 !important; font-size: 17px !important; font-weight: 600 !important; letter-spacing: 0 !important; }
@@ -5656,7 +5663,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       {!discreetMode && <div style={S.chatBgOverlay} />}
 
       {/* Header */}
-      <div style={S.chatHeader} className={discreetMode ? "discreet-chat-header" : ""}>
+      <div style={S.chatHeader} className={"chat-header " + (discreetMode ? "discreet-chat-header" : "")}>
         {discreetMode ? (
           <>
             <button style={S.backBtn} className="discreet-back-btn" onClick={onBack}>‹ Back</button>
@@ -5673,8 +5680,8 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
           </>
         ) : (
           <>
-            <button style={S.backBtn} onClick={onBack}>← Back</button>
-            <div style={S.chatHeaderInfo}>
+            <button style={S.backBtn} className="chat-back-btn" onClick={onBack}>← Back</button>
+            <div style={S.chatHeaderInfo} className="chat-header-info">
               {characterAvatar(character) && (
                 <img src={characterAvatar(character)} alt="Edit face" title="Edit face"
                   style={{ ...S.chatAvatar, cursor: "pointer" }}
@@ -5706,7 +5713,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                 </div>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <div className="chat-header-btns" style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
               <button className="discreet-toggle" title={theme === "dark" ? "Light theme" : "Dark theme"} onClick={onToggleTheme}>{theme === "dark" ? "☀" : "🌙"}</button>
               <button className="discreet-toggle" title="Discreet mode" onClick={onToggleDiscreet}>👁</button>
               <button style={S.iconBtnLight} className="chat-icon-btn" title="Image gallery" onClick={() => setShowGallery(true)}>🖼</button>
