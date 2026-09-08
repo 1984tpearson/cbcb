@@ -4917,7 +4917,11 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       try {
         const library = await loadWardrobeLibrary();
         closetList = closetGarments(currentChar, library).filter(g => g.image);
-      } catch { closetList = []; }
+      } catch (e) {
+        console.warn("[scene] wardrobe unavailable, dressing in words only:", e.message);
+        closetList = [];
+      }
+      console.info(`[scene] inferring setup for "${scenario.label || "(no label)"}" — ${currentChar.name} has ${(currentChar.closet || []).length} in the closet, ${closetList.length} usable`);
       // Its own section at the end rather than a bullet in the middle. Buried
       // in the list it sat directly above "use null for anything the scenario
       // does not support", which is an invitation to answer null, and it was
@@ -4955,7 +4959,14 @@ Return ONLY valid JSON: {"charOutfit": "...", "userOutfit": "...", "location": "
 No other text.` }]
       });
       const parsed = parseJsonReply(raw);
-      if (!parsed) return;
+      // Was silent. A reply the parser cannot read looked exactly like a scene
+      // that set nothing — no outfit, no staging, no garments, no error — and
+      // that is the case worth being able to recognise, because it is the one
+      // a longer prompt makes more likely.
+      if (!parsed) {
+        console.warn("[scene] setup reply could not be parsed as JSON:", String(raw || "").slice(0, 300));
+        return;
+      }
       commitCharacter(prev => {
         const next = { ...prev };
         let changed = false;
@@ -4995,6 +5006,7 @@ No other text.` }]
           if (value) { staging[key] = value; stagingChanged = true; }
         }
         if (stagingChanged) { next.staging = staging; changed = true; }
+        console.info(`[scene] applied — outfit ${charOutfit ? "yes" : "no"}, staging ${stagingChanged ? "yes" : "no"}, worn ${(next.worn || []).length}`);
         // Only seeded into an empty list, so a hand-written goal is never
         // displaced by one the scenario suggested.
         if (wantIntentions && Array.isArray(parsed.intentions) && activeIntentions(prev).length === 0) {
