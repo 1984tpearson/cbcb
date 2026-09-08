@@ -3380,10 +3380,14 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
   // hosted is what the image model can fetch; a photo that failed to upload has
   // none and is shown faded, because it cannot take part in a generation.
   const [photos, setPhotos] = useState(() => (character.sourcePhotos || []).map(url => ({ url, hosted: url })));
-  // Whether the next re-shoot reads them alongside the base image. On by
-  // default when there are any: they are the closest thing to a record of what
-  // she actually looks like, and the base image is a drawing of them.
-  const [usePhotos, setUsePhotos] = useState(true);
+  // Whether the next re-shoot reads them alongside the base image. Off by
+  // default, which is the opposite of what it looks like it should be: a
+  // photograph is a much stronger statement than a word, so a photo of her with
+  // brown hair beats "auburn hair" in the prompt and the edit simply does not
+  // land. Editing is contradicting the reference on purpose; the photos are
+  // there for the other job, which is re-anchoring who she is when the base
+  // image has drifted away from her.
+  const [usePhotos, setUsePhotos] = useState(false);
   const photoRef = useRef();
 
   const setFaceField = (groupKey, fieldKey, value) =>
@@ -3475,6 +3479,8 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
         const i = dataUrls.indexOf(p.url);
         return i === -1 ? p : { ...p, hosted: hostedUrls[i] || null };
       }));
+      // Adding photos is the re-anchor gesture, so it turns them on. Any edit
+      // outstanding at the time gets the warning below rather than silence.
       setUsePhotos(true);
       if (hostedUrls.some(u => !u)) setError("Some photos could not be uploaded — they are shown faded and will not be used.");
     } catch (err) { setError(err.message); }
@@ -3661,10 +3667,23 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
                 {!!hostedPhotos.length && (
                   <label style={{ fontSize: 12, color: "var(--text3)", display: "flex", alignItems: "center", gap: 6 }}>
                     <input type="checkbox" checked={usePhotos} onChange={e => setUsePhotos(e.target.checked)} />
-                    Use {hostedPhotos.length === 1 ? "it" : `all ${hostedPhotos.length}`} when regenerating
+                    Re-anchor to {hostedPhotos.length === 1 ? "it" : "them"} when regenerating
                   </label>
                 )}
               </div>
+              {usePhotos && !!changedKeys.length && (
+                <p style={{ fontSize: 12, color: "var(--blue)", margin: "6px 0 0" }}>
+                  The photos show her as she was, so they will argue with your change to{" "}
+                  {describeAppearanceChanges(changedKeys)} — and a photograph usually wins. Untick the box to make just
+                  that change from the base image.
+                </p>
+              )}
+              {!usePhotos && !!hostedPhotos.length && (
+                <p style={{ fontSize: 11, color: "var(--text3)", margin: "6px 0 0" }}>
+                  Not being used — this regenerates from the base image alone, so a change to her hair or makeup is all
+                  that moves. Tick the box when you want her pulled back towards the photographs instead.
+                </p>
+              )}
 
               <button style={{ ...S.btnPrimary, marginTop: 8 }} onClick={generateBase} disabled={!!busy}>
                 {busy === "base" ? "Generating…" : photosInUse.length ? "Generate base image from photos" : "Generate base image"}
