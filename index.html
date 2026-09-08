@@ -2247,44 +2247,59 @@ apparent sex and build rather than leaving it out.`;
 // box is [x, y, w, h] as fractions of the image. Returns null rather than
 // throwing — every caller treats a failed crop as "keep the photograph whole",
 // which is a worse reference but never a wrong one.
-function cropFaceFromDataUrl(dataUrl, box) {
-  const cfg = ((CFG.image || {}).expressions || {}).autoFill || {};
+// Cuts a rectangle out of a data URL and returns a smaller data URL. rect is
+// { x, y, w, h } as fractions of the image, so callers work in the picture
+// rather than in pixels they would have to have measured first.
+//
+// Works on the data URL rather than the hosted copy on purpose: a remote image
+// taints the canvas and toDataURL then throws, and there is no need to go near
+// that. Returns null rather than throwing — every caller treats a failed crop
+// as "keep the photograph whole", which is a worse reference but never a
+// wrong one.
+function cropDataUrl(dataUrl, rect, maxPx) {
   return new Promise(resolve => {
-    if (!Array.isArray(box) || box.length !== 4 || box.some(n => typeof n !== "number" || !isFinite(n))) return resolve(null);
-    let [x, y, w, h] = box;
-    // A box a vision model gives back is approximately right at best. Reject
-    // the implausible ones — a face filling a hundredth of the frame is a
-    // mistake, one filling all of it is the model declining to answer — and
-    // grow the rest into a head-and-shoulders crop rather than a tight one
-    // that clips her chin.
-    if (!(w > 0 && h > 0)) return resolve(null);
-    const area = w * h;
-    if (area < (cfg.minBoxFraction ?? 0.01) || area > (cfg.maxBoxFraction ?? 0.9)) return resolve(null);
+    const { x, y, w, h } = rect || {};
+    if (![x, y, w, h].every(n => typeof n === "number" && isFinite(n)) || !(w > 0 && h > 0)) return resolve(null);
     const img = new Image();
     img.onerror = () => resolve(null);
     img.onload = () => {
       try {
-        const pad = cfg.padding ?? 0.45;
-        let px = (x - w * pad) * img.width;
-        let py = (y - h * pad) * img.height;
-        let pw = w * (1 + pad * 2) * img.width;
-        let ph = h * (1 + pad * 2) * img.height;
-        // Clamped to the picture: a padded box runs off the edge on any photo
-        // where the head is near the top, which is most portraits.
-        px = Math.max(0, px); py = Math.max(0, py);
-        pw = Math.min(pw, img.width - px); ph = Math.min(ph, img.height - py);
+        // Clamped to the picture: a padded or dragged box runs off the edge on
+        // any photo where the head is near the top, which is most portraits.
+        let px = Math.max(0, x * img.width);
+        let py = Math.max(0, y * img.height);
+        let pw = Math.min(w * img.width, img.width - px);
+        let ph = Math.min(h * img.height, img.height - py);
         if (pw < 32 || ph < 32) return resolve(null);
-        const max = cfg.maxCropPx ?? 768;
+        const max = maxPx || 768;
         const scale = Math.min(1, max / Math.max(pw, ph));
         const canvas = document.createElement("canvas");
         canvas.width = Math.round(pw * scale);
         canvas.height = Math.round(ph * scale);
         canvas.getContext("2d").drawImage(img, px, py, pw, ph, 0, 0, canvas.width, canvas.height);
         resolve(canvas.toDataURL("image/jpeg", 0.92));
-      } catch (e) { console.warn("Face crop failed:", e.message); resolve(null); }
+      } catch (e) { console.warn("Crop failed:", e.message); resolve(null); }
     };
     img.src = dataUrl;
   });
+}
+
+// The automatic crop: a head box from the vision model, padded out to head and
+// shoulders. The box is the part a vision model is worst at, so the
+// implausible ones are refused here — a face filling a hundredth of the frame
+// is a mistake, one filling all of it is the model declining to answer.
+function cropFaceFromDataUrl(dataUrl, box) {
+  const cfg = ((CFG.image || {}).expressions || {}).autoFill || {};
+  if (!Array.isArray(box) || box.length !== 4 || box.some(n => typeof n !== "number" || !isFinite(n))) return Promise.resolve(null);
+  const [x, y, w, h] = box;
+  if (!(w > 0 && h > 0)) return Promise.resolve(null);
+  const area = w * h;
+  if (area < (cfg.minBoxFraction ?? 0.01) || area > (cfg.maxBoxFraction ?? 0.9)) return Promise.resolve(null);
+  const pad = cfg.padding ?? 0.45;
+  return cropDataUrl(dataUrl, {
+    x: x - w * pad, y: y - h * pad,
+    w: w * (1 + pad * 2), h: h * (1 + pad * 2),
+  }, cfg.maxCropPx);
 }
 
 // Reads uploaded photographs and says which expression slot each one belongs
@@ -3533,6 +3548,125 @@ function AppearanceTabFields({ tab, face, onFace, appearance, onAppearance, body
   );
 }
 
+// ─── CROP ─────────────────────────────────────────────────────────────────────
+// A square crop box over one uploaded picture, dragged with a finger or a
+// mouse. Used when an expression photograph is added by hand: the automatic
+// path guesses a head box from the vision model, and this is the answer to
+// what happens when you would rather say where the face is yourself.
+//
+// Square because every slot it fills is displayed and used as a square, and a
+// crop that has to be squashed later is not the crop that was chosen.
+//
+// The box is held in the rendered picture's own pixels rather than the file's,
+// so it needs no knowledge of the original size; the scaling is uniform, so a
+// square on screen is a square in the file. It is converted to fractions at
+// the last moment, which is what cropDataUrl takes.
+function CropBox({ dataUrl, label, onCancel, onConfirm }) {
+  const imgRef = useRef();
+  const [frame, setFrame] = useState(null); // rendered size of the picture
+  const [box, setBox] = useState(null);     // { x, y, size } in that same space
+  const drag = useRef(null);
+
+  // Set up once the picture has been laid out — before that there is no size
+  // to place a box inside of.
+  const onImgLoad = () => {
+    const el = imgRef.current;
+    if (!el) return;
+    const w = el.clientWidth, h = el.clientHeight;
+    const size = Math.round(Math.min(w, h) * 0.8);
+    setFrame({ w, h });
+    // Placed high rather than centred: on a photograph of a person the face is
+    // almost never in the middle, and starting on it saves a drag.
+    setBox({ x: Math.round((w - size) / 2), y: Math.round(Math.min((h - size) / 2, h * 0.08)), size });
+  };
+
+  const clamp = (b) => {
+    if (!frame) return b;
+    const size = Math.max(48, Math.min(b.size, frame.w, frame.h));
+    return {
+      size,
+      x: Math.max(0, Math.min(b.x, frame.w - size)),
+      y: Math.max(0, Math.min(b.y, frame.h - size)),
+    };
+  };
+
+  // One pointer, one gesture: either the whole box moves or one corner drags
+  // the size, with the opposite corner staying where it is.
+  const startDrag = (e, corner) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { corner, startX: e.clientX, startY: e.clientY, box };
+  };
+  const onDrag = (e) => {
+    const d = drag.current;
+    if (!d || !frame) return;
+    const dx = e.clientX - d.startX, dy = e.clientY - d.startY;
+    if (!d.corner) return setBox(clamp({ ...d.box, x: d.box.x + dx, y: d.box.y + dy }));
+    // A square tracks one axis, and the larger movement is the one meant.
+    const along = Math.abs(dx) > Math.abs(dy) ? dx : dy;
+    const sign = d.corner === "se" ? 1 : d.corner === "nw" ? -1 : (d.corner === "ne" ? (Math.abs(dx) > Math.abs(dy) ? 1 : -1) : (Math.abs(dx) > Math.abs(dy) ? -1 : 1));
+    const size = d.box.size + along * sign;
+    const next = { size, x: d.box.x, y: d.box.y };
+    // Corners that are not the anchor move the origin as the size changes.
+    if (d.corner === "nw") { next.x = d.box.x + (d.box.size - size); next.y = d.box.y + (d.box.size - size); }
+    if (d.corner === "ne") { next.y = d.box.y + (d.box.size - size); }
+    if (d.corner === "sw") { next.x = d.box.x + (d.box.size - size); }
+    setBox(clamp(next));
+  };
+  const endDrag = () => { drag.current = null; };
+
+  const handle = (corner, style) => (
+    <div onPointerDown={e => startDrag(e, corner)} onPointerMove={onDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
+      style={{ position: "absolute", width: 26, height: 26, background: "var(--pink)", opacity: 0.85, borderRadius: 4, touchAction: "none", cursor: "nwse-resize", ...style }} />
+  );
+
+  return (
+    <div style={{ ...S.overlay, zIndex: 210 }}>
+      <div style={{ ...S.modal, maxWidth: 480 }}>
+        <div style={S.modalHeader}>
+          <span style={S.modalTitle}>Crop — {label}</span>
+          <button style={S.iconBtn} onClick={onCancel}>✕</button>
+        </div>
+        <div style={{ ...S.modalBody, textAlign: "center" }}>
+          <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 8px", textAlign: "left" }}>
+            Drag the square onto her face, and its corners to resize. Head and shoulders works better than a tight
+            crop on the features.
+          </p>
+          {/* overflow hidden so the box's darkening shadow stops at the edge of
+              the picture instead of dimming the whole dialog — which also means
+              the handles have to sit inside the corners rather than on them. */}
+          <div style={{ position: "relative", display: "inline-block", lineHeight: 0, maxWidth: "100%", touchAction: "none", overflow: "hidden" }}>
+            <img ref={imgRef} src={dataUrl} alt="to crop" onLoad={onImgLoad}
+              style={{ maxWidth: "100%", maxHeight: "55vh", display: "block", userSelect: "none" }} draggable={false} />
+            {box && (
+              <div onPointerDown={e => startDrag(e, null)} onPointerMove={onDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
+                style={{ position: "absolute", left: box.x, top: box.y, width: box.size, height: box.size, border: "2px solid var(--pink)", boxShadow: "0 0 0 9999px rgba(0,0,0,0.45)", touchAction: "none", cursor: "move" }}>
+                {handle("nw", { left: 0, top: 0 })}
+                {handle("ne", { right: 0, top: 0, cursor: "nesw-resize" })}
+                {handle("sw", { left: 0, bottom: 0, cursor: "nesw-resize" })}
+                {handle("se", { right: 0, bottom: 0 })}
+              </div>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+            <button style={S.btnSecondary} onClick={onCancel}>Cancel</button>
+            <div style={{ flex: 1 }} />
+            {/* Skipping the crop is a real answer: a photograph that is already
+                a head shot has nothing to cut off, and the whole picture in a
+                slot has always been allowed. */}
+            <button style={S.btnSecondary} onClick={() => onConfirm(null)}>Use whole photo</button>
+            <button style={S.btnPrimary} disabled={!box || !frame}
+              onClick={() => onConfirm({ x: box.x / frame.w, y: box.y / frame.h, w: box.size / frame.w, h: box.size / frame.h })}>
+              Use crop
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── APPEARANCE EDITOR ────────────────────────────────────────────────────────
 // Everything about how a character looks, and the two images that carry it.
 // Was two modals — a face editor that re-shot the base image and a body editor
@@ -3597,6 +3731,8 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
   // rather than state because the change event reads it, and a click that set
   // state would not have re-rendered the input before the picker opened.
   const expressionSlot = useRef(null);
+  // { slot, dataUrl } while the crop box is open over a picked photograph.
+  const [cropping, setCropping] = useState(null);
 
   const setFaceField = (groupKey, fieldKey, value) =>
     setFace(f => ({ ...f, [groupKey]: { ...f[groupKey], [fieldKey]: value } }));
@@ -3711,19 +3847,36 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
     setBusy("");
   };
 
+  // Picking a file opens the crop box rather than filling the slot. The
+  // automatic path guesses where the face is; by hand, saying so is the point.
   const addExpression = async (e) => {
     const file = (e.target.files || [])[0];
     const slot = expressionSlot.current;
     e.target.value = "";
     if (!file || !slot) return;
+    setError("");
+    try { setCropping({ slot, dataUrl: await readFileAsDataUrl(file) }); }
+    catch (err) { setError(err.message); }
+  };
+
+  // rect is null when they chose the whole photograph, and a crop that fails
+  // falls back to it too — a slot holding the uncropped picture is what this
+  // has always been, and is better than an empty one.
+  const finishCrop = async (rect) => {
+    const { slot, dataUrl } = cropping || {};
+    setCropping(null);
+    if (!slot || !dataUrl) return;
     setBusy(`expr:${slot}`); setError("");
     try {
-      const url = await persistUploadedPhoto(await readFileAsDataUrl(file));
+      const maxPx = (((CFG.image || {}).expressions || {}).autoFill || {}).maxCropPx;
+      const cropped = rect ? await cropDataUrl(dataUrl, rect, maxPx) : null;
+      if (rect && !cropped) setError("That crop could not be made, so the whole photo was used.");
       // No local data-URL preview here, unlike the photo strip: this one is
       // only ever useful to the image model, and a picture it cannot fetch
       // would sit in the grid looking filled while doing nothing.
+      const url = await persistUploadedPhoto(cropped || dataUrl);
       if (!url) throw new Error("that photo could not be uploaded");
-      setExpressions(x => ({ ...x, [slot]: { url, auto: false, cropped: false } }));
+      setExpressions(x => ({ ...x, [slot]: { url, auto: false, cropped: !!cropped } }));
       setExprNote("");
     } catch (err) { setError(err.message); }
     setBusy("");
@@ -4073,6 +4226,12 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
           </div>
         </div>
       </div>
+
+      {cropping && (
+        <CropBox dataUrl={cropping.dataUrl}
+          label={((((CFG.image || {}).expressions || {}).slots || []).find(sl => sl.key === cropping.slot) || {}).label || cropping.slot}
+          onCancel={() => setCropping(null)} onConfirm={finishCrop} />
+      )}
 
       {lightbox && (
         <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
