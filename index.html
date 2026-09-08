@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=46"></script>
+  <script src="site-config.js?v=47"></script>
   <script src="image-prompt.js?v=24"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -414,6 +414,7 @@ const {
   buildFacePrompt, buildFaceEditPrompt, isFaceUnset, isFaceStructureUnset,
   buildBodyBasePrompt, buildUploadBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
   isUserUndressed, povSelfBody, isIntimateScene,
+  visibleWornGarments,
   detectPhysicalContact, stripViewerLimbs,
   buildPovModifiers, joinPromptParts, assembleImagePrompt,
 } = IMG;
@@ -489,8 +490,12 @@ const resolveWornGarments = async (character) => {
   if (!ids.length) return [];
   try {
     const library = await loadWardrobeLibrary();
-    return closetGarments({ closet: ids }, library)
-      .filter(g => g.image)
+    const worn = closetGarments({ closet: ids }, library).filter(g => g.image);
+    // Worn, then visible. A bra under a jumper stays on her and stays in what
+    // the chat model is told; it is only its photograph that is held back,
+    // because sending it is an instruction to show it. The cap counts what is
+    // actually sent, so hidden underwear no longer uses up one of the five.
+    return visibleWornGarments(worn, character.wornState)
       .slice(0, (CFG.wardrobe.chat && CFG.wardrobe.chat.maxWorn) || 5);
   } catch (e) {
     console.warn("Wardrobe unavailable, generating without garments:", e.message);
@@ -2542,7 +2547,7 @@ function ClosetPicker({ selected, onChange, onClose }) {
 
 // The chosen garments, as thumbnails. Loads the library itself rather than
 // taking it as a prop, so the panel shows a closet without opening the picker.
-function ClosetStrip({ closet, worn, onRemove, onToggleWorn, maxWorn }) {
+function ClosetStrip({ closet, worn, wornState, onRemove, onToggleWorn, maxWorn }) {
   const [library, setLibrary] = useState(null);
   useEffect(() => {
     let live = true;
@@ -2580,6 +2585,12 @@ function ClosetStrip({ closet, worn, onRemove, onToggleWorn, maxWorn }) {
               <img src={g.image} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
               <div style={{ fontSize: 10, fontWeight: 700, color: on ? "var(--pink)" : "var(--text2)", padding: "4px 5px" }}>
                 {on ? "● " : ""}{g.name || "Untitled"}
+                {/* What the tracker last said about this garment. Shown so
+                    that a picture with the shirt hanging open is explainable
+                    rather than mysterious. */}
+                {on && (wornState || {})[g.id] && (
+                  <span style={{ color: "var(--blue)", fontWeight: 800 }}> · {(wornState || {})[g.id]}</span>
+                )}
               </div>
               <button onClick={e => { e.stopPropagation(); onRemove(g.id); }} title="Remove from closet"
                 style={{ position: "absolute", top: 3, right: 3, width: 20, height: 20, borderRadius: "50%", border: "none",
@@ -2706,7 +2717,7 @@ function CharacterPersonalityPanel({ character, onSave, onClose, model }) {
           <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>
             The clothes {character.name} owns, picked from the wardrobe. Tap one to put it on: worn garments are outlined, their photographs are sent to the image model so it draws those exact clothes, and their names go into the box above so she knows what she has on.
           </p>
-          <ClosetStrip closet={closet} worn={worn}
+          <ClosetStrip closet={closet} worn={worn} wornState={character.wornState}
             maxWorn={(CFG.wardrobe.chat && CFG.wardrobe.chat.maxWorn) || 5}
             onRemove={id => { setCloset(c => c.filter(x => x !== id)); setWorn(w => w.filter(x => x !== id)); }}
             onToggleWorn={(ids, names) => { setWorn(ids); setCharOutfit(names.join(", ")); }} />
@@ -4824,6 +4835,24 @@ No other text.` }]
       // sneakers" -> "white top and blue jeans"), so the wardrobe drifted
       // even in conversations where nobody touched their clothes.
       if (!CLOTHING_MENTION_RE.test(recent)) return;
+      // The garments she is actually wearing, listed for the tracker by number
+      // so it can say what happened to each one. Numbered rather than named
+      // because two garments can share a name and an id means nothing to a
+      // language model.
+      //
+      // Everything worn is listed, not only what is visible: she is the one
+      // who might take the jumper off, and the bra under it is the reason that
+      // is worth doing.
+      let wornList = [];
+      try {
+        const library = await loadWardrobeLibrary();
+        wornList = closetGarments({ closet: currentChar.worn || [] }, library);
+      } catch { wornList = []; }
+      const wornBlock = wornList.length
+        ? `\n\n${currentChar.name} is wearing these specific garments:\n` +
+          wornList.map((g, i) => `${i + 1}. ${g.name || "unnamed"}${g.category ? ` (${g.category})` : ""}`).join("\n") +
+          `\n\nFor each one report how it is being worn NOW, as "garments": an object keyed by those numbers.\nUse exactly one of these words:\n- "on" — worn normally, as intended\n- "open" — undone, unbuttoned, unzipped but still on\n- "aside" — pulled down, pushed up, off one shoulder, round the ankles: still on her but out of place\n- "off" — taken off completely and no longer being worn\nOmit a garment entirely if nothing about it changed and it is simply on. Never guess: only report what the conversation shows.`
+        : "";
       const raw = await aiComplete({
         // The conversation model, not the 8B one. Two people, partial states
         // and "did this actually change?" is more than the small model could
@@ -4854,8 +4883,10 @@ Rules:
 - Never dress someone who was undressed unless the conversation shows them putting clothing on.
 - Evidence must be a short quote copied from the conversation above. If you cannot quote it, the answer is null.
 
+${wornBlock}
+
 Return ONLY valid JSON:
-{"charOutfit": null, "charEvidence": null, "userOutfit": null, "userEvidence": null}
+{"charOutfit": null, "charEvidence": null, "userOutfit": null, "userEvidence": null${wornList.length ? ', "garments": {}' : ""}}
 No other text.` }]
       });
       const parsed = parseJsonReply(raw);
@@ -4871,21 +4902,46 @@ No other text.` }]
         ? cleanOutfitUpdate(parsed.charOutfit) : null;
       const userProposed = evidenceSupported(parsed.userEvidence, recent)
         ? cleanOutfitUpdate(parsed.userOutfit) : null;
-      if (!charProposed && !userProposed) return;
+      // Per-garment verdicts, mapped back from the numbers the tracker was
+      // given. Anything it did not mention is unchanged, which is why it is
+      // told to omit those: a model asked to restate every garment every turn
+      // will eventually restate one wrongly.
+      const statuses = {};
+      const removed = new Set();
+      const reported = (parsed.garments && typeof parsed.garments === "object") ? parsed.garments : {};
+      for (const [key, value] of Object.entries(reported)) {
+        const garment = wornList[Number(key) - 1];
+        if (!garment) continue;
+        const status = String(value || "").trim().toLowerCase();
+        if (status === "off") removed.add(garment.id);
+        else if (["open", "aside"].includes(status)) statuses[garment.id] = status;
+        else if (status === "on") statuses[garment.id] = "on";
+      }
+      if (!charProposed && !userProposed && !Object.keys(reported).length) return;
       commitIfCurrent(epoch, prev => {
         const charOutfit = charProposed ?? prev.charOutfit ?? null;
         const userOutfit = userProposed ?? prev.userOutfit ?? null;
-        if (charOutfit === prev.charOutfit && userOutfit === prev.userOutfit) return prev;
-        // The tracker writes prose, so once it has changed what she is wearing
-        // the worn garments no longer describe her and their photographs must
-        // stop being sent — a picture of the dress she just took off is the
-        // one thing that would put it straight back on her.
+        // A garment reported "off" stops being worn, so its photograph stops
+        // being sent — a picture of the dress she just took off is the one
+        // thing that would put it straight back on her. The rest stay, with
+        // whatever state they are in.
         //
-        // Blunt on purpose: a change of any kind drops all of them, rather
-        // than trying to work out which garment came off. Working that out is
-        // the next piece of this, and guessing it here would be wrong quietly.
-        const worn = charProposed ? [] : (prev.worn || []);
-        return { ...prev, charOutfit, userOutfit, worn };
+        // This replaces dropping every garment on any clothing change at all,
+        // which is what happened before the tracker could say which one it
+        // was: taking a jacket off left her with no wardrobe references and
+        // sent the whole outfit back to being words.
+        const prevWorn = prev.worn || [];
+        const worn = removed.size ? prevWorn.filter(id => !removed.has(id)) : prevWorn;
+        const wornState = {};
+        for (const id of worn) {
+          const next = statuses[id] || (prev.wornState || {})[id];
+          if (next && next !== "on") wornState[id] = next;
+        }
+        const sameOutfits = charOutfit === prev.charOutfit && userOutfit === prev.userOutfit;
+        const sameWorn = worn.length === prevWorn.length;
+        const sameState = JSON.stringify(wornState) === JSON.stringify(prev.wornState || {});
+        if (sameOutfits && sameWorn && sameState) return prev;
+        return { ...prev, charOutfit, userOutfit, worn, wornState };
       });
     } catch (e) {
       console.warn("Wardrobe tracking failed:", e.message);

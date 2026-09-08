@@ -1316,6 +1316,52 @@
         instruction: "Here is a character:\n\n{desc}\n\nHere is every garment in the wardrobe. One per line, as: id | name | category | set | tags\n\n{catalogue}\n\nChoose the garments this person owns and would actually be seen in. Aim for about {count}.\n\nThink about who they are before you pick. Cover, where the wardrobe has something suitable:\n- everyday clothes they would wear most days\n- anything their job, role or circumstances require — a nurse owns scrubs, a runner owns running kit — but never ONLY that\n- something to sleep in\n- underwear\n- shoes\n- a coat or jacket if they would own one\n- one thing for a night out or an occasion\n\nRules:\n- Only ids from the list. Never invent a garment, a name or an id.\n- A closet is one person's taste, not a catalogue. Do not pick everything that matches — pick what THIS person would own, given their age, their build, their circumstances and how they carry themselves.\n- Garments sharing a set name are one outfit. Take the whole set or none of it.\n- Do not pick two of something they would only own one of.\n\nReturn ONLY a JSON object, no markdown and no commentary:\n{\"closet\": [\"id\", ...], \"missing\": [\"...\"]}\n\n\"missing\" is for things this character plainly should own that the wardrobe has nothing suitable for, each 2-5 words, like \"police uniform\" or \"walking boots\". Use an empty array when the wardrobe covered them.",
       },
 
+      // ── Layers ─────────────────────────────────────────────────────────────
+      // Worn is not the same as visible. A bra under a jumper is worn — she
+      // knows it is there and so should the chat model — but its photograph
+      // has no business going to the image model, because a flat lay is an
+      // instruction to show that garment, and five of them are five such
+      // instructions. Sending underwear along with the clothes over it is
+      // what produced people wearing their bra outside their shirt.
+      //
+      // So each worn garment is placed on a layer and given the parts of the
+      // body it covers, and anything with something over it is worn but not
+      // sent.
+      layers: {
+        // Higher covers lower, within a shared region. Shoes and accessories
+        // sit above everything because nothing is ever worn over them.
+        categoryLayer: {
+          Underwear: 0,
+          Top: 1, Bottom: 1, Dress: 1, Sleepwear: 1, Swimwear: 1, "Full outfit": 1,
+          Outerwear: 2,
+          Shoes: 9, Accessory: 9,
+        },
+        // Which parts of the body each category is over. Two garments only
+        // hide one another where these overlap: a bra and jeans are both worn
+        // under nothing, so both are visible; a bra and a jumper are not.
+        categoryRegions: {
+          Top: ["torso"],
+          Outerwear: ["torso"],
+          Bottom: ["legs"],
+          Dress: ["torso", "legs"],
+          Sleepwear: ["torso", "legs"],
+          Swimwear: ["torso", "legs"],
+          "Full outfit": ["torso", "legs"],
+          Shoes: [], Accessory: [],
+        },
+        // "Underwear" is one category covering two quite different things, so
+        // the region is read off the garment's own name and tags. Matched in
+        // order, and anything unrecognised is treated as covering both, which
+        // is the cautious answer: it hides the garment when she is dressed,
+        // and a missing garment is a smaller error than one drawn over her
+        // clothes.
+        underwearRegions: [
+          { match: "bra|bralette|bandeau|crop|camisole|vest|corset|bustier", regions: ["torso"] },
+          { match: "knicker|panty|panties|thong|brief|boxer|short|garter|stocking|tights|hold-?up", regions: ["legs"] },
+          { match: "bodysuit|teddy|slip|basque|onesie|union", regions: ["torso", "legs"] },
+        ],
+      },
+
       // ── Worn in chat ───────────────────────────────────────────────────────
       // A character wearing closet garments in an ordinary chat image. The
       // same trick as the fitting room, with none of its wording about

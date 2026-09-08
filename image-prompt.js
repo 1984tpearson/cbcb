@@ -756,6 +756,74 @@ window.ImagePrompt = {
       return "a person";
     }
 
+    // ── Which worn garments the image model is shown ──────────────────────────
+    // Worn is not the same as visible. See CFG.wardrobe.layers: a garment with
+    // something over it stays on her and stays in what the chat model is told,
+    // but its photograph is not sent, because a flat lay is an instruction to
+    // show that garment.
+    //
+    // Pure, so the whole rule can be checked across combinations in a script
+    // rather than one generation at a time.
+    function garmentLayer(garment) {
+      const L = (CFG.wardrobe.layers || {});
+      const layer = (L.categoryLayer || {})[garment && garment.category];
+      return typeof layer === "number" ? layer : 1;
+    }
+
+    function garmentRegions(garment) {
+      const L = (CFG.wardrobe.layers || {});
+      const category = garment && garment.category;
+      if (category === "Underwear") {
+        const hay = [garment.name, (garment.tags || []).join(" ")].join(" ").toLowerCase();
+        const rule = (L.underwearRegions || []).find(r => new RegExp(r.match, "i").test(hay));
+        // Unrecognised underwear covers both, which hides it whenever she is
+        // dressed. A garment missing from a picture is a smaller error than
+        // one drawn over her clothes.
+        return rule ? rule.regions : ["torso", "legs"];
+      }
+      const regions = (L.categoryRegions || {})[category];
+      return Array.isArray(regions) ? regions : ["torso"];
+    }
+
+    // A garment is hidden when something on a higher layer covers a part of
+    // the body it is on. Equal layers never hide each other: a shirt and jeans
+    // are both worn, both visible.
+    //
+    // A garment only covers while it is where it should be. An open jacket
+    // does not hide the shirt under it, a dress pushed aside does not hide the
+    // bra, and jeans round her ankles do not hide anything at all — which is
+    // the whole reason those pictures are worth making.
+    function isGarmentCovered(garment, worn, states) {
+      const st = states || {};
+      const layer = garmentLayer(garment);
+      const regions = garmentRegions(garment);
+      if (!regions.length) return false; // shoes, accessories — nothing goes over them
+      return worn.some(other => {
+        if (!other || other.id === garment.id) return false;
+        if (String(st[other.id] || "on").toLowerCase() !== "on") return false;
+        if (garmentLayer(other) <= layer) return false;
+        return garmentRegions(other).some(r => regions.includes(r));
+      });
+    }
+
+    // The garments to send as reference images.
+    //
+    // states maps garment id to how it is being worn. Anything not simply "on"
+    // — a shirt hanging open, jeans round her ankles, a bra pulled down — is
+    // sent whatever is over it, because a garment out of position is exactly
+    // the one the picture is about. That is also why the covering rule cannot
+    // be the whole story: it assumes every garment sits where it should, and
+    // undressing is the case where none of them do.
+    function visibleWornGarments(worn, states) {
+      const list = (worn || []).filter(Boolean);
+      const st = states || {};
+      return list.filter(g => {
+        const status = String(st[g.id] || "on").toLowerCase();
+        if (status !== "on") return true;
+        return !isGarmentCovered(g, list, st);
+      });
+    }
+
     // Everything the app assembles a chat image prompt from, in one place, so
     // the lab and the app can never drift into building it differently.
     // charDesc is passed in already built (it comes from the appearance
@@ -843,6 +911,7 @@ window.ImagePrompt = {
       buildFacePrompt, buildFaceEditPrompt, faceFieldPhrase, isFaceUnset, isFaceStructureUnset,
       buildBodyBasePrompt, buildUploadBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
       isUserUndressed, povSelfBody, isIntimateScene,
+      garmentLayer, garmentRegions, isGarmentCovered, visibleWornGarments,
       beatShowsContact, detectPhysicalContact, stripViewerLimbs,
       buildPovModifiers, joinPromptParts, subjectFor, assembleImagePrompt,
       extractScene, parseSceneExtraction,
