@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Wardrobe</title>
-<script src="site-config.js?v=53"></script>
+<script src="site-config.js?v=54"></script>
 <script src="image-prompt.js?v=25"></script>
 <style>
   :root {
@@ -414,7 +414,7 @@
       <button class="primary" id="saveBtn" onclick="saveItem()">Save</button>
       <button onclick="closeEditor()">Cancel</button>
       <button id="copyBtn" onclick="copyUrl()">Copy image URL</button>
-      <button id="splitBtn" onclick="splitItem()" title="Separate a two-piece garment into its pieces">Split into pieces</button>
+      <button id="splitBtn" onclick="splitItem()" title="Redraw as a flat lay with no person, or separate a two-piece garment into its pieces">Isolate / split</button>
       <span class="spacer"></span>
       <button class="danger" id="deleteBtn" onclick="deleteItem()">Delete</button>
     </div>
@@ -2076,8 +2076,33 @@
     try {
       pieces = await readPieces(item.image);
     } catch (e) { status(e.message, "err"); return; }
-    if (pieces.length < 2) {
-      status("This reads as a single garment — nothing to split.", "err");
+    if (!pieces.length) {
+      status("Could not see a garment in that picture.", "err");
+      return;
+    }
+    // One garment: not a split but a flatten. A picture found by web search is
+    // usually of somebody wearing the clothes, and this is the same isolate
+    // step used on one half of a pair — so the button does both rather than
+    // refusing the case it is most useful for.
+    //
+    // In place, on this record, with the old picture kept as a variant, so a
+    // worse flat lay than the photograph it came from can be undone.
+    if (pieces.length === 1) {
+      const piece = pieces[0];
+      if (!confirm(`Redraw "${item.name || "this garment"}" as a flat lay of the garment alone, with no person?\n\n` +
+          `• ${(piece.known.name || piece.typed).slice(0, 60)}\n\n` +
+          `One image. The current picture is kept as a variant, so you can go back to it.`)) {
+        status("", "");
+        return;
+      }
+      status("Isolating the garment…", "busy");
+      try {
+        const { url, prompt } = await isolateGarment(item.image, piece.known);
+        acceptImage(url, "wiro", prompt);
+        // Saves and closes the editor, which is why the message comes after.
+        await window.saveItem();
+        status("Redrawn as a flat lay. The old picture is in the variants.", "ok");
+      } catch (e) { status("Could not isolate it: " + e.message, "err"); }
       return;
     }
     if (!confirm(`Split "${item.name || "this garment"}" into ${pieces.length} pieces?\n\n` +

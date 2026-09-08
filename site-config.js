@@ -1253,10 +1253,17 @@
       // torso and the bottoms on the legs, and the tracker can retire one
       // without touching the other.
       //
+      // It answers for one garment as readily as for two, because the same
+      // question serves a second purpose: a picture found by web search is
+      // usually of somebody wearing the clothes, and isolating the garment out
+      // of it is the same operation as isolating one half of a pair. One
+      // garment in, one flat lay out, and the record keeps its old picture as
+      // a variant.
+      //
       // Not extractInstruction, which asks what is being WORN in a photograph
       // — nobody is wearing a flat lay, and asked that question of one the
       // model hedges. {categories} is substituted.
-      splitInstruction: "This photograph shows a single clothing product that may be made up of more than one separate garment — a pyjama set is a top and bottoms, a bikini is a top and briefs, a suit is a jacket and trousers.\n\nList the separately wearable garments in it.\n\nReturn ONLY a JSON array, no markdown and no commentary. Each element is an object:\n{\n  \"name\": a short specific name for that piece alone, 2-5 words,\n  \"category\": exactly one of [{categories}],\n  \"description\": 15 to 30 words describing THAT PIECE alone — colour, fabric, cut, length, neckline, sleeves, fastenings, pattern,\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion\n}\n\nA piece counts as separate only if it can be worn without the other — the top half and bottom half of a two-piece do; a hood on a coat, a belt sewn to a dress and a lining do not. Name each piece for what it is on its own: \"pink striped pyjama top\", not \"pyjama set top\".\n\nIf this is one single garment that cannot be split, return an empty array.",
+      splitInstruction: "This photograph shows clothing. It may be a flat lay, a product shot, or a person wearing the clothes, and it may be one garment or a set made up of more than one separate garment — a pyjama set is a top and bottoms, a bikini is a top and briefs, a suit is a jacket and trousers.\n\nList the separately wearable garments in it.\n\nReturn ONLY a JSON array, no markdown and no commentary. Each element is an object:\n{\n  \"name\": a short specific name for that piece alone, 2-5 words,\n  \"category\": exactly one of [{categories}],\n  \"description\": 15 to 30 words describing THAT PIECE alone — colour, fabric, cut, length, neckline, sleeves, fastenings, pattern,\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion\n}\n\nA piece counts as separate only if it can be worn without the other — the top half and bottom half of a two-piece do; a hood on a coat, a belt sewn to a dress and a lining do not. Name each piece for what it is on its own: \"pink striped pyjama top\", not \"pyjama set top\".\n\nIgnore anyone wearing the clothes, and ignore the background, jewellery and bags. If there is only one garment, return an array of one — that is a normal answer, not a failure.",
 
       // Read back off the finished picture, so that naming and filing a garment
       // is not a form to fill in. {categories} is substituted with the list
