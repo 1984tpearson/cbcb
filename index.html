@@ -4910,6 +4910,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       const intentionAsk = wantIntentions
         ? `\n- intentions: up to ${intentCfg.maxActive} things ${currentChar.name} privately wants out of THIS situation and would work toward without saying so. Concrete and achievable in a conversation, not moods. Each needs a goal (second person, under 15 words) and nerve 0-100 for how much courage it takes her. An empty array is fine if the scenario sets nothing up.${intentionTone ? ` ${intentionTone}` : ""}`
         : "";
+      const intentionField = wantIntentions ? `, "intentions": [{"goal": "...", "nerve": 40}]` : "";
       // Her own clothes, offered by number so the scenario can dress her out
       // of them rather than inventing an outfit beside a closet full of
       // photographed garments. Same numbering the tracker uses.
@@ -4937,7 +4938,9 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
         // is the task the small model kept failing at for wardrobe and staging.
         model: settings.selectedModel,
         messages: [{ role: "user", content:
-`Given this opening scenario, infer the starting state of the scene. Base everything on the setting and context — be specific, realistic and concrete.
+`${scenario.blank
+  ? `No scene has been chosen — the conversation is starting cold. Infer an ordinary, plausible starting state for ${currentChar.name}: a normal moment in her own life, on a normal day. Dress her casually for that, in what she would actually have on around the house or out doing something unremarkable — not an outfit for an occasion. Keep the location and poses ordinary too, or null where nothing suggests one.`
+  : `Given this opening scenario, infer the starting state of the scene. Base everything on the setting and context — be specific, realistic and concrete.`}
 
 Character: ${currentChar.name}, ${currentChar.age || ""} ${currentChar.gender || ""}, ${appearanceDesc}
 Persona: ${currentChar.persona || ""}
@@ -5893,8 +5896,12 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                       onClick={() => { setOpeningScenarios(null); setOpeningLoading(true); generateOpeningScenarios({ character, model: settings.selectedModel, settings, exclude: seenScenarioLabels }).then(s => { setOpeningScenarios(s); setSeenScenarioLabels(prev => [...prev, ...s.map(sc => sc.label)]); }).catch(() => {}).finally(() => setOpeningLoading(false)); }}>
                       ↺ Different options
                     </button>
+                    {/* Starting blank used to set nothing at all — no outfit,
+                        no staging, no clothes — so a character with a closet
+                        full of garments began undressed. There is no scene to
+                        read, so it dresses her for an ordinary day instead. */}
                     <button style={{ ...S.btnSecondary, marginTop: 0 }}
-                      onClick={() => setOpeningScenarios(null)}>
+                      onClick={() => { setOpeningScenarios(null); inferScenarioSetup({ blank: true }, character); }}>
                       Skip — start blank
                     </button>
                   </div>
