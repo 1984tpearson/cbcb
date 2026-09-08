@@ -802,9 +802,12 @@ window.ImagePrompt = {
     function garmentRegions(garment) {
       const L = (CFG.wardrobe.layers || {});
       const category = garment && garment.category;
-      if (category === "Underwear") {
+      // Categories that cover two different things are read by name: a
+      // Sleepwear "pyjama top" is a torso garment and would otherwise be said
+      // to cover her legs, hiding whatever is under them.
+      if ((L.nameRegionCategories || []).includes(category)) {
         const hay = [garment.name, (garment.tags || []).join(" ")].join(" ").toLowerCase();
-        const rule = (L.underwearRegions || []).find(r => new RegExp(r.match, "i").test(hay));
+        const rule = (L.nameRegions || []).find(r => new RegExp(r.match, "i").test(hay));
         // Unrecognised underwear covers both, which hides it whenever she is
         // dressed. A garment missing from a picture is a smaller error than
         // one drawn over her clothes.

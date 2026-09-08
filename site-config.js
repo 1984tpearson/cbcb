@@ -1240,6 +1240,24 @@
       // guessing them is the job. {categories} is substituted.
       extractInstruction: "Look at this photograph and list every distinct item of clothing or footwear worn in it.\n\nReturn ONLY a JSON object, no markdown and no commentary, of the form {\"outfit\": \"...\", \"garments\": [ ... ]}.\n\n\"outfit\" is a short name for what these clothes are as an outfit, 2-4 words \u2014 what someone would call this way of dressing, like \"navy business suit\" or \"summer running kit\". The garments in one photograph are worn together, so they are a set, and this names it.\n\nEach element of \"garments\" is an object:\n{\n  \"name\": a short specific name, 2-5 words,\n  \"category\": exactly one of [{categories}],\n  \"description\": 15 to 30 words describing the garment ALONE — colour, fabric, cut, length, neckline, sleeves, fastenings, pattern,\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion. Only ever tags that will fit many garments \u2014 never the cut, the fastening, the fit or the sleeve length, because a tag describing one garment can never group anything\n}\n\nDescribe each garment as it would look laid out flat on its own, not as it appears on the body. Where the photograph hides part of it, infer the most likely form rather than omitting it. Ignore jewellery, bags, glasses and anything that is not worn clothing or footwear. If no clothing is visible, return an empty garments list.",
 
+      // ── Splitting a set ────────────────────────────────────────────────────
+      // Some garments arrive as one photograph of two things: a pyjama set, a
+      // bikini, a tracksuit. As one record they can be put on and taken off
+      // only together, so a character cannot take the pyjama top off and keep
+      // the bottoms — there is no state for half a garment, and marking the
+      // whole record "off" removes both.
+      //
+      // Splitting makes them what they should have been: separate garments
+      // sharing a set name, which everything downstream already handles. The
+      // pickers take a whole set or none, the layer rule puts the top on the
+      // torso and the bottoms on the legs, and the tracker can retire one
+      // without touching the other.
+      //
+      // Not extractInstruction, which asks what is being WORN in a photograph
+      // — nobody is wearing a flat lay, and asked that question of one the
+      // model hedges. {categories} is substituted.
+      splitInstruction: "This photograph shows a single clothing product that may be made up of more than one separate garment — a pyjama set is a top and bottoms, a bikini is a top and briefs, a suit is a jacket and trousers.\n\nList the separately wearable garments in it.\n\nReturn ONLY a JSON array, no markdown and no commentary. Each element is an object:\n{\n  \"name\": a short specific name for that piece alone, 2-5 words,\n  \"category\": exactly one of [{categories}],\n  \"description\": 15 to 30 words describing THAT PIECE alone — colour, fabric, cut, length, neckline, sleeves, fastenings, pattern,\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion\n}\n\nA piece counts as separate only if it can be worn without the other — the top half and bottom half of a two-piece do; a hood on a coat, a belt sewn to a dress and a lining do not. Name each piece for what it is on its own: \"pink striped pyjama top\", not \"pyjama set top\".\n\nIf this is one single garment that cannot be split, return an empty array.",
+
       // Read back off the finished picture, so that naming and filing a garment
       // is not a form to fill in. {categories} is substituted with the list
       // above — the model must choose from it rather than inventing a category,
@@ -1351,12 +1369,13 @@
           "Full outfit": ["torso", "legs"],
           Shoes: [], Accessory: [],
         },
-        // "Underwear" is one category covering two quite different things, so
-        // the region is read off the garment's own name and tags. Matched in
-        // order, and anything unrecognised is treated as covering both, which
-        // is the cautious answer: it hides the garment when she is dressed,
-        // and a missing garment is a smaller error than one drawn over her
-        // clothes.
+        // Some categories cover two quite different things — Underwear is a
+        // bra or knickers, Sleepwear a pyjama top or the bottoms, Swimwear a
+        // bikini top or a whole costume — so for those the region is read off
+        // the garment's own name and tags instead. Matched in order, and
+        // anything unrecognised is treated as covering both, which is the
+        // cautious answer: it hides the garment when she is dressed, and a
+        // missing garment is a smaller error than one drawn over her clothes.
         //
         // Names are the wardrobe owner's, not a taxonomy: a singlet filed
         // under Underwear was called "white sleeveless top", matched nothing,
@@ -1364,10 +1383,15 @@
         // hide it. Hence "top" and the sleeveless words. Within this category
         // a name containing "top" is a torso garment; the word is only broad
         // out in the open.
-        underwearRegions: [
-          { match: "bra|bralette|bandeau|crop|camisole|vest|corset|bustier|singlet|sleeveless|tank|under-?shirt|tee|t-shirt|top\\b", regions: ["torso"] },
-          { match: "knicker|panty|panties|thong|brief|boxer|short|garter|stocking|tights|hold-?up", regions: ["legs"] },
-          { match: "bodysuit|teddy|slip|basque|onesie|union", regions: ["torso", "legs"] },
+        // Which categories get read by name rather than taken from
+        // categoryRegions above.
+        nameRegionCategories: ["Underwear", "Sleepwear", "Swimwear"],
+        nameRegions: [
+          // Whole-body first: a "short set" and a "pyjama set" are both
+          // pieces, and the leg words below would otherwise claim them.
+          { match: "\\bset\\b|pyjamas|pajamas|bodysuit|teddy|slip\\b|basque|onesie|union|swimsuit|costume|leotard|nightie|nightdress|nightgown|romper|playsuit", regions: ["torso", "legs"] },
+          { match: "bra|bralette|bandeau|crop|camisole|vest|corset|bustier|singlet|sleeveless|tank|under-?shirt|tee|t-shirt|top\\b|shirt", regions: ["torso"] },
+          { match: "knicker|panty|panties|thong|brief|boxer|short|garter|stocking|tights|hold-?up|bottoms|trouser|pant", regions: ["legs"] },
         ],
       },
 
