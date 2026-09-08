@@ -4865,7 +4865,13 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
               status: "active",
               steps: (i.steps || []).map(st => ({ ...st, done: false })),
             }));
-      return { ...prev, currentSessionId: newSessionId, sliders: resetSliders, charOutfit: null, userOutfit: null, staging: null, intentions };
+      // worn and wornState go with the outfit text. They were being left
+      // behind, so a character who ended the last scene in a bra and one shoe
+      // began the next one — a coffee shop at noon, per the freshly inferred
+      // prose — still wearing them, and it was those flat lays that reached
+      // the image model. The words said one thing and the pictures another,
+      // and the pictures win.
+      return { ...prev, currentSessionId: newSessionId, sliders: resetSliders, charOutfit: null, userOutfit: null, worn: [], wornState: {}, staging: null, intentions };
     });
     setMessages([]);
     setMessagesLoaded(false);
@@ -4898,7 +4904,19 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       const intentionAsk = wantIntentions
         ? `\n- intentions: up to ${intentCfg.maxActive} things ${currentChar.name} privately wants out of THIS situation and would work toward without saying so. Concrete and achievable in a conversation, not moods. Each needs a goal (second person, under 15 words) and nerve 0-100 for how much courage it takes her. An empty array is fine if the scenario sets nothing up.${intentionTone ? ` ${intentionTone}` : ""}`
         : "";
-      const intentionField = wantIntentions ? `, "intentions": [{"goal": "...", "nerve": 40}]` : "";
+      // Her own clothes, offered by number so the scenario can dress her out
+      // of them rather than inventing an outfit beside a closet full of
+      // photographed garments. Same numbering the tracker uses.
+      let closetList = [];
+      try {
+        const library = await loadWardrobeLibrary();
+        closetList = closetGarments(currentChar, library).filter(g => g.image);
+      } catch { closetList = []; }
+      const closetAsk = closetList.length
+        ? `\n- worn: which of ${currentChar.name}'s own clothes she has on, as an array of the numbers below. Where you choose some, charOutfit must describe those same clothes and nothing else. Choose what someone would actually wear for this, including underwear where she would be wearing it. Take a whole set or none of it, and never two of something she would only wear one of. An empty array is right if nothing here suits the scene.\n\n${currentChar.name}'s clothes:\n` +
+          closetList.map((g, i) => `${i + 1}. ${g.name || "unnamed"}${g.category ? ` (${g.category})` : ""}`).join("\n")
+        : "";
+      const closetField = closetList.length ? `, "worn": [1, 2]` : "";
       const raw = await aiComplete({
         // The conversation model: reading a scene and inferring what it implies
         // is the task the small model kept failing at for wardrobe and staging.
@@ -4919,10 +4937,10 @@ Infer:
 - location: where the scene takes place, e.g. "a small kitchen at night"
 - charPose: ${currentChar.name}'s body position as a phrase completing "she is ...", e.g. "standing at the stove with her back turned"
 - userPose: the User's body position, same phrasing, e.g. "standing in the doorway"
-- proximity: physical distance between them, e.g. "across the room", "an arm's length apart"${intentionAsk}
+- proximity: physical distance between them, e.g. "across the room", "an arm's length apart"${intentionAsk}${closetAsk}
 
 Keep each value under 15 words. Use null for anything the scenario genuinely does not support.
-Return ONLY valid JSON: {"charOutfit": "...", "userOutfit": "...", "location": "...", "charPose": "...", "userPose": "...", "proximity": "..."${intentionField}}
+Return ONLY valid JSON: {"charOutfit": "...", "userOutfit": "...", "location": "...", "charPose": "...", "userPose": "...", "proximity": "..."${closetField}${intentionField}}
 No other text.` }]
       });
       const parsed = parseJsonReply(raw);
@@ -4934,6 +4952,30 @@ No other text.` }]
         const userOutfit = cleanOutfitUpdate(parsed.userOutfit);
         if (charOutfit) { next.charOutfit = charOutfit; changed = true; }
         if (userOutfit) { next.userOutfit = userOutfit; changed = true; }
+        // Garments she owns, chosen for this scene. Only numbers that are
+        // really on the list count, and the prose above stands whether or not
+        // any of them did: the closet cannot cover every scenario, and a
+        // scene it cannot dress should still be dressed in words.
+        if (closetList.length && Array.isArray(parsed.worn)) {
+          const worn = [...new Set(parsed.worn
+            .map(n => closetList[Number(n) - 1])
+            .filter(Boolean)
+            .map(g => g.id))];
+          if (worn.length) {
+            next.worn = worn;
+            next.wornState = {};
+            // The prose is rewritten from the garments actually chosen, the
+            // same way tapping one in the closet writes its name. Left alone
+            // it was invented in the same breath and could name a black dress
+            // while the flat lays showed scrubs — and then the chat model and
+            // the image model are describing different afternoons.
+            const names = worn
+              .map(id => (closetList.find(g => g.id === id) || {}).name)
+              .filter(Boolean);
+            if (names.length) next.charOutfit = names.join(", ");
+            changed = true;
+          }
+        }
         const staging = { ...(prev.staging || EMPTY_STAGING) };
         let stagingChanged = false;
         for (const key of STAGING_KEYS) {
