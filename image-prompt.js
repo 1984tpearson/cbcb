@@ -556,11 +556,14 @@ window.ImagePrompt = {
     function pickExpressionReference(photos, sceneText) {
       const slots = (CFG.image && CFG.image.expressions && CFG.image.expressions.slots) || [];
       if (!photos || !slots.length) return null;
+      // A slot holds either a bare URL, which is how the first hand-filled ones
+      // were stored, or { url, auto } once the reader could fill them itself.
+      const urlOf = v => (typeof v === "string" ? v : (v && v.url) || null);
       const text = String(sceneText || "").toLowerCase();
       if (!text) return null;
       let best = null;
       for (const slot of slots) {
-        const url = photos[slot.key];
+        const url = urlOf(photos[slot.key]);
         if (!url) continue; // an empty slot is not a candidate, however well it matches
         for (const word of slot.words || []) {
           // Word boundary at the start only: these are prefixes, so "smil"

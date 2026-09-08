@@ -1856,6 +1856,39 @@
           { key: "serious", label: "Serious", hint: "Straight-faced and intent.",
             words: ["serious", "stern", "intense", "intently", "focused", "frown", "grim", "unimpressed"] },
         ],
+
+        // Reading the slots off the photographs somebody just uploaded, rather
+        // than making them fill a grid by hand. {slots} is the list above.
+        //
+        // The whole difficulty is in saying no. A model asked which of five
+        // expressions a photograph shows will pick one, because that is what
+        // it was asked; and a half-smile filed under "angry" is exactly the
+        // failure this feature was built to avoid, since a wrong slot is worse
+        // than an empty one. So "none" leads the list, is said to be the usual
+        // answer, and a confidence has to be given — anything under
+        // minConfidence is dropped whatever it claims to be.
+        autoFill: {
+          instruction: "You are sorting photographs of one person by facial expression.\n\nThe expressions being collected are:\n{slots}\n\nFor EACH image, in the order given, decide whether it clearly and unmistakably shows one of those expressions. \"none\" is the right answer for most photographs and is never a failure: an ordinary or neutral face, a faint or ambiguous expression, a face that is turned away, blurred, in shadow, partly covered or too small to read, or any expression not on the list, is \"none\". Do not stretch a photograph to fit a slot, and do not try to fill every slot.\n\nAlso give the face's position in the frame as [x, y, width, height], each a fraction of the image between 0 and 1, x and y being the top-left corner of a box around the head. Give this only when you can see the head clearly; otherwise use null.\n\nReturn ONLY a JSON array with one object per image, in the same order, no markdown and no commentary:\n[{\"i\": 0, \"expression\": \"none\" or one of the keys above, \"confidence\": 0.0 to 1.0, \"face\": [x, y, w, h] or null}]\n\nconfidence is how certain you are of the expression: 1.0 for an unmistakable one, below 0.6 for anything you are talking yourself into.",
+          // Deliberately high. A missed smile costs nothing — the slot stays
+          // empty and the image is generated the way it always was — while a
+          // wrong one is sent to the generator every time that expression comes
+          // up in chat.
+          minConfidence: 0.75,
+          // The head box a vision model gives back is approximately right at
+          // best, so it is grown by this fraction of its own size on each side
+          // before cropping. Head and shoulders is the intended crop; a tight
+          // one that clips her chin is the thing to avoid.
+          padding: 0.45,
+          // Sanity limits on that box, since a box is the part a vision model
+          // is worst at. A face filling a hundredth of the frame is a mistake,
+          // and one filling the whole of it is the model declining to answer.
+          // Outside these the photograph is kept whole rather than cropped.
+          minBoxFraction: 0.01,
+          maxBoxFraction: 0.9,
+          // Longest side of the stored crop, in pixels. Enough for a face; not
+          // a second copy of a phone photograph.
+          maxCropPx: 768,
+        },
       },
 
       proportionGuard: "two arms and two hands per person, no extra limbs, anatomically coherent",

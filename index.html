@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=54"></script>
-  <script src="image-prompt.js?v=25"></script>
+  <script src="site-config.js?v=55"></script>
+  <script src="image-prompt.js?v=26"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -1689,6 +1689,11 @@ const DEFAULT_APPEARANCE = {
 // exactly as they did — their reference is still the clothed image it always
 // was until the body editor converts them.
 const characterAvatar = (c) => (c && (c.avatarImage || c.referenceImage)) || null;
+// An expression slot holds either a bare URL — how the first hand-filled ones
+// were stored — or { url, auto, cropped } once the reader could fill them
+// itself. Everything that displays or sends one goes through here.
+const expressionUrl = (v) => (typeof v === "string" ? v : (v && v.url) || null);
+const expressionIsAuto = (v) => !!(v && typeof v === "object" && v.auto);
 
 const BODY_CFG = (CFG.appearance && CFG.appearance.body) || { fields: [], noneValue: "None", customValue: "Custom" };
 
@@ -2232,6 +2237,132 @@ apparent sex and build rather than leaving it out.`;
     appearance: appearanceFromVision(parsed, current),
     age: Number.isFinite(age) && age >= 18 && age <= 100 ? age : null,
   };
+}
+
+// Crops a face out of an uploaded photograph, client-side, so the expression
+// slot holds a head rather than a whole holiday snap. Works on the data URL
+// rather than the hosted copy on purpose: a remote image taints the canvas and
+// toDataURL then throws, and there is no need to go near that.
+//
+// box is [x, y, w, h] as fractions of the image. Returns null rather than
+// throwing — every caller treats a failed crop as "keep the photograph whole",
+// which is a worse reference but never a wrong one.
+function cropFaceFromDataUrl(dataUrl, box) {
+  const cfg = ((CFG.image || {}).expressions || {}).autoFill || {};
+  return new Promise(resolve => {
+    if (!Array.isArray(box) || box.length !== 4 || box.some(n => typeof n !== "number" || !isFinite(n))) return resolve(null);
+    let [x, y, w, h] = box;
+    // A box a vision model gives back is approximately right at best. Reject
+    // the implausible ones — a face filling a hundredth of the frame is a
+    // mistake, one filling all of it is the model declining to answer — and
+    // grow the rest into a head-and-shoulders crop rather than a tight one
+    // that clips her chin.
+    if (!(w > 0 && h > 0)) return resolve(null);
+    const area = w * h;
+    if (area < (cfg.minBoxFraction ?? 0.01) || area > (cfg.maxBoxFraction ?? 0.9)) return resolve(null);
+    const img = new Image();
+    img.onerror = () => resolve(null);
+    img.onload = () => {
+      try {
+        const pad = cfg.padding ?? 0.45;
+        let px = (x - w * pad) * img.width;
+        let py = (y - h * pad) * img.height;
+        let pw = w * (1 + pad * 2) * img.width;
+        let ph = h * (1 + pad * 2) * img.height;
+        // Clamped to the picture: a padded box runs off the edge on any photo
+        // where the head is near the top, which is most portraits.
+        px = Math.max(0, px); py = Math.max(0, py);
+        pw = Math.min(pw, img.width - px); ph = Math.min(ph, img.height - py);
+        if (pw < 32 || ph < 32) return resolve(null);
+        const max = cfg.maxCropPx ?? 768;
+        const scale = Math.min(1, max / Math.max(pw, ph));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(pw * scale);
+        canvas.height = Math.round(ph * scale);
+        canvas.getContext("2d").drawImage(img, px, py, pw, ph, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.92));
+      } catch (e) { console.warn("Face crop failed:", e.message); resolve(null); }
+    };
+    img.src = dataUrl;
+  });
+}
+
+// Reads uploaded photographs and says which expression slot each one belongs
+// in, or none. Returns one entry per image in the order given, already filtered
+// to the confident answers — see the note in site-config for why saying no is
+// the whole difficulty here.
+async function classifyExpressionPhotos({ dataUrls }) {
+  const cfg = ((CFG.image || {}).expressions || {});
+  const slots = cfg.slots || [];
+  const auto = cfg.autoFill || {};
+  if (!slots.length || !auto.instruction || !dataUrls.length) return [];
+  const slotList = slots.map(sl => `- "${sl.key}": ${sl.hint || sl.label}`).join("\n");
+  const instruction = auto.instruction.replace("{slots}", slotList);
+
+  const raw = (await aiComplete({
+    model: VISION_MODEL,
+    params: { max_tokens: 60 + 60 * dataUrls.length },
+    messages: [{
+      role: "user",
+      content: [
+        { type: "text", text: instruction },
+        ...dataUrls.map(url => ({ type: "image_url", image_url: { url } })),
+      ],
+    }],
+  })).trim();
+
+  const parsed = parseJsonReply(raw);
+  if (!Array.isArray(parsed)) {
+    console.warn("Expression read returned unparseable reply:", raw.slice(0, 200));
+    return [];
+  }
+  const keys = slots.map(sl => sl.key);
+  const min = auto.minConfidence ?? 0.75;
+  return parsed
+    .map(p => ({
+      index: Math.round(Number(p && p.i)),
+      slot: String((p && p.expression) || "none"),
+      confidence: Number(p && p.confidence),
+      box: Array.isArray(p && p.face) ? p.face.map(Number) : null,
+    }))
+    // "none" is a real answer and the common one, so it is dropped here rather
+    // than treated as a failure. An index the model invented is dropped too.
+    .filter(r => keys.includes(r.slot)
+      && Number.isInteger(r.index) && r.index >= 0 && r.index < dataUrls.length
+      && Number.isFinite(r.confidence) && r.confidence >= min);
+}
+
+// Fills the empty expression slots from photographs that were just uploaded.
+// Only the empty ones: a slot filled by hand is an answer, and this is a guess.
+// Where two photographs claim the same slot the more confident one takes it.
+//
+// Returns { filled, labels } — the new slot map and what to tell them was
+// recognised, since a picture that quietly appears in a grid they were not
+// looking at is not something they can disagree with.
+async function autoFillExpressionSlots({ dataUrls, hostedUrls, existing }) {
+  const slots = ((CFG.image || {}).expressions || {}).slots || [];
+  const filled = { ...(existing || {}) };
+  const labels = [];
+  const taken = new Set(Object.keys(filled).filter(k => filled[k]));
+  let results;
+  try { results = await classifyExpressionPhotos({ dataUrls }); }
+  catch (e) { console.warn("Expression read failed:", e.message); return { filled, labels }; }
+
+  for (const r of [...results].sort((a, b) => b.confidence - a.confidence)) {
+    if (taken.has(r.slot)) continue;
+    const dataUrl = dataUrls[r.index];
+    // The crop is the optional half: a box is what a vision model is worst at,
+    // so a crop that does not come back leaves the whole photograph in the
+    // slot rather than losing the recognition with it.
+    const cropped = await cropFaceFromDataUrl(dataUrl, r.box);
+    const url = (cropped && await persistUploadedPhoto(cropped)) || hostedUrls[r.index] || null;
+    if (!url) continue;
+    filled[r.slot] = { url, auto: true, cropped: !!cropped };
+    taken.add(r.slot);
+    const slot = slots.find(sl => sl.key === r.slot);
+    labels.push((slot && slot.label) || r.slot);
+  }
+  return { filled, labels };
 }
 
 async function generateOpeningScenarios({ character, model, settings, exclude = [] }) {
@@ -3460,6 +3591,7 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
   // reaches for when the scene names that expression — see the note in
   // site-config under image.expressions.
   const [expressions, setExpressions] = useState(() => ({ ...(character.expressionPhotos || {}) }));
+  const [exprNote, setExprNote] = useState("");
   const expressionRef = useRef();
   // Which slot the hidden file input is currently filling. Held in a ref
   // rather than state because the change event reads it, and a click that set
@@ -3559,6 +3691,22 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
       // outstanding at the time gets the warning below rather than silence.
       setUsePhotos(true);
       if (hostedUrls.some(u => !u)) setError("Some photos could not be uploaded — they are shown faded and will not be used.");
+
+      // Read the expressions off them while they are here. Nothing is
+      // overwritten and nothing is forced: most photographs come back as none,
+      // which is the honest answer for an ordinary face.
+      setBusy("expressions");
+      const { filled, labels } = await autoFillExpressionSlots({ dataUrls, hostedUrls, existing: expressions });
+      // Merged against the latest state rather than replacing it: a slot filled
+      // by hand during the read is an answer, and this is still only a guess.
+      setExpressions(x => {
+        const next = { ...x };
+        for (const key of Object.keys(filled)) if (!expressionUrl(next[key])) next[key] = filled[key];
+        return next;
+      });
+      setExprNote(labels.length
+        ? `Filled from your photos: ${labels.join(", ")}. Check them below — clear any you disagree with.`
+        : "No clear expressions in those photos, so nothing was filled in. Upload one per slot below if you want them.");
     } catch (err) { setError(err.message); }
     setBusy("");
   };
@@ -3575,7 +3723,8 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
       // only ever useful to the image model, and a picture it cannot fetch
       // would sit in the grid looking filled while doing nothing.
       if (!url) throw new Error("that photo could not be uploaded");
-      setExpressions(x => ({ ...x, [slot]: url }));
+      setExpressions(x => ({ ...x, [slot]: { url, auto: false, cropped: false } }));
+      setExprNote("");
     } catch (err) { setError(err.message); }
     setBusy("");
   };
@@ -3851,13 +4000,17 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
                     <div onClick={() => { if (busy) return; expressionSlot.current = slot.key; expressionRef.current.click(); }}
                       title={slot.hint || slot.label}
                       style={{ width: 72, height: 72, borderRadius: 8, background: "var(--bg3)", cursor: busy ? "default" : "pointer", position: "relative", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", border: expressions[slot.key] ? "2px solid var(--pink)" : "2px dashed var(--bg4, #6664)" }}>
-                      {expressions[slot.key]
-                        ? <img src={expressions[slot.key]} alt={slot.label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      {expressionUrl(expressions[slot.key])
+                        ? <img src={expressionUrl(expressions[slot.key])} alt={slot.label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                         : <span style={{ fontSize: 20, color: "var(--text3)" }}>{busy === `expr:${slot.key}` ? "…" : "+"}</span>}
+                      {expressionIsAuto(expressions[slot.key]) && (
+                        <span title="Recognised from your photos — clear it if it is wrong"
+                          style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.55)", color: "#fff", fontSize: 9, textAlign: "center", letterSpacing: 0.4 }}>AUTO</span>
+                      )}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
                       <span style={{ fontSize: 11, color: "var(--text3)" }}>{slot.label}</span>
-                      {expressions[slot.key] && (
+                      {expressionUrl(expressions[slot.key]) && (
                         <button onClick={() => setExpressions(x => { const next = { ...x }; delete next[slot.key]; return next; })}
                           title="Remove"
                           style={{ border: "none", background: "none", color: "var(--text3)", fontSize: 11, cursor: "pointer", padding: 0 }}>✕</button>
@@ -3867,6 +4020,7 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
                 ))}
               </div>
               <input ref={expressionRef} type="file" accept="image/*" style={{ display: "none" }} onChange={addExpression} />
+              {exprNote && <p style={{ fontSize: 11, color: "var(--text3)", margin: "6px 0 0" }}>{exprNote}</p>}
 
               <div style={S.divider} />
 
@@ -3937,7 +4091,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const safeCharacter = character || null;
   const [form, setForm] = useState(() => safeCharacter ? { ...safeCharacter } : {
     id: Date.now().toString(), lastUsedAt: Date.now(), name: "", persona: "", nsfw: false,
-    referenceImage: null, backgroundImage: null, autoImage: false, sourcePhotos: [],
+    referenceImage: null, backgroundImage: null, autoImage: false, sourcePhotos: [], expressionPhotos: {},
     gender: "Female", customGender: "", sliders: { ...DEFAULT_SLIDERS }, disabledSliders: [],
     age: "", maritalStatus: "", relationship: "", relationshipCustom: "",
     appearance: { ...DEFAULT_APPEARANCE },
@@ -3987,6 +4141,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   // image model can fetch — null while it is still going up, or if it failed.
   const [photos, setPhotos] = useState(() =>
     (safeCharacter && safeCharacter.sourcePhotos || []).map(url => ({ url, hosted: url })));
+  const [exprNote, setExprNote] = useState("");
   const fileRef = useRef();
 
   const handleVibeGenerate = async () => {
@@ -4144,6 +4299,20 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       setAppearanceNote(`Couldn't turn ${dataUrls.length > 1 ? "those photos" : "that photo"} into a base image (${err.message}) — it is being used as-is, so chat images will copy its framing and clothing.`);
     }
     setImgStage("");
+
+    // Sort the same photographs into expression slots while they are here.
+    // Only the clear ones — most faces come back as none — and the result is
+    // shown rather than filed away silently, since a slot they cannot see is
+    // one they cannot disagree with.
+    if (hosted.length) {
+      const { filled, labels } = await autoFillExpressionSlots({
+        dataUrls, hostedUrls, existing: form.expressionPhotos,
+      });
+      if (labels.length) {
+        setForm(f => ({ ...f, expressionPhotos: filled }));
+        setExprNote(`Recognised ${labels.join(", ")} — used when a chat scene calls for that expression. Change them in the appearance editor.`);
+      }
+    }
 
     // The age is still worth reading off the photo: it is not an appearance
     // setting, nothing else can estimate it, and it is offered rather than
@@ -4477,6 +4646,20 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
                     style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6, background: "var(--bg3)", opacity: p.hosted ? 1 : 0.45 }} />
                 ))}
               </div>
+              {!!exprNote && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
+                  {(((CFG.image || {}).expressions || {}).slots || [])
+                    .filter(slot => expressionUrl((form.expressionPhotos || {})[slot.key]))
+                    .map(slot => (
+                      <div key={slot.key} style={{ textAlign: "center" }}>
+                        <img src={expressionUrl(form.expressionPhotos[slot.key])} alt={slot.label}
+                          style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 6, background: "var(--bg3)", display: "block" }} />
+                        <span style={{ fontSize: 10, color: "var(--text3)" }}>{slot.label}</span>
+                      </div>
+                    ))}
+                </div>
+              )}
+              {!!exprNote && <p style={{ fontSize: 11, color: "var(--text3)", margin: "4px 0 0" }}>{exprNote}</p>}
               <p style={{ fontSize: 11, color: "var(--text3)", margin: "4px 0 0" }}>
                 {photos.length > 1
                   ? `${photos.length} photos of her, read together — different angles and lighting describe a face better than one shot does.`
