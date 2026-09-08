@@ -1357,8 +1357,15 @@
         // is the cautious answer: it hides the garment when she is dressed,
         // and a missing garment is a smaller error than one drawn over her
         // clothes.
+        //
+        // Names are the wardrobe owner's, not a taxonomy: a singlet filed
+        // under Underwear was called "white sleeveless top", matched nothing,
+        // and so counted as covering the legs too — which let a pair of jeans
+        // hide it. Hence "top" and the sleeveless words. Within this category
+        // a name containing "top" is a torso garment; the word is only broad
+        // out in the open.
         underwearRegions: [
-          { match: "bra|bralette|bandeau|crop|camisole|vest|corset|bustier", regions: ["torso"] },
+          { match: "bra|bralette|bandeau|crop|camisole|vest|corset|bustier|singlet|sleeveless|tank|under-?shirt|tee|t-shirt|top\\b", regions: ["torso"] },
           { match: "knicker|panty|panties|thong|brief|boxer|short|garter|stocking|tights|hold-?up", regions: ["legs"] },
           { match: "bodysuit|teddy|slip|basque|onesie|union", regions: ["torso", "legs"] },
         ],
