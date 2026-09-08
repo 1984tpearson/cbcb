@@ -1474,9 +1474,20 @@
       // which is what dressing a specific person in specific clothes is.
       model: "seedream-v5-pro-uncensored",
       resolution: "1k",
-      // Wiro caps inputImage at 15 including the reference, and coherence goes
-      // long before that. The character's photograph takes one of these.
+      // Per person, not per shot. Wiro caps inputImage at 15 including the
+      // references, and coherence goes long before that.
       maxGarments: 5,
+      // How many people can be in one photograph. Every extra person is a face
+      // the model has to keep faithful while also composing a scene, and past
+      // three it starts averaging them into each other — which is the one
+      // failure that makes a group shot worthless, because the whole point is
+      // that these particular people are in it.
+      maxCharacters: 3,
+      // The hard ceiling on reference images for the whole shot, people and
+      // garments together. Deliberately shown in the UI rather than enforced
+      // silently: a garment dropped without saying so is one the model was
+      // never told about, and the photograph comes back wrong with no clue why.
+      maxReferenceImages: 8,
       // Full length by default — the studio exists to photograph an outfit on
       // a person, and a portrait crop throws away half of one.
       aspectRatio: "3:4",
@@ -1496,6 +1507,21 @@
       // handle the model has on them: without "the first reference image" it
       // has no way to know which picture is the person and which are clothes.
       promptTemplate: "{framing} photograph of the person in the first reference image{charDesc}. {garments}{pose}{setting}{lighting}{camera}{mood}",
+      // Two people or more is a different prompt, not the same one repeated.
+      // The single-subject template above stays exactly as it was, because
+      // position-based garment matching ("the images after the first are the
+      // garments") is the most reliable thing this model does and there is no
+      // reason to spend that reliability on shots that do not need it.
+      //
+      // With several people the positions stop being unambiguous — image four
+      // could be person two or person one's coat — so each person is named,
+      // their photograph is pointed at by position, and their clothes are named
+      // in words against their name. Less precise about fabric than the solo
+      // path, and the only version that reliably puts the right coat on the
+      // right person.
+      groupPromptTemplate: "{framing} photograph of {count} people together.{subjects} {garments}{together}{setting}{lighting}{camera}{mood}",
+      // first, second, third… as far as maxCharacters can reach.
+      ordinals: ["first", "second", "third", "fourth", "fifth", "sixth"],
       // Each clause and how it is worded once something is chosen for it. The
       // wording lives with the field so a new option never needs a code change.
       clauses: {
@@ -1505,6 +1531,20 @@
         // every time.
         garmentsNone: "They are dressed as they are in the reference image.",
         pose: " They are {v}.",
+        // One sentence per person in a group shot: who they are, which
+        // photograph is them, and what they are doing. Their pose rides in
+        // here rather than in a clause of its own, because in a group shot a
+        // pose belongs to a person and not to the photograph.
+        subject: " The {ordinal} reference image is {name}{charDesc}{pose}.",
+        subjectPose: ", {v}",
+        garmentsGroupWorn: "The remaining reference images are garments, photographed flat: {v}. Dress each person in the garments listed against their name, matching colour, cut, fabric and detailing precisely.",
+        // Said out loud rather than left silent, for the same reason as the
+        // solo case: told nothing, the model dresses them however it likes.
+        garmentsGroupNone: "Everyone is dressed as they are in their own reference image.",
+        // Some chosen, some not. Without this the people with no garments
+        // quietly become the model's invention.
+        garmentsGroupRest: " Everyone not listed is dressed as they are in their own reference image.",
+        together: " Together they are {v}.",
         setting: " The setting is {v}.",
         lighting: " Lit by {v}.",
         camera: " Shot on {v}.",
@@ -1595,6 +1635,23 @@
         { id: "documentary", label: "Documentary", text: "plain documentary, nothing styled" },
         { id: "cinematic", label: "Cinematic", text: "cinematic, like a film still" },
         { id: "dreamy", label: "Dreamy", text: "dreamy and soft, gentle haze" },
+      ],
+
+      // How the people in a group shot relate to each other. Only ever asked
+      // for when there is more than one person, so there is no default: two
+      // people standing in a room are doing something, and guessing what is
+      // how you get a stock photograph.
+      interactions: [
+        { id: "side-by-side", label: "Side by side", text: "standing side by side facing the camera" },
+        { id: "arm-in-arm", label: "Arm in arm", text: "standing arm in arm, close together" },
+        { id: "embracing", label: "Embracing", text: "holding each other, one resting their head on the other" },
+        { id: "talking", label: "Talking", text: "turned towards each other mid-conversation, ignoring the camera" },
+        { id: "laughing", label: "Laughing", text: "laughing together at something out of frame" },
+        { id: "back-to-back", label: "Back to back", text: "standing back to back, both facing the camera" },
+        { id: "one-behind", label: "One behind", text: "one standing behind the other, arms around their waist" },
+        { id: "sitting-together", label: "Sitting together", text: "sitting together on the same seat, leaning in" },
+        { id: "walking-together", label: "Walking together", text: "walking together towards the camera in step" },
+        { id: "apart", label: "Apart", text: "standing apart from each other, not touching" },
       ],
 
       // What a fresh visit starts on. Chosen to be the shot you would take if

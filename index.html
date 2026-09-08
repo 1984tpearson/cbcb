@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=49"></script>
+  <script src="site-config.js?v=50"></script>
   <script src="image-prompt.js?v=25"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -2486,6 +2486,21 @@ function ClosetPicker({ selected, onChange, onClose }) {
   const chosen = new Set(selected);
   const toggle = (id) => onChange(chosen.has(id) ? selected.filter(x => x !== id) : [...selected, id]);
 
+  // Config order, so the headings appear in the same sequence every time
+  // rather than shuffling as the wardrobe fills up — the same rule the
+  // wardrobe page's own picker follows, so the two are not two different
+  // orderings of the same clothes. Categories the config no longer lists
+  // still get a block: a garment under a retired category is not a garment
+  // that should become invisible.
+  const groupedShown = (() => {
+    const known = (CFG.wardrobe.categories || []).filter(c => shown.some(g => g.category === c));
+    const rest = [...new Set(shown.map(g => g.category).filter(c => !known.includes(c)))].sort();
+    return [...known, ...rest].map(c => ({
+      category: c || "Uncategorised",
+      garments: shown.filter(g => (g.category || "") === (c || "")),
+    })).filter(x => x.garments.length);
+  })();
+
   return (
     <div style={S.overlay}>
       <div style={{ ...S.modal, maxWidth: 560 }}>
@@ -2516,21 +2531,47 @@ function ClosetPicker({ selected, onChange, onClose }) {
                   </select>
                 )}
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 8, marginTop: 12 }}>
-                {shown.map(g => {
-                  const on = chosen.has(g.id);
-                  return (
-                    <button key={g.id} onClick={() => toggle(g.id)} title={g.description || g.name}
-                      style={{ padding: 0, background: "var(--bg3)", cursor: "pointer", borderRadius: 10, overflow: "hidden",
-                        border: on ? "2px solid var(--pink)" : "1px solid var(--border2)", textAlign: "left" }}>
-                      <img src={g.image} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
-                      <div style={{ fontSize: 11, fontWeight: 700, color: on ? "var(--pink)" : "var(--text2)", padding: "5px 6px" }}>
-                        {g.name || "Untitled"}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+              {/* Grouped under a heading per category rather than one long
+                  grid. A wardrobe is not a flat list once it has more than a
+                  screenful in it: "the boots" is found by looking under Shoes,
+                  and a heading is what makes that possible without first
+                  narrowing the whole picker down to one category and then
+                  having to widen it again for the next garment.
+
+                  The dropdown above stays — a filter and a grouping answer
+                  different questions, and the filter is still the faster route
+                  when you already know you only want one category. */}
+              {groupedShown.map(({ category, garments }) => (
+                <div key={category} style={{ marginTop: 14 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
+                    <span style={{ ...S.label, marginTop: 0 }}>{category}</span>
+                    <span style={{ fontSize: 11, color: "var(--text4)", fontWeight: 700 }}>
+                      {/* How many of this category are on, not just how many
+                          exist — chosen garments scroll out of sight, and a
+                          count that only says "8" cannot tell you that two of
+                          them are already picked. */}
+                      {garments.filter(g => chosen.has(g.id)).length
+                        ? garments.filter(g => chosen.has(g.id)).length + " chosen · " + garments.length
+                        : garments.length}
+                    </span>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 8 }}>
+                    {garments.map(g => {
+                      const on = chosen.has(g.id);
+                      return (
+                        <button key={g.id} onClick={() => toggle(g.id)} title={g.description || g.name}
+                          style={{ padding: 0, background: "var(--bg3)", cursor: "pointer", borderRadius: 10, overflow: "hidden",
+                            border: on ? "2px solid var(--pink)" : "1px solid var(--border2)", textAlign: "left" }}>
+                          <img src={g.image} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+                          <div style={{ fontSize: 11, fontWeight: 700, color: on ? "var(--pink)" : "var(--text2)", padding: "5px 6px" }}>
+                            {g.name || "Untitled"}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
               {shown.length === 0 && <p style={{ fontSize: 13, color: "var(--text3)", marginTop: 10 }}>Nothing matches that.</p>}
             </>
           )}
@@ -6003,12 +6044,13 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 // ─── PHOTO STUDIO ────────────────────────────────────────────────────────────
 // The fitting room in wardrobe.html answers one question — does this outfit
-// work — and is built to ask nothing else: plain backdrop, one pose, no
+// work — and is built to ask nothing else: plain backdrop, one pose, no other
 // choices to get wrong. This is the other half of that. Same method (the
-// character's reference photograph and the garment flat lays handed to the
+// characters' reference photographs and the garment flat lays handed to the
 // model together, which is the only way to put specific clothes on a specific
 // person) with the rest of the photograph opened up: pose, surroundings,
-// lighting, framing, lens and mood.
+// lighting, framing, lens and mood — and, when more than one person is in it,
+// how they are with each other.
 //
 // It lives here rather than over there because the subject is a character, and
 // characters live in this app — with their closet, their reference image and
@@ -6028,35 +6070,95 @@ function studioChoiceText(list, choice) {
   return opt ? opt.text : "";
 }
 
+// Age, gender and height only, from the same function the chat path uses. The
+// reference image says how they look, and saying it again in words cannot make
+// the picture more like itself.
+function studioCharDesc(character) {
+  try { return buildChatCharDesc(character) || ""; } catch { return ""; }
+}
+
+// In a group shot a person needs a handle the model can attach clothes to, and
+// an unnamed character has none. "the second person" is a poor name but it is
+// a stable one, which is the whole requirement.
+function studioSubjectName(subject, i) {
+  const cfg = studioCfg();
+  return (subject.character.name || "").trim() ||
+    ("the " + (cfg.ordinals[i] || "next") + " person");
+}
+
+const studioGarmentText = (garments, sep) =>
+  garments.map(g => g.description || g.name).filter(Boolean).join(sep || "; ");
+
 // Clauses whose value is empty drop out whole, so an unset lighting leaves no
 // trace rather than "Lit by ." — the one failure mode of a template with holes
 // in it, and the model renders an empty clause as literally as a full one.
-function buildStudioPrompt({ character, garments, choices }) {
+function buildStudioPrompt({ subjects, choices }) {
   const cfg = studioCfg();
   const c = cfg.clauses;
-  const charDesc = (() => {
-    // Age, gender and height only, from the same function the chat path uses.
-    // The reference image says how they look, and saying it again in words
-    // cannot make the picture more like itself.
-    try { return buildChatCharDesc(character) || ""; } catch { return ""; }
-  })();
-
-  const garmentText = garments.map(g => g.description || g.name).filter(Boolean).join("; ");
   const fill = (tpl, v) => (v ? tpl.replace("{v}", v) : "");
+  const framing = studioChoiceText(cfg.framings, choices.framing);
 
-  const body = fillTemplate(cfg.promptTemplate, {
-    // Empty rather than a stand-in word: the template reads "{framing}
-    // photograph", so a fallback of "Photograph" gives "Photograph photograph".
-    // The leading gap it leaves is closed by the whitespace collapse below.
-    framing: studioChoiceText(cfg.framings, choices.framing),
-    charDesc: charDesc ? ", " + charDesc : "",
-    garments: garmentText ? fill(c.garmentsWorn, garmentText) : c.garmentsNone,
-    pose: fill(c.pose, studioChoiceText(cfg.poses, choices.pose)),
+  // Shared by both templates: these describe the photograph, not the people in
+  // it, so they do not change when a second person walks into frame.
+  const shared = {
+    framing,
     setting: fill(c.setting, studioChoiceText(cfg.settings, choices.setting)),
     lighting: fill(c.lighting, studioChoiceText(cfg.lighting, choices.lighting)),
     camera: fill(c.camera, studioChoiceText(cfg.cameras, choices.camera)),
     mood: fill(c.mood, studioChoiceText(cfg.moods, choices.mood)),
-  });
+  };
+
+  let body;
+  if (subjects.length === 1) {
+    // Unchanged from the single-subject original on purpose. Position-based
+    // garment matching — "the images after the first are the garments" — is the
+    // most reliable thing this model does, and there is no reason to spend that
+    // reliability on shots that do not need it.
+    const s = subjects[0];
+    const garmentText = studioGarmentText(s.garments);
+    body = fillTemplate(cfg.promptTemplate, {
+      ...shared,
+      charDesc: (d => d ? ", " + d : "")(studioCharDesc(s.character)),
+      garments: garmentText ? fill(c.garmentsWorn, garmentText) : c.garmentsNone,
+      pose: fill(c.pose, studioChoiceText(cfg.poses, s.pose)),
+    });
+  } else {
+    // With several people the positions stop being unambiguous — reference
+    // image four could be person two or person one's coat — so each person is
+    // named, their photograph is pointed at by position, and their clothes are
+    // named in words against their name.
+    const subjectLines = subjects.map((s, i) => fillTemplate(c.subject, {
+      ordinal: cfg.ordinals[i] || "next",
+      name: studioSubjectName(s, i),
+      charDesc: (d => d ? ", " + d : "")(studioCharDesc(s.character)),
+      pose: fill(c.subjectPose, studioChoiceText(cfg.poses, s.pose)),
+    })).join("");
+
+    // Two separators doing two different jobs. With one separator for both,
+    // "Anna wears a red dress; black heels; Ben wears a coat" leaves the heels
+    // sitting between the two names with nothing to say whose they are — which
+    // is the single thing this whole branch exists to make unambiguous.
+    const dressed = subjects
+      .map((s, i) => ({ name: studioSubjectName(s, i), text: studioGarmentText(s.garments, ", ") }))
+      .filter(x => x.text);
+    let garments;
+    if (!dressed.length) {
+      garments = c.garmentsGroupNone;
+    } else {
+      garments = fill(c.garmentsGroupWorn, dressed.map(x => x.name + " wears " + x.text).join(". "));
+      // Some chosen and some not is the common case, and the people with no
+      // garments quietly become the model's invention without this.
+      if (dressed.length < subjects.length) garments += c.garmentsGroupRest;
+    }
+
+    body = fillTemplate(cfg.groupPromptTemplate, {
+      ...shared,
+      count: subjects.length,
+      subjects: subjectLines,
+      garments,
+      together: fill(c.together, studioChoiceText(cfg.interactions, choices.together)),
+    });
+  }
 
   // Typed as a sentence fragment far more often than as a sentence, so it gets
   // the full stop it needs to not run into the style modifiers behind it.
@@ -6066,14 +6168,24 @@ function buildStudioPrompt({ character, garments, choices }) {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+// The people first, in the order the prompt names them, then everyone's
+// garments behind them — which is what "the remaining reference images are
+// garments" means and the order it has to be true in.
+function studioReferenceImages(subjects) {
+  return [
+    ...subjects.map(s => s.character.referenceImage),
+    ...subjects.flatMap(s => s.garments.map(g => g.image)),
+  ].filter(Boolean);
+}
+
 // One row of chips plus a Custom chip that opens a text box. "None" is a real
 // choice and not the same as custom-but-empty: it says leave this out of the
 // prompt entirely, which for lighting or setting is often what you want.
-function StudioChoiceRow({ label, options, value, onChange }) {
+function StudioChoiceRow({ label, options, value, onChange, compact }) {
   const isCustom = value && value.id === STUDIO_CUSTOM;
   const pick = (id) => onChange(id === (value && value.id) ? { id: "" } : { id, custom: (value && value.custom) || "" });
   return (
-    <div style={{ marginBottom: 14 }}>
+    <div style={{ marginBottom: compact ? 0 : 14 }}>
       <span style={S.label}>{label}</span>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
         {options.map(o => (
@@ -6092,19 +6204,120 @@ function StudioChoiceRow({ label, options, value, onChange }) {
   );
 }
 
+// One person in the shot: their clothes and their pose. A pose belongs to a
+// person rather than to the photograph, which is why it sits in here and not
+// with the lighting — two people in one frame are rarely doing the same thing.
+function StudioSubjectCard({ subject, index, count, library, onChange, onRemove, budgetLeft }) {
+  const cfg = studioCfg();
+  const [showPicker, setShowPicker] = useState(false);
+  const [capNote, setCapNote] = useState("");
+  const c = subject.character;
+  const garments = library ? closetGarments({ closet: subject.closet }, library).filter(g => g.image) : [];
+
+  // Grouped by category, the same as the picker. A row of eleven thumbnails is
+  // a row you count rather than read; under headings it says what they are
+  // wearing on their top half without opening anything.
+  const grouped = (() => {
+    const known = (CFG.wardrobe.categories || []).filter(k => garments.some(g => g.category === k));
+    const rest = [...new Set(garments.map(g => g.category).filter(k => !known.includes(k)))].sort();
+    return [...known, ...rest]
+      .map(k => ({ category: k || "Uncategorised", items: garments.filter(g => (g.category || "") === (k || "")) }))
+      .filter(x => x.items.length);
+  })();
+
+  const choose = (ids) => {
+    if (ids.length > cfg.maxGarments) {
+      // A cap rather than silently dropping the extra: every garment is another
+      // reference image the model has to stay faithful to while also composing
+      // a person, and past a handful it stops managing either.
+      setCapNote("That is as many as one person can wear at once (" + cfg.maxGarments + ").");
+      return;
+    }
+    if (ids.length > subject.closet.length && budgetLeft <= 0) {
+      setCapNote("That is the most reference images one photograph can hold (" + cfg.maxReferenceImages + ").");
+      return;
+    }
+    setCapNote("");
+    onChange({ ...subject, closet: ids });
+  };
+
+  return (
+    <div style={S.studioSubject}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+        {characterAvatar(c)
+          ? <img src={characterAvatar(c)} alt="" style={{ width: 44, height: 44, borderRadius: "50%", objectFit: "cover", border: "2px solid var(--pink-light)" }} />
+          : <div style={{ width: 44, height: 44, borderRadius: "50%", background: "var(--bg3)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, color: "var(--pink)" }}>{(c.name || "?").slice(0, 1).toUpperCase()}</div>}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", display: "block" }}>{c.name || "Unnamed"}</span>
+          {count > 1 && (
+            // Which reference image they are, said out loud. It is the handle
+            // the prompt uses for them, and when a shot comes back with the
+            // wrong coat on the wrong person this is the line that explains it.
+            <span style={{ fontSize: 11, color: "var(--text4)", fontWeight: 700 }}>
+              {(cfg.ordinals[index] || "next")} reference image
+            </span>
+          )}
+        </div>
+        {count > 1 && <button style={S.iconBtn} title="Take them out of the shot" onClick={onRemove}>✕</button>}
+      </div>
+
+      {!c.referenceImage && (
+        <p style={{ fontSize: 12, color: "#c04060", fontWeight: 700, margin: "0 0 8px" }}>
+          No base image — make one in their appearance editor first.
+        </p>
+      )}
+
+      <span style={S.label}>Wearing</span>
+      <p style={{ fontSize: 12, color: "var(--text3)", margin: "6px 0 8px" }}>
+        {garments.length
+          ? garments.length + " of " + cfg.maxGarments + " chosen."
+          : "Nothing chosen — dressed as they are in their base image."}
+      </p>
+      {library === null && <p style={{ fontSize: 12, color: "var(--text3)" }}>Loading the wardrobe…</p>}
+      {grouped.map(({ category, items }) => (
+        <div key={category} style={{ marginBottom: 8 }}>
+          <span style={{ fontSize: 10, color: "var(--text4)", fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase" }}>{category}</span>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+            {items.map(g => (
+              <button key={g.id} onClick={() => choose(subject.closet.filter(x => x !== g.id))}
+                title={"Take off " + (g.name || "this")} style={S.studioGarment}>
+                <img src={g.image} alt="" style={{ width: 64, height: 64, objectFit: "cover", display: "block" }} />
+                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text2)", padding: "3px 4px", display: "block" }}>{g.name || "Untitled"}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+      <button style={{ ...S.btnSecondary, marginTop: 4 }} onClick={() => setShowPicker(true)}>Choose clothes</button>
+      {capNote && <p style={{ fontSize: 12, color: "#c04060", fontWeight: 700, marginTop: 8 }}>{capNote}</p>}
+
+      <div style={{ marginTop: 12 }}>
+        <StudioChoiceRow label="Pose" options={cfg.poses} value={subject.pose} compact
+          onChange={v => onChange({ ...subject, pose: v })} />
+      </div>
+
+      {showPicker && (
+        <ClosetPicker selected={subject.closet} onChange={choose} onClose={() => setShowPicker(false)} />
+      )}
+    </div>
+  );
+}
+
 function PhotoStudio({ characters, onBack }) {
   const cfg = studioCfg();
-  const withBase = characters.filter(c => c.referenceImage);
-  const [charId, setCharId] = useState(() => (withBase[0] ? withBase[0].id : (characters[0] ? characters[0].id : null)));
   const [library, setLibrary] = useState(null);
-  const [closet, setCloset] = useState([]);
-  const [showPicker, setShowPicker] = useState(false);
+  // Ordered, and the order is load-bearing: it is the order the reference
+  // images go in and the order the prompt names people in.
+  const [subjects, setSubjects] = useState(() => {
+    const first = characters.find(c => c.referenceImage) || characters[0];
+    return first ? [{ charId: first.id, closet: [], pose: { id: (cfg.defaults || {}).pose || "" } }] : [];
+  });
   const [choices, setChoices] = useState(() => {
     const d = cfg.defaults || {};
     return {
-      pose: { id: d.pose || "" }, setting: { id: d.setting || "" },
-      lighting: { id: d.lighting || "" }, framing: { id: d.framing || "" },
-      camera: { id: d.camera || "" }, mood: { id: d.mood || "" }, notes: "",
+      setting: { id: d.setting || "" }, lighting: { id: d.lighting || "" },
+      framing: { id: d.framing || "" }, camera: { id: d.camera || "" },
+      mood: { id: d.mood || "" }, together: { id: "" }, notes: "",
     };
   });
   const [aspect, setAspect] = useState(cfg.aspectRatio);
@@ -6114,8 +6327,6 @@ function PhotoStudio({ characters, onBack }) {
   const [error, setError] = useState("");
   const [shots, setShots] = useState([]);
 
-  const character = characters.find(c => c.id === charId) || null;
-
   useEffect(() => {
     let live = true;
     loadWardrobeLibrary().then(items => { if (live) setLibrary(items); })
@@ -6123,64 +6334,76 @@ function PhotoStudio({ characters, onBack }) {
     return () => { live = false; };
   }, []);
 
-  // Starting from what they are already wearing, rather than from nothing:
-  // the wardrobe already knows, and re-picking the same five garments is the
-  // tapping the closet exists to remove. Still only a starting point — every
-  // one of them can be taken off again.
-  useEffect(() => {
-    if (!character) { setCloset([]); return; }
-    const worn = Array.isArray(character.worn) ? character.worn : [];
-    setCloset(worn.slice(0, cfg.maxGarments));
-  }, [charId]);
+  // The subject rows resolved against the real characters and the real
+  // wardrobe. A character deleted while the studio is open drops out rather
+  // than becoming a row with nothing in it.
+  const resolved = subjects
+    .map(s => ({ ...s, character: characters.find(c => c.id === s.charId) }))
+    .filter(s => s.character)
+    .map(s => ({ ...s, garments: library ? closetGarments({ closet: s.closet }, library).filter(g => g.image) : [] }));
 
-  const garments = library ? closetGarments({ closet }, library).filter(g => g.image) : [];
-  const prompt = character ? buildStudioPrompt({ character, garments, choices }) : "";
+  const inShot = new Set(resolved.map(s => s.charId));
+  const refCount = resolved.length + resolved.reduce((n, s) => n + s.garments.length, 0);
+  const budgetLeft = cfg.maxReferenceImages - refCount;
+  const missingBase = resolved.filter(s => !s.character.referenceImage);
+  const prompt = resolved.length ? buildStudioPrompt({ subjects: resolved, choices }) : "";
 
-  const setChoice = (key) => (v) => setChoices(prev => ({ ...prev, [key]: v }));
-
-  const chooseGarments = (ids) => {
-    if (ids.length > cfg.maxGarments) {
-      // A cap rather than silently dropping the extra: every garment is another
-      // reference image the model has to stay faithful to while also composing
-      // a person, and past a handful it stops managing either.
-      setStatus("That is as many as it can wear at once (" + cfg.maxGarments + ").");
+  const addSubject = (id) => {
+    if (subjects.length >= cfg.maxCharacters) {
+      setStatus("That is as many people as one photograph can hold (" + cfg.maxCharacters + ").");
+      return;
+    }
+    if (budgetLeft <= 0) {
+      setStatus("That is the most reference images one photograph can hold (" + cfg.maxReferenceImages + ").");
       return;
     }
     setStatus("");
-    setCloset(ids);
+    setSubjects(prev => [...prev, { charId: id, closet: [], pose: { id: (cfg.defaults || {}).pose || "" } }]);
   };
 
+  const updateSubject = (i, next) => setSubjects(prev => prev.map((s, j) => j === i ? next : s));
+  const removeSubject = (i) => setSubjects(prev => prev.filter((_, j) => j !== i));
+
+  const setChoice = (key) => (v) => setChoices(prev => ({ ...prev, [key]: v }));
+
   const generate = async () => {
-    if (!character || !character.referenceImage) {
-      setError((character ? character.name : "That character") + " has no base image to photograph.");
+    if (!resolved.length) { setError("Pick somebody to photograph."); return; }
+    if (missingBase.length) {
+      setError(missingBase.map(s => s.character.name || "One of them").join(" and ") +
+        " has no base image to photograph.");
       return;
     }
-    setBusy(true); setError(""); setStatus("Taking the photograph… this takes a minute.");
+    setBusy(true); setError("");
+    setStatus(resolved.length > 1
+      ? "Taking the photograph of " + resolved.length + " people… this takes a minute."
+      : "Taking the photograph… this takes a minute.");
     try {
       const url = await generateImageWiro({
         prompt,
         model: cfg.model,
         resolution: cfg.resolution,
         aspectRatio: aspect,
-        // The person first, the garment flat lays after — the order the prompt
-        // names them in, and the same list the fitting room and the chat path
-        // build. Wiro takes a comma-joined list here.
-        initImage: joinReferenceImages([character.referenceImage, ...garments.map(g => g.image)]),
+        // Wiro takes a comma-joined list here — people first, garments after,
+        // which is the order the prompt refers to them in.
+        initImage: studioReferenceImages(resolved).join(","),
         // Worth recovering: a studio shot is one you set going and then put the
-        // phone down on.
-        track: { characterId: character.id, label: "Photo studio" },
+        // phone down on. Only one gallery can be named for a recovery, so it is
+        // the first person in the shot — the one the prompt is built around.
+        track: { characterId: resolved[0].charId, label: "Photo studio" },
       });
-      setShots(s => [{ url, prompt }, ...s]);
+      setShots(s => [{ url, prompt, names: resolved.map((x, i) => studioSubjectName(x, i)) }, ...s]);
       setStatus("");
-      // Straight into their gallery, which is where the app already looks for
-      // pictures of them — a studio shot nobody can find from the chat is one
-      // that was not worth taking.
-      try {
-        const gallery = await dataApi.getGallery(character.id);
-        await dataApi.saveGallery(character.id, [{ url, prompt, date: Date.now() }, ...gallery].slice(0, GALLERY_LIMIT));
-      } catch (e) {
-        setError("Photo taken, but saving it to the gallery failed: " + e.message);
+      // Into the gallery of everybody in it. A group shot filed under one
+      // person is a picture the others can never find, and the gallery is
+      // where the app already looks for pictures of someone.
+      const failed = [];
+      for (const s of resolved) {
+        try {
+          const gallery = await dataApi.getGallery(s.charId);
+          await dataApi.saveGallery(s.charId, [{ url, prompt, date: Date.now() }, ...gallery].slice(0, GALLERY_LIMIT));
+        } catch { failed.push(s.character.name || "one of them"); }
       }
+      if (failed.length) setError("Photo taken, but saving it to the gallery of " + failed.join(" and ") + " failed.");
     } catch (e) {
       setError(e.message); setStatus("");
     }
@@ -6201,13 +6424,23 @@ function PhotoStudio({ characters, onBack }) {
         <div style={S.studioCard}>
           <h3 style={S.studioHeading}>Who</h3>
           {characters.length === 0 && <p style={{ fontSize: 13, color: "var(--text3)" }}>No characters yet.</p>}
+          <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 8px" }}>
+            {"Tap to add or remove. Up to " + cfg.maxCharacters + " people in one shot" +
+              (resolved.length ? " — " + resolved.length + " in it now." : ".")}
+          </p>
           <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
             {characters.map(c => {
-              const on = c.id === charId;
+              const on = inShot.has(c.id);
+              // Characters without a base image are marked rather than left
+              // out: one missing from the row looks like one gone missing.
               return (
-                // Characters without a base image are marked rather than left
-                // out: one missing from the row looks like one gone missing.
-                <button key={c.id} onClick={() => setCharId(c.id)} title={c.name || ""}
+                <button key={c.id} title={c.name || ""}
+                  // A plain toggle in both directions, including down to
+                  // nobody. Anything cleverer — tap-to-swap while one person is
+                  // in the shot, tap-to-add once there are two — means the same
+                  // tap does two different things depending on state, and the
+                  // one it does is the one you were not expecting.
+                  onClick={() => on ? removeSubject(subjects.findIndex(x => x.charId === c.id)) : addSubject(c.id)}
                   style={{ ...S.studioTile, borderColor: on ? "var(--pink)" : "var(--border2)",
                     opacity: c.referenceImage ? 1 : 0.45 }}>
                   {characterAvatar(c)
@@ -6220,37 +6453,33 @@ function PhotoStudio({ characters, onBack }) {
               );
             })}
           </div>
-          {character && !character.referenceImage && (
-            <p style={{ fontSize: 12, color: "#c04060", fontWeight: 700, marginTop: 6 }}>
-              {(character.name || "They")} has no base image — make one in their appearance editor first.
-            </p>
-          )}
+          {/* The budget, always visible. It is the one limit that silently
+              ruins a shot — a garment past the ceiling is one the model was
+              never sent, and the photograph comes back missing it with no
+              clue why. */}
+          <p style={{ fontSize: 11, color: budgetLeft <= 0 ? "#c04060" : "var(--text4)", fontWeight: 700, marginTop: 8 }}>
+            {refCount} of {cfg.maxReferenceImages} reference images used
+            {" — "}{resolved.length} {resolved.length === 1 ? "person" : "people"}
+            {", "}{refCount - resolved.length} garment{refCount - resolved.length === 1 ? "" : "s"}.
+          </p>
+          {status && <p style={{ fontSize: 12, color: "#c04060", fontWeight: 700, marginTop: 4 }}>{status}</p>}
         </div>
 
-        <div style={S.studioCard}>
-          <h3 style={S.studioHeading}>What they wear</h3>
-          <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 8px" }}>
-            {garments.length
-              ? garments.length + " of " + cfg.maxGarments + " chosen."
-              : "Nothing chosen — they will be dressed as they are in their base image."}
-          </p>
-          {library === null && <p style={{ fontSize: 13, color: "var(--text3)" }}>Loading the wardrobe…</p>}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {garments.map(g => (
-              <button key={g.id} onClick={() => setCloset(closet.filter(x => x !== g.id))}
-                title={"Take off " + (g.name || "this")} style={S.studioGarment}>
-                <img src={g.image} alt="" style={{ width: 64, height: 64, objectFit: "cover", display: "block" }} />
-                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text2)", padding: "3px 4px", display: "block" }}>{g.name || "Untitled"}</span>
-              </button>
-            ))}
-          </div>
-          <button style={{ ...S.btnSecondary, marginTop: 10 }} onClick={() => setShowPicker(true)}>Choose clothes</button>
-          {status && <p style={{ fontSize: 12, color: "#c04060", fontWeight: 700, marginTop: 8 }}>{status}</p>}
-        </div>
+        {resolved.map((s, i) => (
+          <StudioSubjectCard key={s.charId} subject={s} index={i} count={resolved.length}
+            library={library} budgetLeft={budgetLeft}
+            onChange={next => updateSubject(i, { charId: next.charId, closet: next.closet, pose: next.pose })}
+            onRemove={() => removeSubject(i)} />
+        ))}
 
         <div style={S.studioCard}>
           <h3 style={S.studioHeading}>The photograph</h3>
-          <StudioChoiceRow label="Pose" options={cfg.poses} value={choices.pose} onChange={setChoice("pose")} />
+          {/* Only asked for when there is more than one person: two people
+              standing in a room are doing something, and there is no sensible
+              default for what. */}
+          {resolved.length > 1 && (
+            <StudioChoiceRow label="Together" options={cfg.interactions} value={choices.together} onChange={setChoice("together")} />
+          )}
           <StudioChoiceRow label="Surroundings" options={cfg.settings} value={choices.setting} onChange={setChoice("setting")} />
           <StudioChoiceRow label="Lighting" options={cfg.lighting} value={choices.lighting} onChange={setChoice("lighting")} />
           <StudioChoiceRow label="Framing" options={cfg.framings} value={choices.framing} onChange={setChoice("framing")} />
@@ -6270,8 +6499,8 @@ function PhotoStudio({ characters, onBack }) {
         </div>
 
         <div style={S.studioCard}>
-          <button style={{ ...S.btnPrimary, width: "100%", padding: "14px 22px", fontSize: 15, opacity: busy || !character ? 0.6 : 1 }}
-            disabled={busy || !character} onClick={generate}>
+          <button style={{ ...S.btnPrimary, width: "100%", padding: "14px 22px", fontSize: 15, opacity: busy || !resolved.length ? 0.6 : 1 }}
+            disabled={busy || !resolved.length} onClick={generate}>
             {busy ? "Taking the photograph…" : "Take the photograph"}
           </button>
           {status && !error && <p style={{ fontSize: 12, color: "var(--text3)", marginTop: 8, textAlign: "center" }}>{status}</p>}
@@ -6290,7 +6519,7 @@ function PhotoStudio({ characters, onBack }) {
           <div style={S.studioCard}>
             <h3 style={S.studioHeading}>Contact sheet</h3>
             <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 10px" }}>
-              Saved to {character ? (character.name || "their") + "’s" : "their"} gallery as they are taken.
+              Saved to the gallery of everyone in them as they are taken.
             </p>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 10 }}>
               {shots.map((s, i) => (
@@ -6302,9 +6531,6 @@ function PhotoStudio({ characters, onBack }) {
           </div>
         )}
       </main>
-      {showPicker && (
-        <ClosetPicker selected={closet} onChange={chooseGarments} onClose={() => setShowPicker(false)} />
-      )}
     </div>
   );
 }
@@ -6559,6 +6785,7 @@ const S = {
   studioCard: { background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:16, padding:"16px 18px", marginBottom:16, boxShadow:"0 2px 8px var(--shadow)" },
   studioHeading: { fontSize:15, fontWeight:800, color:"var(--pink)", margin:"0 0 10px" },
   studioTile: { flex:"0 0 92px", width:92, padding:0, background:"var(--bg3)", borderRadius:12, overflow:"hidden", cursor:"pointer", border:"2px solid var(--border2)", textAlign:"center" },
+  studioSubject: { background:"var(--bg2)", border:"1px solid var(--pink-border)", borderRadius:16, padding:"14px 16px", marginBottom:16, boxShadow:"0 2px 8px var(--shadow)" },
   studioGarment: { padding:0, background:"var(--bg3)", border:"1px solid var(--border2)", borderRadius:10, overflow:"hidden", cursor:"pointer", width:64 },
   studioChip: { background:"var(--bg3)", border:"1px solid var(--border2)", color:"var(--text2)", borderRadius:16, padding:"6px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" },
   studioChipOn: { background:"var(--pink)", border:"1px solid var(--pink)", color:"#fff", borderRadius:16, padding:"6px 12px", cursor:"pointer", fontSize:12, fontWeight:800, fontFamily:"inherit", boxShadow:"0 2px 8px var(--shadow)" },
