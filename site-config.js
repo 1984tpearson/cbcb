@@ -1567,6 +1567,45 @@
       // row as a JSON array and is rewritten whole on every new image.
       galleryLimit: 200,
 
+      // Photographs of the real person pulling one expression, attached to a
+      // chat image when the scene calls for that expression.
+      //
+      // The problem they solve: the base image is a neutral, mid-thigh studio
+      // shot, so it is the only account of the face the generator has ever
+      // seen. Asked for a smile, it has to invent one, and it invents a
+      // generic one — the smile is the model's, over her geometry. No wording
+      // fixes that, because the words are not what is missing. A photograph of
+      // her actually smiling is.
+      //
+      // Fixed slots rather than free tags, so choosing one is a lookup rather
+      // than another model call. words are matched against the extracted
+      // scene, which already names the expression, at a word boundary and as
+      // prefixes: "smil" catches smiles, smiling and smiled.
+      //
+      // Neighbours deliberately share a slot — a laugh is a smile at a higher
+      // volume and the same muscles, so one photograph covers both. Nothing
+      // crosses between slots: attaching an angry photograph to a smiling
+      // scene would be worse than the generic smile, since it argues with the
+      // moment the image was asked for rather than merely being nobody's face.
+      // An unfilled slot attaches nothing at all and the image is generated
+      // exactly as it was before, which is what makes a set of one or two
+      // photographs worth having.
+      expressions: {
+        // No neutral slot: the base image is the neutral face already.
+        slots: [
+          { key: "smile", label: "Smile", hint: "Smiling broadly, teeth showing — covers laughing too.",
+            words: ["smil", "grin", "laugh", "giggl", "chuckl", "beam", "amused", "smirk"] },
+          { key: "angry", label: "Angry", hint: "Angry — scowling, jaw set.",
+            words: ["angry", "anger", "furious", "fury", "scowl", "glar", "snarl", "seething", "irate", "livid"] },
+          { key: "sad", label: "Sad", hint: "Upset or crying.",
+            words: ["cry", "crie", "cried", "tear", "sob", "weep", "wept", "upset", "distraught", "miserab"] },
+          { key: "surprised", label: "Surprised", hint: "Caught off guard — eyes wide, mouth open.",
+            words: ["surpris", "shock", "startl", "astonish", "gasp", "wide-eyed", "stunned"] },
+          { key: "serious", label: "Serious", hint: "Straight-faced and intent.",
+            words: ["serious", "stern", "intense", "intently", "focused", "frown", "grim", "unimpressed"] },
+        ],
+      },
+
       proportionGuard: "two arms and two hands per person, no extra limbs, anatomically coherent",
       // Instruction sent to the extractor model that turns the recent
       // conversation into a Stable Diffusion prompt. {name}, {charDesc},

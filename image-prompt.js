@@ -544,6 +544,35 @@ window.ImagePrompt = {
         .filter(Boolean).join(", ");
     }
 
+    // Which stored expression photograph, if any, belongs with this scene.
+    // Returns a URL or null; null is the ordinary answer and means the image is
+    // generated exactly as it always was.
+    //
+    // The scene text is what the extractor wrote, and it is told to put the
+    // most important action first — so where two slots both match, the one
+    // named earliest wins. Never guesses: an unfilled slot, or a scene that
+    // names no expression at all, attaches nothing rather than reaching for
+    // whichever photograph happens to exist.
+    function pickExpressionReference(photos, sceneText) {
+      const slots = (CFG.image && CFG.image.expressions && CFG.image.expressions.slots) || [];
+      if (!photos || !slots.length) return null;
+      const text = String(sceneText || "").toLowerCase();
+      if (!text) return null;
+      let best = null;
+      for (const slot of slots) {
+        const url = photos[slot.key];
+        if (!url) continue; // an empty slot is not a candidate, however well it matches
+        for (const word of slot.words || []) {
+          // Word boundary at the start only: these are prefixes, so "smil"
+          // is meant to catch "smiling" but not to catch the tail of another
+          // word.
+          const at = text.search(new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+          if (at !== -1 && (!best || at < best.at)) best = { at, url };
+        }
+      }
+      return best ? best.url : null;
+    }
+
     // avatar is { lighting, lightingCustom, outfit } — how this photograph is
     // taken rather than what she looks like, which is why it lives apart from
     // appearance and never reaches a base image.
@@ -910,6 +939,7 @@ window.ImagePrompt = {
       appearancePhrasePreview, buildAppearancePrompt, appearanceWords, pickFaceVariation,
       buildFacePrompt, buildFaceEditPrompt, faceFieldPhrase, isFaceUnset, isFaceStructureUnset,
       buildBodyBasePrompt, buildUploadBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
+      pickExpressionReference,
       isUserUndressed, povSelfBody, isIntimateScene,
       garmentLayer, garmentRegions, isGarmentCovered, visibleWornGarments,
       beatShowsContact, detectPhysicalContact, stripViewerLimbs,

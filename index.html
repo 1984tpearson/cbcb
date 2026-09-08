@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=47"></script>
-  <script src="image-prompt.js?v=24"></script>
+  <script src="site-config.js?v=48"></script>
+  <script src="image-prompt.js?v=25"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -413,6 +413,7 @@ const {
   appearancePhrasePreview, buildAppearancePrompt, appearanceWords, pickFaceVariation,
   buildFacePrompt, buildFaceEditPrompt, isFaceUnset, isFaceStructureUnset,
   buildBodyBasePrompt, buildUploadBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
+  pickExpressionReference,
   isUserUndressed, povSelfBody, isIntimateScene,
   visibleWornGarments,
   detectPhysicalContact, stripViewerLimbs,
@@ -3389,6 +3390,15 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
   // image has drifted away from her.
   const [usePhotos, setUsePhotos] = useState(false);
   const photoRef = useRef();
+  // One photograph per expression slot, keyed by slot. What a chat image
+  // reaches for when the scene names that expression — see the note in
+  // site-config under image.expressions.
+  const [expressions, setExpressions] = useState(() => ({ ...(character.expressionPhotos || {}) }));
+  const expressionRef = useRef();
+  // Which slot the hidden file input is currently filling. Held in a ref
+  // rather than state because the change event reads it, and a click that set
+  // state would not have re-rendered the input before the picker opened.
+  const expressionSlot = useRef(null);
 
   const setFaceField = (groupKey, fieldKey, value) =>
     setFace(f => ({ ...f, [groupKey]: { ...f[groupKey], [fieldKey]: value } }));
@@ -3483,6 +3493,23 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
       // outstanding at the time gets the warning below rather than silence.
       setUsePhotos(true);
       if (hostedUrls.some(u => !u)) setError("Some photos could not be uploaded — they are shown faded and will not be used.");
+    } catch (err) { setError(err.message); }
+    setBusy("");
+  };
+
+  const addExpression = async (e) => {
+    const file = (e.target.files || [])[0];
+    const slot = expressionSlot.current;
+    e.target.value = "";
+    if (!file || !slot) return;
+    setBusy(`expr:${slot}`); setError("");
+    try {
+      const url = await persistUploadedPhoto(await readFileAsDataUrl(file));
+      // No local data-URL preview here, unlike the photo strip: this one is
+      // only ever useful to the image model, and a picture it cannot fetch
+      // would sit in the grid looking filled while doing nothing.
+      if (!url) throw new Error("that photo could not be uploaded");
+      setExpressions(x => ({ ...x, [slot]: url }));
     } catch (err) { setError(err.message); }
     setBusy("");
   };
@@ -3593,6 +3620,7 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
       // Only the ones the generator can actually fetch: a photo it cannot read
       // is not a reference, and keeping it would just fail again next time.
       sourcePhotos: hostedPhotos,
+      expressionPhotos: expressions,
     });
   };
 
@@ -3736,6 +3764,43 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
                 ))}
                 {!variants.length && <span style={{ fontSize: 12, color: "var(--text3)" }}>None yet.</span>}
               </div>
+
+              <div style={S.divider} />
+
+              <label style={{ ...S.label, marginTop: 0 }}>Expressions</label>
+              <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 6px" }}>
+                One photo of her per expression. When a chat scene calls for one, that photo is sent with the base
+                image, so the smile in the picture is hers rather than one the generator made up. An empty slot changes
+                nothing — the image is generated exactly as it is now.
+              </p>
+              {!hostedPhotos.length && (
+                <p style={{ fontSize: 11, color: "var(--blue)", margin: "0 0 6px" }}>
+                  This character was not built from photographs. A real face uploaded here will pull her towards that
+                  person, not just borrow the expression.
+                </p>
+              )}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {(((CFG.image || {}).expressions || {}).slots || []).map(slot => (
+                  <div key={slot.key} style={{ width: 72 }}>
+                    <div onClick={() => { if (busy) return; expressionSlot.current = slot.key; expressionRef.current.click(); }}
+                      title={slot.hint || slot.label}
+                      style={{ width: 72, height: 72, borderRadius: 8, background: "var(--bg3)", cursor: busy ? "default" : "pointer", position: "relative", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", border: expressions[slot.key] ? "2px solid var(--pink)" : "2px dashed var(--bg4, #6664)" }}>
+                      {expressions[slot.key]
+                        ? <img src={expressions[slot.key]} alt={slot.label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        : <span style={{ fontSize: 20, color: "var(--text3)" }}>{busy === `expr:${slot.key}` ? "…" : "+"}</span>}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+                      <span style={{ fontSize: 11, color: "var(--text3)" }}>{slot.label}</span>
+                      {expressions[slot.key] && (
+                        <button onClick={() => setExpressions(x => { const next = { ...x }; delete next[slot.key]; return next; })}
+                          title="Remove"
+                          style={{ border: "none", background: "none", color: "var(--text3)", fontSize: 11, cursor: "pointer", padding: 0 }}>✕</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <input ref={expressionRef} type="file" accept="image/*" style={{ display: "none" }} onChange={addExpression} />
 
               <div style={S.divider} />
 
@@ -5384,7 +5449,12 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         // Her photograph first, the garment flat lays after it — the order the
         // prompt refers to them by, and the same list the fitting room builds.
         // Wiro takes a comma-joined list here.
-        initImage: [character.referenceImage, ...worn.map(g => g.image)].join(","),
+        //
+        // An expression photograph, where the scene calls for one and she has
+        // one, sits with the base image rather than after the flat lays: both
+        // are pictures of her, and the prompt's clause about clothing speaks
+        // of "the reference images" without counting them.
+        initImage: [character.referenceImage, pickExpressionReference(character.expressionPhotos, customImgPrompt), ...worn.map(g => g.image)].filter(Boolean).join(","),
         // Chat images are the ones worth recovering: they are the ones you set
         // going and then put the phone down.
         track: { characterId: character.id, label: customImgPrompt },
@@ -5498,7 +5568,10 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       const url = await generateImageWiro({
         prompt: fullImgPrompt,
         model: settings.imageModel,
-        initImage: [character.referenceImage, ...worn.map(g => g.image)].join(","),
+        // See the custom-prompt path above for why the expression photograph
+        // goes here. Matched against the extracted scene, which is where the
+        // expression is actually named.
+        initImage: [character.referenceImage, pickExpressionReference(character.expressionPhotos, extracted.scene), ...worn.map(g => g.image)].filter(Boolean).join(","),
         track: { characterId: character.id, label: prompt },
       });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);
