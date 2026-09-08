@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=50"></script>
+  <script src="site-config.js?v=51"></script>
   <script src="image-prompt.js?v=25"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -1954,6 +1954,11 @@ async function suggestCloset({ character, model }) {
   });
   const parsed = parseJsonReply(raw);
   if (!parsed) return { closet: [], missing: [] };
+  // Reported back rather than kept private. It is the reasoning the picks are
+  // supposed to follow from, so it is also the fastest way to see when they
+  // have not: a closet full of scrubs under "a primary school teacher" says
+  // the picking ignored the character rather than misread them.
+  const who = typeof parsed.who === "string" ? parsed.who.trim() : "";
 
   // Only ids that are really in the library, de-duplicated, capped. A model
   // asked to choose from a list will occasionally return an id that is not on
@@ -1964,7 +1969,8 @@ async function suggestCloset({ character, model }) {
   const missing = (parsed.missing || [])
     .filter(m => typeof m === "string" && m.trim())
     .map(m => m.trim()).slice(0, 8);
-  return { closet, missing };
+  console.info(`[closet] ${who || "(no reasoning given)"} — picked ${closet.length} of ${library.length}`);
+  return { closet, missing, who };
 }
 
 async function autoGenerateCharacter({ vibe, model, constraints = {} }) {
@@ -2800,11 +2806,11 @@ function CharacterPersonalityPanel({ character, onSave, onClose, model }) {
             onClick={async () => {
               setClosetBusy(true); setClosetNote("");
               try {
-                const { closet: picked, missing } = await suggestCloset({
+                const { closet: picked, missing, who } = await suggestCloset({
                   character: { ...character, closet }, model });
                 if (picked.length) { setCloset(picked); setWorn(w => w.filter(id => picked.includes(id))); }
                 setClosetNote(picked.length
-                  ? `Picked ${picked.length} garments.${missing.length ? ` Nothing in the wardrobe for: ${missing.join(", ")}.` : ""} Save to keep them.`
+                  ? `Picked ${picked.length}${who ? ` for ${who}` : ""}.${missing.length ? ` Nothing in the wardrobe for: ${missing.join(", ")}.` : ""} Save to keep them.`
                   : "Couldn't pick anything — check there are garments in the wardrobe.");
               } catch (e) { setClosetNote(`Failed: ${e.message}`); }
               setClosetBusy(false);
@@ -4028,11 +4034,11 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       // clothes have already been picked by hand.
       if (!(merged.closet || []).length) {
         try {
-          const { closet, missing } = await suggestCloset({ character: merged, model: settings.selectedModel });
+          const { closet, missing, who } = await suggestCloset({ character: merged, model: settings.selectedModel });
           if (closet.length) merged.closet = closet;
-          setClosetNote(missing.length
-            ? `Stocked ${closet.length} garments. Nothing in the wardrobe for: ${missing.join(", ")}.`
-            : (closet.length ? `Stocked ${closet.length} garments from the wardrobe.` : ""));
+          setClosetNote(closet.length
+            ? `Stocked ${closet.length} garments${who ? ` for ${who}` : ""}.${missing.length ? ` Nothing in the wardrobe for: ${missing.join(", ")}.` : ""}`
+            : "");
         } catch (e) { console.warn("Closet suggestion failed:", e.message); }
       }
       setForm(merged);
@@ -4370,10 +4376,10 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
               onClick={async () => {
                 setClosetLoading(true); setClosetNote("");
                 try {
-                  const { closet, missing } = await suggestCloset({ character: form, model: settings.selectedModel });
+                  const { closet, missing, who } = await suggestCloset({ character: form, model: settings.selectedModel });
                   if (closet.length) setForm(f => ({ ...f, closet }));
                   setClosetNote(closet.length
-                    ? `Stocked ${closet.length} garments.${missing.length ? ` Nothing in the wardrobe for: ${missing.join(", ")}.` : ""}`
+                    ? `Stocked ${closet.length}${who ? ` for ${who}` : ""}.${missing.length ? ` Nothing in the wardrobe for: ${missing.join(", ")}.` : ""}`
                     : "Couldn't pick anything — is there a persona, and are there garments in the wardrobe?");
                 } catch (e) { setClosetNote(`Failed: ${e.message}`); }
                 setClosetLoading(false);
@@ -4912,9 +4918,14 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
         const library = await loadWardrobeLibrary();
         closetList = closetGarments(currentChar, library).filter(g => g.image);
       } catch { closetList = []; }
+      // Its own section at the end rather than a bullet in the middle. Buried
+      // in the list it sat directly above "use null for anything the scenario
+      // does not support", which is an invitation to answer null, and it was
+      // one line of instruction against a numbered list of garments.
       const closetAsk = closetList.length
-        ? `\n- worn: which of ${currentChar.name}'s own clothes she has on, as an array of the numbers below. Where you choose some, charOutfit must describe those same clothes and nothing else. Choose what someone would actually wear for this, including underwear where she would be wearing it. Take a whole set or none of it, and never two of something she would only wear one of. An empty array is right if nothing here suits the scene.\n\n${currentChar.name}'s clothes:\n` +
-          closetList.map((g, i) => `${i + 1}. ${g.name || "unnamed"}${g.category ? ` (${g.category})` : ""}`).join("\n")
+        ? `\n\nWARDROBE — these are ${currentChar.name}'s own clothes:\n` +
+          closetList.map((g, i) => `${i + 1}. ${g.name || "unnamed"}${g.category ? ` (${g.category})` : ""}`).join("\n") +
+          `\n\n"worn" is which of those she has on for this scene, as an array of their numbers. This is required and must be an array — never null. Dress her as someone would really be dressed: what the scene calls for, plus underwear where she would be wearing it. Take a whole set or none of it, never two of something she would only wear one of, and use [] only if genuinely nothing here suits the scene. charOutfit must then describe those same clothes and nothing else.`
         : "";
       const closetField = closetList.length ? `, "worn": [1, 2]` : "";
       const raw = await aiComplete({
@@ -4937,9 +4948,9 @@ Infer:
 - location: where the scene takes place, e.g. "a small kitchen at night"
 - charPose: ${currentChar.name}'s body position as a phrase completing "she is ...", e.g. "standing at the stove with her back turned"
 - userPose: the User's body position, same phrasing, e.g. "standing in the doorway"
-- proximity: physical distance between them, e.g. "across the room", "an arm's length apart"${intentionAsk}${closetAsk}
+- proximity: physical distance between them, e.g. "across the room", "an arm's length apart"${intentionAsk}
 
-Keep each value under 15 words. Use null for anything the scenario genuinely does not support.
+Keep each value under 15 words. Use null for anything the scenario genuinely does not support.${closetAsk}
 Return ONLY valid JSON: {"charOutfit": "...", "userOutfit": "...", "location": "...", "charPose": "...", "userPose": "...", "proximity": "..."${closetField}${intentionField}}
 No other text.` }]
       });
@@ -4956,6 +4967,7 @@ No other text.` }]
         // really on the list count, and the prose above stands whether or not
         // any of them did: the closet cannot cover every scenario, and a
         // scene it cannot dress should still be dressed in words.
+        console.info(`[scene] closet offered ${closetList.length}, worn returned ${JSON.stringify(parsed.worn)}`);
         if (closetList.length && Array.isArray(parsed.worn)) {
           const worn = [...new Set(parsed.worn
             .map(n => closetList[Number(n) - 1])
