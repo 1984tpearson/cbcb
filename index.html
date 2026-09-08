@@ -5041,15 +5041,24 @@ No other text.` }]
       // Everything worn is listed, not only what is visible: she is the one
       // who might take the jumper off, and the bra under it is the reason that
       // is worth doing.
-      let wornList = [];
+      // The whole closet, not only what she has on, with the worn ones marked.
+      //
+      // It used to be the worn list alone, and that made dressing
+      // one-directional: the vocabulary could say a jacket had come off but
+      // had no way to say one had gone on, so "she puts on a jacket" changed
+      // the prose and left the garments untouched. One list of everything she
+      // owns fixes it — a garment that is not currently worn, reported "on",
+      // is a garment she has just put on.
+      let trackList = [];
       try {
         const library = await loadWardrobeLibrary();
-        wornList = closetGarments({ closet: currentChar.worn || [] }, library);
-      } catch { wornList = []; }
-      const wornBlock = wornList.length
-        ? `\n\n${currentChar.name} is wearing these specific garments:\n` +
-          wornList.map((g, i) => `${i + 1}. ${g.name || "unnamed"}${g.category ? ` (${g.category})` : ""}`).join("\n") +
-          `\n\nFor each one report how it is being worn NOW, as "garments": an object keyed by those numbers.\nUse exactly one of these words:\n- "on" — worn normally, as intended\n- "open" — undone, unbuttoned, unzipped but still on\n- "aside" — pulled down, pushed up, off one shoulder, round the ankles: still on her but out of place\n- "off" — taken off completely and no longer being worn\nOmit a garment entirely if nothing about it changed and it is simply on. Never guess: only report what the conversation shows.`
+        trackList = closetGarments(currentChar, library);
+      } catch { trackList = []; }
+      const wornIds = new Set(currentChar.worn || []);
+      const wornBlock = trackList.length
+        ? `\n\nThese are ${currentChar.name}'s own clothes. The ones marked WEARING are on her right now; the rest are in her wardrobe:\n` +
+          trackList.map((g, i) => `${i + 1}. ${g.name || "unnamed"}${g.category ? ` (${g.category})` : ""}${wornIds.has(g.id) ? " — WEARING" : ""}`).join("\n") +
+          `\n\nReport any garment whose state CHANGED in the conversation above, as "garments": an object keyed by those numbers.\nUse exactly one of these words:\n- "on" — she is now wearing it normally. For something not marked WEARING, this means she has just put it on.\n- "open" — undone, unbuttoned, unzipped, but still on\n- "aside" — pulled down, pushed up, off one shoulder, round the ankles: still on her but out of place\n- "off" — taken off completely and no longer being worn\nOmit every garment that did not change. Only report what the conversation actually shows: putting something on needs her to have put it on, not merely to own it.`
         : "";
       const raw = await aiComplete({
         // The conversation model, not the 8B one. Two people, partial states
@@ -5084,7 +5093,7 @@ Rules:
 ${wornBlock}
 
 Return ONLY valid JSON:
-{"charOutfit": null, "charEvidence": null, "userOutfit": null, "userEvidence": null${wornList.length ? ', "garments": {}' : ""}}
+{"charOutfit": null, "charEvidence": null, "userOutfit": null, "userEvidence": null${trackList.length ? ', "garments": {}' : ""}}
 No other text.` }]
       });
       const parsed = parseJsonReply(raw);
@@ -5106,14 +5115,21 @@ No other text.` }]
       // will eventually restate one wrongly.
       const statuses = {};
       const removed = new Set();
+      const added = [];
       const reported = (parsed.garments && typeof parsed.garments === "object") ? parsed.garments : {};
       for (const [key, value] of Object.entries(reported)) {
-        const garment = wornList[Number(key) - 1];
+        const garment = trackList[Number(key) - 1];
         if (!garment) continue;
         const status = String(value || "").trim().toLowerCase();
-        if (status === "off") removed.add(garment.id);
-        else if (["open", "aside"].includes(status)) statuses[garment.id] = status;
-        else if (status === "on") statuses[garment.id] = "on";
+        if (status === "off") { removed.add(garment.id); continue; }
+        if (!["on", "open", "aside"].includes(status)) continue;
+        // Anything she was not already wearing has just been put on.
+        if (!wornIds.has(garment.id)) added.push(garment.id);
+        statuses[garment.id] = status;
+      }
+      if (Object.keys(reported).length) {
+        console.info(`[wardrobe] garments changed: ${JSON.stringify(reported)}` +
+          `${added.length ? ` (put on ${added.length})` : ""}${removed.size ? ` (took off ${removed.size})` : ""}`);
       }
       if (!charProposed && !userProposed && !Object.keys(reported).length) return;
       commitIfCurrent(epoch, prev => {
@@ -5129,14 +5145,18 @@ No other text.` }]
         // was: taking a jacket off left her with no wardrobe references and
         // sent the whole outfit back to being words.
         const prevWorn = prev.worn || [];
-        const worn = removed.size ? prevWorn.filter(id => !removed.has(id)) : prevWorn;
+        const kept = removed.size ? prevWorn.filter(id => !removed.has(id)) : prevWorn;
+        // Put-on garments go on the end, so the ones she was already wearing
+        // keep their place and the newest thing is the one that drops off if
+        // the visible cap is ever reached.
+        const worn = added.length ? [...kept, ...added.filter(id => !kept.includes(id))] : kept;
         const wornState = {};
         for (const id of worn) {
           const next = statuses[id] || (prev.wornState || {})[id];
           if (next && next !== "on") wornState[id] = next;
         }
         const sameOutfits = charOutfit === prev.charOutfit && userOutfit === prev.userOutfit;
-        const sameWorn = worn.length === prevWorn.length;
+        const sameWorn = worn.length === prevWorn.length && worn.every((id, i) => id === prevWorn[i]);
         const sameState = JSON.stringify(wornState) === JSON.stringify(prev.wornState || {});
         if (sameOutfits && sameWorn && sameState) return prev;
         return { ...prev, charOutfit, userOutfit, worn, wornState };
