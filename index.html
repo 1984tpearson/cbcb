@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=48"></script>
+  <script src="site-config.js?v=49"></script>
   <script src="image-prompt.js?v=25"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -6001,6 +6001,315 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
+// ─── PHOTO STUDIO ────────────────────────────────────────────────────────────
+// The fitting room in wardrobe.html answers one question — does this outfit
+// work — and is built to ask nothing else: plain backdrop, one pose, no
+// choices to get wrong. This is the other half of that. Same method (the
+// character's reference photograph and the garment flat lays handed to the
+// model together, which is the only way to put specific clothes on a specific
+// person) with the rest of the photograph opened up: pose, surroundings,
+// lighting, framing, lens and mood.
+//
+// It lives here rather than over there because the subject is a character, and
+// characters live in this app — with their closet, their reference image and
+// the gallery the result belongs in.
+
+const studioCfg = () => CFG.photoStudio;
+
+// A chosen value is either one of the config's options or something typed.
+// Both collapse to the same thing before the prompt sees them — the text —
+// so nothing downstream has to know which it was.
+const STUDIO_CUSTOM = "__custom";
+
+function studioChoiceText(list, choice) {
+  if (!choice || !choice.id) return "";
+  if (choice.id === STUDIO_CUSTOM) return (choice.custom || "").trim();
+  const opt = (list || []).find(o => o.id === choice.id);
+  return opt ? opt.text : "";
+}
+
+// Clauses whose value is empty drop out whole, so an unset lighting leaves no
+// trace rather than "Lit by ." — the one failure mode of a template with holes
+// in it, and the model renders an empty clause as literally as a full one.
+function buildStudioPrompt({ character, garments, choices }) {
+  const cfg = studioCfg();
+  const c = cfg.clauses;
+  const charDesc = (() => {
+    // Age, gender and height only, from the same function the chat path uses.
+    // The reference image says how they look, and saying it again in words
+    // cannot make the picture more like itself.
+    try { return buildChatCharDesc(character) || ""; } catch { return ""; }
+  })();
+
+  const garmentText = garments.map(g => g.description || g.name).filter(Boolean).join("; ");
+  const fill = (tpl, v) => (v ? tpl.replace("{v}", v) : "");
+
+  const body = fillTemplate(cfg.promptTemplate, {
+    // Empty rather than a stand-in word: the template reads "{framing}
+    // photograph", so a fallback of "Photograph" gives "Photograph photograph".
+    // The leading gap it leaves is closed by the whitespace collapse below.
+    framing: studioChoiceText(cfg.framings, choices.framing),
+    charDesc: charDesc ? ", " + charDesc : "",
+    garments: garmentText ? fill(c.garmentsWorn, garmentText) : c.garmentsNone,
+    pose: fill(c.pose, studioChoiceText(cfg.poses, choices.pose)),
+    setting: fill(c.setting, studioChoiceText(cfg.settings, choices.setting)),
+    lighting: fill(c.lighting, studioChoiceText(cfg.lighting, choices.lighting)),
+    camera: fill(c.camera, studioChoiceText(cfg.cameras, choices.camera)),
+    mood: fill(c.mood, studioChoiceText(cfg.moods, choices.mood)),
+  });
+
+  // Typed as a sentence fragment far more often than as a sentence, so it gets
+  // the full stop it needs to not run into the style modifiers behind it.
+  let extra = (choices.notes || "").trim();
+  if (extra && !/[.!?]$/.test(extra)) extra += ".";
+  const text = [body, extra, cfg.styleModifiers].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+// One row of chips plus a Custom chip that opens a text box. "None" is a real
+// choice and not the same as custom-but-empty: it says leave this out of the
+// prompt entirely, which for lighting or setting is often what you want.
+function StudioChoiceRow({ label, options, value, onChange }) {
+  const isCustom = value && value.id === STUDIO_CUSTOM;
+  const pick = (id) => onChange(id === (value && value.id) ? { id: "" } : { id, custom: (value && value.custom) || "" });
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <span style={S.label}>{label}</span>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+        {options.map(o => (
+          <button key={o.id} onClick={() => pick(o.id)} title={o.text}
+            style={value && value.id === o.id ? S.studioChipOn : S.studioChip}>{o.label}</button>
+        ))}
+        <button onClick={() => pick(STUDIO_CUSTOM)} style={isCustom ? S.studioChipOn : S.studioChip}>Custom…</button>
+      </div>
+      {isCustom && (
+        <input style={{ ...S.input, marginTop: 8 }} autoFocus
+          placeholder={"Describe the " + label.toLowerCase() + " in your own words"}
+          value={(value && value.custom) || ""}
+          onChange={e => onChange({ id: STUDIO_CUSTOM, custom: e.target.value })} />
+      )}
+    </div>
+  );
+}
+
+function PhotoStudio({ characters, onBack }) {
+  const cfg = studioCfg();
+  const withBase = characters.filter(c => c.referenceImage);
+  const [charId, setCharId] = useState(() => (withBase[0] ? withBase[0].id : (characters[0] ? characters[0].id : null)));
+  const [library, setLibrary] = useState(null);
+  const [closet, setCloset] = useState([]);
+  const [showPicker, setShowPicker] = useState(false);
+  const [choices, setChoices] = useState(() => {
+    const d = cfg.defaults || {};
+    return {
+      pose: { id: d.pose || "" }, setting: { id: d.setting || "" },
+      lighting: { id: d.lighting || "" }, framing: { id: d.framing || "" },
+      camera: { id: d.camera || "" }, mood: { id: d.mood || "" }, notes: "",
+    };
+  });
+  const [aspect, setAspect] = useState(cfg.aspectRatio);
+  const [showPrompt, setShowPrompt] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [shots, setShots] = useState([]);
+
+  const character = characters.find(c => c.id === charId) || null;
+
+  useEffect(() => {
+    let live = true;
+    loadWardrobeLibrary().then(items => { if (live) setLibrary(items); })
+      .catch(e => { if (live) { setLibrary([]); setError("Couldn't load the wardrobe (" + e.message + ")."); } });
+    return () => { live = false; };
+  }, []);
+
+  // Starting from what they are already wearing, rather than from nothing:
+  // the wardrobe already knows, and re-picking the same five garments is the
+  // tapping the closet exists to remove. Still only a starting point — every
+  // one of them can be taken off again.
+  useEffect(() => {
+    if (!character) { setCloset([]); return; }
+    const worn = Array.isArray(character.worn) ? character.worn : [];
+    setCloset(worn.slice(0, cfg.maxGarments));
+  }, [charId]);
+
+  const garments = library ? closetGarments({ closet }, library).filter(g => g.image) : [];
+  const prompt = character ? buildStudioPrompt({ character, garments, choices }) : "";
+
+  const setChoice = (key) => (v) => setChoices(prev => ({ ...prev, [key]: v }));
+
+  const chooseGarments = (ids) => {
+    if (ids.length > cfg.maxGarments) {
+      // A cap rather than silently dropping the extra: every garment is another
+      // reference image the model has to stay faithful to while also composing
+      // a person, and past a handful it stops managing either.
+      setStatus("That is as many as it can wear at once (" + cfg.maxGarments + ").");
+      return;
+    }
+    setStatus("");
+    setCloset(ids);
+  };
+
+  const generate = async () => {
+    if (!character || !character.referenceImage) {
+      setError((character ? character.name : "That character") + " has no base image to photograph.");
+      return;
+    }
+    setBusy(true); setError(""); setStatus("Taking the photograph… this takes a minute.");
+    try {
+      const url = await generateImageWiro({
+        prompt,
+        model: cfg.model,
+        resolution: cfg.resolution,
+        aspectRatio: aspect,
+        // The person first, the garment flat lays after — the order the prompt
+        // names them in, and the same list the fitting room and the chat path
+        // build. Wiro takes a comma-joined list here.
+        initImage: joinReferenceImages([character.referenceImage, ...garments.map(g => g.image)]),
+        // Worth recovering: a studio shot is one you set going and then put the
+        // phone down on.
+        track: { characterId: character.id, label: "Photo studio" },
+      });
+      setShots(s => [{ url, prompt }, ...s]);
+      setStatus("");
+      // Straight into their gallery, which is where the app already looks for
+      // pictures of them — a studio shot nobody can find from the chat is one
+      // that was not worth taking.
+      try {
+        const gallery = await dataApi.getGallery(character.id);
+        await dataApi.saveGallery(character.id, [{ url, prompt, date: Date.now() }, ...gallery].slice(0, GALLERY_LIMIT));
+      } catch (e) {
+        setError("Photo taken, but saving it to the gallery failed: " + e.message);
+      }
+    } catch (e) {
+      setError(e.message); setStatus("");
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div style={S.app}>
+      <div style={S.appBg} />
+      <header style={S.header}>
+        <button style={S.backBtn} onClick={onBack}>‹ Back</button>
+        <div style={S.logo}>STUDIO</div>
+        <span style={{ width: 60 }} />
+      </header>
+      <main style={S.main}>
+        {error && <div style={S.errorBar}>{error}<button style={S.errorClose} onClick={() => setError("")}>✕</button></div>}
+
+        <div style={S.studioCard}>
+          <h3 style={S.studioHeading}>Who</h3>
+          {characters.length === 0 && <p style={{ fontSize: 13, color: "var(--text3)" }}>No characters yet.</p>}
+          <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+            {characters.map(c => {
+              const on = c.id === charId;
+              return (
+                // Characters without a base image are marked rather than left
+                // out: one missing from the row looks like one gone missing.
+                <button key={c.id} onClick={() => setCharId(c.id)} title={c.name || ""}
+                  style={{ ...S.studioTile, borderColor: on ? "var(--pink)" : "var(--border2)",
+                    opacity: c.referenceImage ? 1 : 0.45 }}>
+                  {characterAvatar(c)
+                    ? <img src={characterAvatar(c)} alt="" style={{ width: "100%", aspectRatio: "3/4", objectFit: "cover", display: "block" }} />
+                    : <div style={{ ...S.gridTileFallback, aspectRatio: "3/4" }}>{(c.name || "?").slice(0, 1).toUpperCase()}</div>}
+                  <div style={{ fontSize: 11, fontWeight: 700, padding: "5px 4px", color: on ? "var(--pink)" : "var(--text2)" }}>
+                    {c.name || "Unnamed"}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {character && !character.referenceImage && (
+            <p style={{ fontSize: 12, color: "#c04060", fontWeight: 700, marginTop: 6 }}>
+              {(character.name || "They")} has no base image — make one in their appearance editor first.
+            </p>
+          )}
+        </div>
+
+        <div style={S.studioCard}>
+          <h3 style={S.studioHeading}>What they wear</h3>
+          <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 8px" }}>
+            {garments.length
+              ? garments.length + " of " + cfg.maxGarments + " chosen."
+              : "Nothing chosen — they will be dressed as they are in their base image."}
+          </p>
+          {library === null && <p style={{ fontSize: 13, color: "var(--text3)" }}>Loading the wardrobe…</p>}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {garments.map(g => (
+              <button key={g.id} onClick={() => setCloset(closet.filter(x => x !== g.id))}
+                title={"Take off " + (g.name || "this")} style={S.studioGarment}>
+                <img src={g.image} alt="" style={{ width: 64, height: 64, objectFit: "cover", display: "block" }} />
+                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text2)", padding: "3px 4px", display: "block" }}>{g.name || "Untitled"}</span>
+              </button>
+            ))}
+          </div>
+          <button style={{ ...S.btnSecondary, marginTop: 10 }} onClick={() => setShowPicker(true)}>Choose clothes</button>
+          {status && <p style={{ fontSize: 12, color: "#c04060", fontWeight: 700, marginTop: 8 }}>{status}</p>}
+        </div>
+
+        <div style={S.studioCard}>
+          <h3 style={S.studioHeading}>The photograph</h3>
+          <StudioChoiceRow label="Pose" options={cfg.poses} value={choices.pose} onChange={setChoice("pose")} />
+          <StudioChoiceRow label="Surroundings" options={cfg.settings} value={choices.setting} onChange={setChoice("setting")} />
+          <StudioChoiceRow label="Lighting" options={cfg.lighting} value={choices.lighting} onChange={setChoice("lighting")} />
+          <StudioChoiceRow label="Framing" options={cfg.framings} value={choices.framing} onChange={setChoice("framing")} />
+          <StudioChoiceRow label="Camera" options={cfg.cameras} value={choices.camera} onChange={setChoice("camera")} />
+          <StudioChoiceRow label="Mood" options={cfg.moods} value={choices.mood} onChange={setChoice("mood")} />
+          <span style={S.label}>Anything else</span>
+          <input style={{ ...S.input, marginTop: 6 }} placeholder="Optional — added to the prompt as written"
+            value={choices.notes} onChange={e => setChoices(p => ({ ...p, notes: e.target.value }))} />
+          <span style={S.label}>Shape</span>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+            {cfg.aspectRatios.map(a => (
+              <button key={a.id} onClick={() => setAspect(a.id)} style={aspect === a.id ? S.studioChipOn : S.studioChip}>
+                {a.label} · {a.id}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={S.studioCard}>
+          <button style={{ ...S.btnPrimary, width: "100%", padding: "14px 22px", fontSize: 15, opacity: busy || !character ? 0.6 : 1 }}
+            disabled={busy || !character} onClick={generate}>
+            {busy ? "Taking the photograph…" : "Take the photograph"}
+          </button>
+          {status && !error && <p style={{ fontSize: 12, color: "var(--text3)", marginTop: 8, textAlign: "center" }}>{status}</p>}
+          {/* Shown on request rather than always: it is long, and the point of
+              the pickers is not having to read it. Worth having when a shot
+              comes back wrong and the question is which choice did it. */}
+          <button style={{ ...S.msgActionBtn, marginTop: 8 }} onClick={() => setShowPrompt(v => !v)}>
+            {showPrompt ? "Hide the prompt" : "Show the prompt"}
+          </button>
+          {showPrompt && (
+            <p style={{ fontSize: 12, color: "var(--text3)", lineHeight: 1.6, whiteSpace: "pre-wrap", marginTop: 4 }}>{prompt}</p>
+          )}
+        </div>
+
+        {shots.length > 0 && (
+          <div style={S.studioCard}>
+            <h3 style={S.studioHeading}>Contact sheet</h3>
+            <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 10px" }}>
+              Saved to {character ? (character.name || "their") + "’s" : "their"} gallery as they are taken.
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 10 }}>
+              {shots.map((s, i) => (
+                <a key={i} href={s.url} target="_blank" rel="noreferrer" title={s.prompt}>
+                  <img src={s.url} alt="" style={{ width: "100%", borderRadius: 12, display: "block", border: "1px solid var(--border)" }} />
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+      </main>
+      {showPicker && (
+        <ClosetPicker selected={closet} onChange={chooseGarments} onClose={() => setShowPicker(false)} />
+      )}
+    </div>
+  );
+}
+
+
 function App() {
   const [settings, setSettings] = useState(() => storage.get("personachat_settings", DEFAULT_SETTINGS));
   const [characters, setCharacters] = useState([]);
@@ -6011,6 +6320,7 @@ function App() {
   const [showCharForm, setShowCharForm] = useState(false);
   const [editingChar, setEditingChar] = useState(null);
   const [appearanceChar, setAppearanceChar] = useState(null);
+  const [showStudio, setShowStudio] = useState(false);
   const [discreetMode, setDiscreetMode] = useState(() => storage.get("personachat_discreet", false));
   const [gridMode, setGridMode] = useState(() => storage.get("personachat_gridmode", false));
   // Defaults to whatever the device is set to, then follows the choice once made.
@@ -6081,6 +6391,8 @@ function App() {
     setActiveChar(char);
   };
 
+  if (showStudio) return <PhotoStudio characters={orderedCharacters} onBack={() => setShowStudio(false)} />;
+
   if (activeChar) return <ChatWindow character={activeChar} settings={settings} onBack={() => setActiveChar(null)} onUpdateCharacter={updateCharacter} discreetMode={discreetMode} onToggleDiscreet={toggleDiscreet} theme={theme} onToggleTheme={toggleTheme} />;
 
   return (
@@ -6093,6 +6405,7 @@ function App() {
         }
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button className="discreet-toggle" title={theme === "dark" ? "Light theme" : "Dark theme"} onClick={toggleTheme}>{theme === "dark" ? "☀" : "🌙"}</button>
+          <button className="discreet-toggle" title="Photo studio" onClick={() => setShowStudio(true)}>📷</button>
           <button className="discreet-toggle" title={gridMode ? "List view" : "Grid view"} onClick={() => setGridMode(v => !v)}>{gridMode ? "☰" : "▦"}</button>
           <button className="discreet-toggle" title={discreetMode ? "Exit discreet mode" : "Discreet mode"} onClick={toggleDiscreet}>{discreetMode ? "👁" : "👁"}</button>
           {discreetMode
@@ -6243,6 +6556,12 @@ const S = {
   customImgPanel: { position:"relative", zIndex:10, background:"var(--bg3)", borderTop:"1px solid var(--border)", padding:"10px 12px", backdropFilter:"blur(12px)" },
   regenInput: { width:"100%", background:"var(--bg3)", border:"1px solid var(--border2)", borderRadius:8, padding:"9px 12px", color:"var(--text)", fontSize:13, outline:"none", fontFamily:"inherit", boxSizing:"border-box", marginTop:6, marginBottom:10, fontWeight:600 },
   regenBtns: { display:"flex", gap:8 },
+  studioCard: { background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:16, padding:"16px 18px", marginBottom:16, boxShadow:"0 2px 8px var(--shadow)" },
+  studioHeading: { fontSize:15, fontWeight:800, color:"var(--pink)", margin:"0 0 10px" },
+  studioTile: { flex:"0 0 92px", width:92, padding:0, background:"var(--bg3)", borderRadius:12, overflow:"hidden", cursor:"pointer", border:"2px solid var(--border2)", textAlign:"center" },
+  studioGarment: { padding:0, background:"var(--bg3)", border:"1px solid var(--border2)", borderRadius:10, overflow:"hidden", cursor:"pointer", width:64 },
+  studioChip: { background:"var(--bg3)", border:"1px solid var(--border2)", color:"var(--text2)", borderRadius:16, padding:"6px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" },
+  studioChipOn: { background:"var(--pink)", border:"1px solid var(--pink)", color:"#fff", borderRadius:16, padding:"6px 12px", cursor:"pointer", fontSize:12, fontWeight:800, fontFamily:"inherit", boxShadow:"0 2px 8px var(--shadow)" },
 };
 
 // A component that throws used to unmount the entire tree, leaving a blank

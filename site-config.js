@@ -1455,6 +1455,161 @@
       ],
     },
 
+    // ── Photo studio ─────────────────────────────────────────────────────────
+    // The fitting room's method — the character's reference photograph and the
+    // garment flat lays handed to the model together — with the rest of the
+    // photograph opened up: pose, surroundings, lighting, framing and lens are
+    // chosen rather than fixed to "standing in front of a grey backdrop".
+    //
+    // It lives here rather than in wardrobe.html because the thing being
+    // photographed is a character, and characters live in the app. The wardrobe
+    // page keeps its fitting room: that one answers "does this outfit work",
+    // which wants the plain backdrop and no other choices to get wrong.
+    //
+    // Every list below is a starting point, not a menu: each picker also takes
+    // free text, and what is typed is what reaches the prompt verbatim.
+    photoStudio: {
+      // Same model as the fitting room, and for the same reason: it is the
+      // most reliable of the three at holding several reference images at once,
+      // which is what dressing a specific person in specific clothes is.
+      model: "seedream-v5-pro-uncensored",
+      resolution: "1k",
+      // Wiro caps inputImage at 15 including the reference, and coherence goes
+      // long before that. The character's photograph takes one of these.
+      maxGarments: 5,
+      // Full length by default — the studio exists to photograph an outfit on
+      // a person, and a portrait crop throws away half of one.
+      aspectRatio: "3:4",
+      aspectRatios: [
+        { id: "3:4", label: "Portrait" },
+        { id: "9:16", label: "Full length" },
+        { id: "1:1", label: "Square" },
+        { id: "4:3", label: "Landscape" },
+        { id: "16:9", label: "Wide" },
+      ],
+
+      // {charDesc}, {garments}, {pose}, {setting}, {lighting}, {framing},
+      // {camera} and {mood} are substituted; any that are empty drop out with
+      // the sentence around them rather than leaving "photographed in ."
+      //
+      // The reference images are named by position because that is the only
+      // handle the model has on them: without "the first reference image" it
+      // has no way to know which picture is the person and which are clothes.
+      promptTemplate: "{framing} photograph of the person in the first reference image{charDesc}. {garments}{pose}{setting}{lighting}{camera}{mood}",
+      // Each clause and how it is worded once something is chosen for it. The
+      // wording lives with the field so a new option never needs a code change.
+      clauses: {
+        garmentsWorn: "They are wearing {v}. The reference images after the first are those garments, photographed flat — dress the person in exactly those garments, matching their colour, cut, fabric and detailing precisely.",
+        // Nothing chosen is not nothing said: left silent, the model dresses
+        // them however it likes and the same settings give a different outfit
+        // every time.
+        garmentsNone: "They are dressed as they are in the reference image.",
+        pose: " They are {v}.",
+        setting: " The setting is {v}.",
+        lighting: " Lit by {v}.",
+        camera: " Shot on {v}.",
+        mood: " The mood is {v}.",
+      },
+      // Appended after the assembled prompt, the way the chat path appends its
+      // own style modifiers. Deliberately about the photograph rather than the
+      // person: everything about the person is in the reference image.
+      styleModifiers: "photorealistic, sharp focus, natural skin texture, true to life colour, high detail",
+
+      // The pickers. `id` is what a chip stores, `text` is what reaches the
+      // prompt — the chip says "Leaning on a wall", the model is told the
+      // sentence that actually renders one.
+      poses: [
+        { id: "standing", label: "Standing", text: "standing facing the camera, weight on one hip, arms relaxed at their sides" },
+        { id: "walking", label: "Walking", text: "walking towards the camera mid-stride, looking ahead" },
+        { id: "leaning", label: "Leaning", text: "leaning back against a wall, one foot flat against it, hands behind them" },
+        { id: "sitting", label: "Sitting", text: "sitting, leaning forward slightly with their forearms on their knees" },
+        { id: "overshoulder", label: "Over the shoulder", text: "turned away from the camera and looking back over one shoulder" },
+        { id: "reclining", label: "Reclining", text: "reclining on their side, propped on one elbow" },
+        { id: "kneeling", label: "Kneeling", text: "kneeling upright, hands resting on their thighs" },
+        { id: "candid", label: "Candid", text: "caught mid-movement and not looking at the camera, as if unaware of it" },
+        { id: "arms-crossed", label: "Arms crossed", text: "standing with their arms crossed, chin slightly raised" },
+        { id: "hands-in-hair", label: "Hands in hair", text: "both hands lifted into their hair, elbows out, head tilted back" },
+        { id: "twirl", label: "Twirling", text: "mid-turn with the clothing caught in motion around them" },
+        { id: "lying-back", label: "Lying back", text: "lying on their back, head turned towards the camera" },
+      ],
+      settings: [
+        { id: "studio-grey", label: "Grey studio", text: "a plain seamless light grey studio backdrop" },
+        { id: "studio-black", label: "Black studio", text: "a black studio backdrop with the subject lit away from it" },
+        { id: "bedroom", label: "Bedroom", text: "a warm, softly cluttered bedroom with an unmade bed behind them" },
+        { id: "apartment", label: "Apartment", text: "a modern apartment living room with a large window to one side" },
+        { id: "kitchen", label: "Kitchen", text: "a bright domestic kitchen, worktop and cupboards behind them" },
+        { id: "bathroom", label: "Bathroom", text: "a tiled bathroom with a mirror and a lit vanity" },
+        { id: "city-street", label: "City street", text: "a busy city street at pavement level, shopfronts blurred behind them" },
+        { id: "rooftop", label: "Rooftop", text: "a rooftop above a city skyline" },
+        { id: "beach", label: "Beach", text: "an open sand beach with the sea behind them" },
+        { id: "forest", label: "Forest", text: "a wooded path with dappled light through the canopy" },
+        { id: "garden", label: "Garden", text: "a green garden in summer, planting and a fence behind them" },
+        { id: "cafe", label: "Café", text: "a small café interior, tables and a counter behind them" },
+        { id: "bar", label: "Bar", text: "a dim bar with bottles lit behind the counter" },
+        { id: "hotel", label: "Hotel room", text: "a hotel room with a made bed and city light through the curtains" },
+        { id: "car", label: "Car", text: "the passenger seat of a car, street light passing across the window" },
+        { id: "pool", label: "Poolside", text: "the edge of a swimming pool, water and loungers behind them" },
+      ],
+      lighting: [
+        { id: "softbox", label: "Soft studio", text: "soft even diffused studio lighting, no harsh shadows" },
+        { id: "golden", label: "Golden hour", text: "low golden hour sunlight raking across them from one side" },
+        { id: "window", label: "Window light", text: "soft daylight from a large window to one side" },
+        { id: "overcast", label: "Overcast", text: "flat, even overcast daylight" },
+        { id: "hard-sun", label: "Hard sun", text: "hard midday sunlight with crisp, defined shadows" },
+        { id: "rim", label: "Rim light", text: "a strong backlight rimming their outline, the front in soft fill" },
+        { id: "candle", label: "Candlelight", text: "warm low candlelight, deep falloff into shadow" },
+        { id: "neon", label: "Neon", text: "coloured neon light, magenta and cyan across them" },
+        { id: "moonlight", label: "Moonlight", text: "cool blue moonlight through a window" },
+        { id: "lamp", label: "Lamplight", text: "a single warm lamp close by, the rest of the room dark" },
+        { id: "flash", label: "Direct flash", text: "hard direct on-camera flash, bright foreground and a dark background" },
+        { id: "practicals", label: "Practicals", text: "the room's own lamps and screens as the only light" },
+      ],
+      // Framing sits at the front of the sentence rather than in a clause, so
+      // it reads as the kind of photograph rather than an afterthought.
+      framings: [
+        { id: "full", label: "Full length", text: "Full length fashion" },
+        { id: "three-quarter", label: "Three quarter", text: "Three-quarter length" },
+        { id: "waist", label: "Waist up", text: "Waist-up" },
+        { id: "portrait", label: "Portrait", text: "Head and shoulders portrait" },
+        { id: "closeup", label: "Close up", text: "Tight close-up" },
+        { id: "wide", label: "Wide", text: "Wide environmental" },
+        { id: "low", label: "Low angle", text: "Low-angle full length" },
+        { id: "high", label: "High angle", text: "High-angle looking down" },
+      ],
+      cameras: [
+        { id: "85mm", label: "85mm portrait", text: "an 85mm lens at f/1.8, background thrown out of focus" },
+        { id: "35mm", label: "35mm reportage", text: "a 35mm lens, the room visible around them" },
+        { id: "50mm", label: "50mm natural", text: "a 50mm lens at eye level, natural perspective" },
+        { id: "telephoto", label: "Telephoto", text: "a 135mm telephoto, compressed perspective" },
+        { id: "wide-lens", label: "Wide angle", text: "a 24mm wide angle close to the subject" },
+        { id: "film", label: "35mm film", text: "35mm colour film with visible grain" },
+        { id: "polaroid", label: "Polaroid", text: "an instant camera, soft contrast and a slight colour cast" },
+        { id: "phone", label: "Phone", text: "a phone camera, everything in focus" },
+      ],
+      moods: [
+        { id: "editorial", label: "Editorial", text: "high fashion editorial, composed and deliberate" },
+        { id: "intimate", label: "Intimate", text: "quiet and intimate, unguarded" },
+        { id: "playful", label: "Playful", text: "playful and light, caught laughing" },
+        { id: "moody", label: "Moody", text: "moody and low key, heavy shadow" },
+        { id: "glamour", label: "Glamour", text: "polished glamour, everything flattering" },
+        { id: "documentary", label: "Documentary", text: "plain documentary, nothing styled" },
+        { id: "cinematic", label: "Cinematic", text: "cinematic, like a film still" },
+        { id: "dreamy", label: "Dreamy", text: "dreamy and soft, gentle haze" },
+      ],
+
+      // What a fresh visit starts on. Chosen to be the shot you would take if
+      // you had not thought about it — a plain full-length one, which is also
+      // the one that shows an outfit best.
+      defaults: {
+        pose: "standing",
+        setting: "studio-grey",
+        lighting: "softbox",
+        framing: "full",
+        camera: "85mm",
+        mood: "editorial",
+      },
+    },
+
     // ── Image generation ─────────────────────────────────────────────────────
     image: {
       // Images generated during a chat are shot from the user's own eyes — the
