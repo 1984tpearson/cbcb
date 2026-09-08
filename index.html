@@ -70,6 +70,7 @@
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body, #root { height: 100%; }
+    html, body { max-width: 100%; overflow-x: hidden; }
     @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
     :root {
       --bg: #fdf6f8;
@@ -136,6 +137,9 @@
     .discreet-app { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif !important; background: #ffffff !important; }
     .discreet-app * { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif !important; }
     .discreet-header { background: #f5f5f5 !important; border-bottom: 1px solid #e0e0e0 !important; backdrop-filter: none !important; box-shadow: none !important; padding: 10px 14px !important; }
+    @media (max-width: 480px) {
+      .chat-icon-btn { padding: 6px 9px !important; font-size: 13px !important; }
+    }
     .discreet-chat-header { background: #f5f5f5 !important; border-bottom: 1px solid #e0e0e0 !important; backdrop-filter: none !important; box-shadow: none !important; }
     .discreet-char-name { color: #000000 !important; font-size: 17px !important; font-weight: 600 !important; letter-spacing: 0 !important; }
     .discreet-back-btn { color: #007aff !important; font-size: 17px !important; font-weight: 400 !important; }
@@ -5682,7 +5686,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                   {character.gender && <span style={{ ...S.genderBadge, fontSize: 9 }}>{character.gender === "Custom" ? (character.customGender || "Custom") : character.gender}</span>}
                   {character.nsfw && <span style={{ ...S.nsfwBadge, fontSize: 9 }}>NSFW</span>}
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 140, maxWidth: 200 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 3, width: "100%", minWidth: 0, maxWidth: 200 }}>
                   {[
                     { key: "familiarity",      icon: "🤝", label: "Familiarity",  color: "#5080c8" },
                     { key: "likesUser",        icon: "💛", label: "Likes",        color: "#c87830" },
@@ -5702,16 +5706,16 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                 </div>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
               <button className="discreet-toggle" title={theme === "dark" ? "Light theme" : "Dark theme"} onClick={onToggleTheme}>{theme === "dark" ? "☀" : "🌙"}</button>
               <button className="discreet-toggle" title="Discreet mode" onClick={onToggleDiscreet}>👁</button>
-              <button style={S.iconBtnLight} title="Image gallery" onClick={() => setShowGallery(true)}>🖼</button>
-              <button style={S.iconBtnLight} title="New conversation" onClick={handleRestart}>↺</button>
+              <button style={S.iconBtnLight} className="chat-icon-btn" title="Image gallery" onClick={() => setShowGallery(true)}>🖼</button>
+              <button style={S.iconBtnLight} className="chat-icon-btn" title="New conversation" onClick={handleRestart}>↺</button>
               {/* Personality button */}
-              <button style={S.iconBtnLight} title="Character settings" onClick={() => setShowPersonality(true)}>⚙</button>
+              <button style={S.iconBtnLight} className="chat-icon-btn" title="Character settings" onClick={() => setShowPersonality(true)}>⚙</button>
               {/* Background button */}
               <div style={{ position: "relative" }}>
-                <button style={S.iconBtnLight} title="Change background" onClick={() => setShowBgMenu(v => !v)}>🖼</button>
+                <button style={S.iconBtnLight} className="chat-icon-btn" title="Change background" onClick={() => setShowBgMenu(v => !v)}>🖼</button>
                 {showBgMenu && (
                   <div style={S.bgMenu}>
                     <div style={S.bgMenuTitle}>Set Background</div>
@@ -6739,11 +6743,11 @@ const S = {
   btnSecondary: { background:"var(--blue-bg)", border:"1px solid var(--blue-border)", color:"var(--blue)", borderRadius:20, padding:"10px 22px", cursor:"pointer", fontSize:13, fontWeight:700 },
   iconBtn: { background:"transparent", border:"none", color:"var(--text3)", cursor:"pointer", fontSize:16, padding:"4px 8px" },
   iconBtnLight: { background:"var(--bg3)", border:"1px solid var(--border)", borderRadius:10, padding:"7px 12px", cursor:"pointer", fontSize:14, color:"var(--text2)", fontWeight:600 },
-  chatWindow: { height:"100dvh", minHeight:"-webkit-fill-available", display:"flex", flexDirection:"column", position:"relative", backgroundSize:"cover", backgroundPosition:"center", backgroundRepeat:"no-repeat" },
+  chatWindow: { height:"100dvh", width:"100%", overflowX:"hidden", minHeight:"-webkit-fill-available", display:"flex", flexDirection:"column", position:"relative", backgroundSize:"cover", backgroundPosition:"center", backgroundRepeat:"no-repeat" },
   chatBgOverlay: { position:"absolute", inset:0, zIndex:0, background:"linear-gradient(to bottom, rgba(var(--bg-rgb),0.75) 0%, rgba(var(--bg-rgb),0.45) 40%, rgba(var(--bg-rgb),0.82) 100%)" },
-  chatHeader: { position:"relative", zIndex:10, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 16px", background:"rgba(var(--bg-rgb),0.95)", backdropFilter:"blur(12px)", borderBottom:"1px solid var(--border)", boxShadow:"0 2px 8px var(--shadow)" },
+  chatHeader: { position:"relative", zIndex:10, display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8, maxWidth:"100%", padding:"12px 16px", background:"rgba(var(--bg-rgb),0.95)", backdropFilter:"blur(12px)", borderBottom:"1px solid var(--border)", boxShadow:"0 2px 8px var(--shadow)" },
   backBtn: { background:"transparent", border:"none", color:"var(--blue)", cursor:"pointer", fontSize:14, fontWeight:700, padding:"4px 8px" },
-  chatHeaderInfo: { display:"flex", alignItems:"center", gap:10, flex:1, justifyContent:"center" },
+  chatHeaderInfo: { display:"flex", alignItems:"center", gap:10, flex:"1 1 160px", minWidth:0, justifyContent:"center" },
   chatAvatar: { width:34, height:34, borderRadius:"50%", objectFit:"cover", border:"3px solid var(--pink-light)" },
   chatCharName: { fontSize:16, fontWeight:800, color:"var(--pink)" },
   bgMenu: { position:"absolute", right:0, top:"110%", zIndex:20, background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:14, padding:8, minWidth:190, boxShadow:"0 8px 24px var(--shadow)" },
