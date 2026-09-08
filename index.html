@@ -4930,7 +4930,7 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       const closetAsk = closetList.length
         ? `\n\nWARDROBE — these are ${currentChar.name}'s own clothes:\n` +
           closetList.map((g, i) => `${i + 1}. ${g.name || "unnamed"}${g.category ? ` (${g.category})` : ""}`).join("\n") +
-          `\n\n"worn" is which of those she has on for this scene, as an array of their numbers. This is required and must be an array — never null. Dress her as someone would really be dressed: what the scene calls for, plus underwear where she would be wearing it. Take a whole set or none of it, never two of something she would only wear one of, and use [] only if genuinely nothing here suits the scene. charOutfit must then describe those same clothes and nothing else.`
+          `\n\n"worn" is which of those she has on for this scene, as an array of their numbers. This is required and must be an array — never null. Dress her as someone would really be dressed, from the skin out: underwear FIRST — both halves, something on top and something underneath, chosen separately — and then the clothes the scene calls for over them. A bra is not underwear on its own. Skip a half only where the scene genuinely has her without it. Take a whole set or none of it, never two of something she would only wear one of, and use [] only if genuinely nothing here suits the scene. charOutfit must then describe those same clothes and nothing else.`
         : "";
       const closetField = closetList.length ? `, "worn": [1, 2]` : "";
       const raw = await aiComplete({
