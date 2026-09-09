@@ -556,11 +556,14 @@ window.ImagePrompt = {
     function pickExpressionReference(photos, sceneText) {
       const slots = (CFG.image && CFG.image.expressions && CFG.image.expressions.slots) || [];
       if (!photos || !slots.length) return null;
+      // A slot holds either a bare URL, which is how the first hand-filled ones
+      // were stored, or { url, auto } once the reader could fill them itself.
+      const urlOf = v => (typeof v === "string" ? v : (v && v.url) || null);
       const text = String(sceneText || "").toLowerCase();
       if (!text) return null;
       let best = null;
       for (const slot of slots) {
-        const url = photos[slot.key];
+        const url = urlOf(photos[slot.key]);
         if (!url) continue; // an empty slot is not a candidate, however well it matches
         for (const word of slot.words || []) {
           // Word boundary at the start only: these are prefixes, so "smil"
@@ -846,9 +849,12 @@ window.ImagePrompt = {
     function garmentRegions(garment) {
       const L = (CFG.wardrobe.layers || {});
       const category = garment && garment.category;
-      if (category === "Underwear") {
+      // Categories that cover two different things are read by name: a
+      // Sleepwear "pyjama top" is a torso garment and would otherwise be said
+      // to cover her legs, hiding whatever is under them.
+      if ((L.nameRegionCategories || []).includes(category)) {
         const hay = [garment.name, (garment.tags || []).join(" ")].join(" ").toLowerCase();
-        const rule = (L.underwearRegions || []).find(r => new RegExp(r.match, "i").test(hay));
+        const rule = (L.nameRegions || []).find(r => new RegExp(r.match, "i").test(hay));
         // Unrecognised underwear covers both, which hides it whenever she is
         // dressed. A garment missing from a picture is a smaller error than
         // one drawn over her clothes.

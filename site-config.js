@@ -1240,6 +1240,31 @@
       // guessing them is the job. {categories} is substituted.
       extractInstruction: "Look at this photograph and list every distinct item of clothing or footwear worn in it.\n\nReturn ONLY a JSON object, no markdown and no commentary, of the form {\"outfit\": \"...\", \"garments\": [ ... ]}.\n\n\"outfit\" is a short name for what these clothes are as an outfit, 2-4 words \u2014 what someone would call this way of dressing, like \"navy business suit\" or \"summer running kit\". The garments in one photograph are worn together, so they are a set, and this names it.\n\nEach element of \"garments\" is an object:\n{\n  \"name\": a short specific name, 2-5 words,\n  \"category\": exactly one of [{categories}],\n  \"description\": 15 to 30 words describing the garment ALONE — colour, fabric, cut, length, neckline, sleeves, fastenings, pattern,\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion. Only ever tags that will fit many garments \u2014 never the cut, the fastening, the fit or the sleeve length, because a tag describing one garment can never group anything\n}\n\nDescribe each garment as it would look laid out flat on its own, not as it appears on the body. Where the photograph hides part of it, infer the most likely form rather than omitting it. Ignore jewellery, bags, glasses and anything that is not worn clothing or footwear. If no clothing is visible, return an empty garments list.",
 
+      // ── Splitting a set ────────────────────────────────────────────────────
+      // Some garments arrive as one photograph of two things: a pyjama set, a
+      // bikini, a tracksuit. As one record they can be put on and taken off
+      // only together, so a character cannot take the pyjama top off and keep
+      // the bottoms — there is no state for half a garment, and marking the
+      // whole record "off" removes both.
+      //
+      // Splitting makes them what they should have been: separate garments
+      // sharing a set name, which everything downstream already handles. The
+      // pickers take a whole set or none, the layer rule puts the top on the
+      // torso and the bottoms on the legs, and the tracker can retire one
+      // without touching the other.
+      //
+      // It answers for one garment as readily as for two, because the same
+      // question serves a second purpose: a picture found by web search is
+      // usually of somebody wearing the clothes, and isolating the garment out
+      // of it is the same operation as isolating one half of a pair. One
+      // garment in, one flat lay out, and the record keeps its old picture as
+      // a variant.
+      //
+      // Not extractInstruction, which asks what is being WORN in a photograph
+      // — nobody is wearing a flat lay, and asked that question of one the
+      // model hedges. {categories} is substituted.
+      splitInstruction: "This photograph shows clothing. It may be a flat lay, a product shot, or a person wearing the clothes, and it may be one garment or a set made up of more than one separate garment — a pyjama set is a top and bottoms, a bikini is a top and briefs, a suit is a jacket and trousers.\n\nList the separately wearable garments in it.\n\nReturn ONLY a JSON array, no markdown and no commentary. Each element is an object:\n{\n  \"name\": a short specific name for that piece alone, 2-5 words,\n  \"category\": exactly one of [{categories}],\n  \"description\": 15 to 30 words describing THAT PIECE alone — colour, fabric, cut, length, neckline, sleeves, fastenings, pattern,\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion\n}\n\nA piece counts as separate only if it can be worn without the other — the top half and bottom half of a two-piece do; a hood on a coat, a belt sewn to a dress and a lining do not. Name each piece for what it is on its own: \"pink striped pyjama top\", not \"pyjama set top\".\n\nIgnore anyone wearing the clothes, and ignore the background, jewellery and bags. If there is only one garment, return an array of one — that is a normal answer, not a failure.",
+
       // Read back off the finished picture, so that naming and filing a garment
       // is not a form to fill in. {categories} is substituted with the list
       // above — the model must choose from it rather than inventing a category,
@@ -1307,13 +1332,15 @@
       // it could not find is reported instead, so the answer to a firefighter
       // with no turnout gear is a note saying so, not a silently wrong closet.
       closet: {
-        // Enough for a week, a job and a night in. Well past this and the
-        // model starts picking everything that matches rather than choosing.
-        targetCount: 12,
+        // A wardrobe rather than an outfit: enough for a week, a job, a night
+        // out and a night in, with the underwear to go under all of it. Twelve
+        // was the first guess and it was too few — a closet that size cannot
+        // dress a character twice without repeating.
+        targetCount: 20,
         // Hard ceiling on what is accepted back, whatever it returns.
-        maxCount: 24,
+        maxCount: 40,
         // {desc}, {catalogue} and {count} are substituted.
-        instruction: "Here is a character:\n\n{desc}\n\nHere is every garment in the wardrobe. One per line, as: id | name | category | set | tags\n\n{catalogue}\n\nChoose the garments this person owns and would actually be seen in. Aim for about {count}.\n\nThink about who they are before you pick. Cover, where the wardrobe has something suitable:\n- everyday clothes they would wear most days\n- anything their job, role or circumstances require — a nurse owns scrubs, a runner owns running kit — but never ONLY that\n- something to sleep in\n- underwear\n- shoes\n- a coat or jacket if they would own one\n- one thing for a night out or an occasion\n\nRules:\n- Only ids from the list. Never invent a garment, a name or an id.\n- A closet is one person's taste, not a catalogue. Do not pick everything that matches — pick what THIS person would own, given their age, their build, their circumstances and how they carry themselves.\n- Garments sharing a set name are one outfit. Take the whole set or none of it.\n- Do not pick two of something they would only own one of.\n\nReturn ONLY a JSON object, no markdown and no commentary:\n{\"closet\": [\"id\", ...], \"missing\": [\"...\"]}\n\n\"missing\" is for things this character plainly should own that the wardrobe has nothing suitable for, each 2-5 words, like \"police uniform\" or \"walking boots\". Use an empty array when the wardrobe covered them.",
+        instruction: "Here is a character:\n\n{desc}\n\nHere is every garment in the wardrobe. One per line, as: id | name | category | set | tags\n\n{catalogue}\n\nFirst work out who this person is, then pick their clothes. Aim for about {count} garments.\n\nReturn ONLY a JSON object, no markdown and no commentary:\n{\"who\": \"...\", \"closet\": [\"id\", ...], \"missing\": [\"...\"]}\n\n\"who\" comes FIRST and you must write it before choosing anything: one sentence, under 25 words, on what this person does with their days and how they dress. \"a night-shift nurse in her thirties, practical, lives in scrubs and jeans\". The picks must follow from it.\n\n\"closet\" is the garments they own. Cover, where the wardrobe has something suitable:\n- everyday clothes they would wear most days\n- work clothes IF their job needs them\n- something to sleep in\n- underwear, several\n- shoes\n- a coat or jacket\n- one thing for a night out or an occasion\n\nRules, and the first one is the one that gets broken:\n- A uniform belongs to the person whose job it is. Do not give someone a nurse's, paramedic's, police or military uniform unless \"who\" says that is their job. A teacher does not own scrubs. This is the most common mistake — check every uniform you picked against \"who\" before answering.\n- Only ids from the list. Never invent one.\n- A closet is one person's taste, not a catalogue. Pick what THIS person would own given their age, their build, their circumstances and how they carry themselves. If your picks would suit any character equally well, you have not chosen — start again from \"who\".\n- Garments sharing a set name are one outfit: take the whole set or none of it.\n- Do not pick two of something they would only own one of.\n\n\"missing\" is for things this character plainly should own that the wardrobe has nothing suitable for, each 2-5 words, like \"police uniform\" or \"walking boots\". Use an empty array when the wardrobe covered them.",
       },
 
       // ── Layers ─────────────────────────────────────────────────────────────
@@ -1349,16 +1376,29 @@
           "Full outfit": ["torso", "legs"],
           Shoes: [], Accessory: [],
         },
-        // "Underwear" is one category covering two quite different things, so
-        // the region is read off the garment's own name and tags. Matched in
-        // order, and anything unrecognised is treated as covering both, which
-        // is the cautious answer: it hides the garment when she is dressed,
-        // and a missing garment is a smaller error than one drawn over her
-        // clothes.
-        underwearRegions: [
-          { match: "bra|bralette|bandeau|crop|camisole|vest|corset|bustier", regions: ["torso"] },
-          { match: "knicker|panty|panties|thong|brief|boxer|short|garter|stocking|tights|hold-?up", regions: ["legs"] },
-          { match: "bodysuit|teddy|slip|basque|onesie|union", regions: ["torso", "legs"] },
+        // Some categories cover two quite different things — Underwear is a
+        // bra or knickers, Sleepwear a pyjama top or the bottoms, Swimwear a
+        // bikini top or a whole costume — so for those the region is read off
+        // the garment's own name and tags instead. Matched in order, and
+        // anything unrecognised is treated as covering both, which is the
+        // cautious answer: it hides the garment when she is dressed, and a
+        // missing garment is a smaller error than one drawn over her clothes.
+        //
+        // Names are the wardrobe owner's, not a taxonomy: a singlet filed
+        // under Underwear was called "white sleeveless top", matched nothing,
+        // and so counted as covering the legs too — which let a pair of jeans
+        // hide it. Hence "top" and the sleeveless words. Within this category
+        // a name containing "top" is a torso garment; the word is only broad
+        // out in the open.
+        // Which categories get read by name rather than taken from
+        // categoryRegions above.
+        nameRegionCategories: ["Underwear", "Sleepwear", "Swimwear"],
+        nameRegions: [
+          // Whole-body first: a "short set" and a "pyjama set" are both
+          // pieces, and the leg words below would otherwise claim them.
+          { match: "\\bset\\b|pyjamas|pajamas|bodysuit|teddy|slip\\b|basque|onesie|union|swimsuit|costume|leotard|nightie|nightdress|nightgown|romper|playsuit", regions: ["torso", "legs"] },
+          { match: "bra|bralette|bandeau|crop|camisole|vest|corset|bustier|singlet|sleeveless|tank|under-?shirt|tee|t-shirt|top\\b|shirt", regions: ["torso"] },
+          { match: "knicker|panty|panties|thong|brief|boxer|short|garter|stocking|tights|hold-?up|bottoms|trouser|pant", regions: ["legs"] },
         ],
       },
 
@@ -1858,6 +1898,39 @@
           { key: "serious", label: "Serious", hint: "Straight-faced and intent.",
             words: ["serious", "stern", "intense", "intently", "focused", "frown", "grim", "unimpressed"] },
         ],
+
+        // Reading the slots off the photographs somebody just uploaded, rather
+        // than making them fill a grid by hand. {slots} is the list above.
+        //
+        // The whole difficulty is in saying no. A model asked which of five
+        // expressions a photograph shows will pick one, because that is what
+        // it was asked; and a half-smile filed under "angry" is exactly the
+        // failure this feature was built to avoid, since a wrong slot is worse
+        // than an empty one. So "none" leads the list, is said to be the usual
+        // answer, and a confidence has to be given — anything under
+        // minConfidence is dropped whatever it claims to be.
+        autoFill: {
+          instruction: "You are sorting photographs of one person by facial expression.\n\nThe expressions being collected are:\n{slots}\n\nFor EACH image, in the order given, decide whether it clearly and unmistakably shows one of those expressions. \"none\" is the right answer for most photographs and is never a failure: an ordinary or neutral face, a faint or ambiguous expression, a face that is turned away, blurred, in shadow, partly covered or too small to read, or any expression not on the list, is \"none\". Do not stretch a photograph to fit a slot, and do not try to fill every slot.\n\nAlso give the face's position in the frame as [x, y, width, height], each a fraction of the image between 0 and 1, x and y being the top-left corner of a box around the head. Give this only when you can see the head clearly; otherwise use null.\n\nReturn ONLY a JSON array with one object per image, in the same order, no markdown and no commentary:\n[{\"i\": 0, \"expression\": \"none\" or one of the keys above, \"confidence\": 0.0 to 1.0, \"face\": [x, y, w, h] or null}]\n\nconfidence is how certain you are of the expression: 1.0 for an unmistakable one, below 0.6 for anything you are talking yourself into.",
+          // Deliberately high. A missed smile costs nothing — the slot stays
+          // empty and the image is generated the way it always was — while a
+          // wrong one is sent to the generator every time that expression comes
+          // up in chat.
+          minConfidence: 0.75,
+          // The head box a vision model gives back is approximately right at
+          // best, so it is grown by this fraction of its own size on each side
+          // before cropping. Head and shoulders is the intended crop; a tight
+          // one that clips her chin is the thing to avoid.
+          padding: 0.45,
+          // Sanity limits on that box, since a box is the part a vision model
+          // is worst at. A face filling a hundredth of the frame is a mistake,
+          // and one filling the whole of it is the model declining to answer.
+          // Outside these the photograph is kept whole rather than cropped.
+          minBoxFraction: 0.01,
+          maxBoxFraction: 0.9,
+          // Longest side of the stored crop, in pixels. Enough for a face; not
+          // a second copy of a phone photograph.
+          maxCropPx: 768,
+        },
       },
 
       proportionGuard: "two arms and two hands per person, no extra limbs, anatomically coherent",

@@ -4,8 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Wardrobe</title>
-<script src="site-config.js?v=51"></script>
-<script src="image-prompt.js?v=26"></script>
+<script src="site-config.js?v=56"></script>
+<script src="image-prompt.js?v=27"></script>
 <style>
   :root {
     --pink: #d4547a; --pink-bg: #fdf1f4; --pink-border: #f0c4d1;
@@ -414,6 +414,7 @@
       <button class="primary" id="saveBtn" onclick="saveItem()">Save</button>
       <button onclick="closeEditor()">Cancel</button>
       <button id="copyBtn" onclick="copyUrl()">Copy image URL</button>
+      <button id="splitBtn" onclick="splitItem()" title="Redraw as a flat lay with no person, or separate a two-piece garment into its pieces">Isolate / split</button>
       <span class="spacer"></span>
       <button class="danger" id="deleteBtn" onclick="deleteItem()">Delete</button>
     </div>
@@ -1998,6 +1999,41 @@
       .slice(0, w.maxBatch);
   }
 
+  // What separately wearable pieces this one garment is made of. Asked of the
+  // flat lay itself, so a pyjama set photographed as a pair can become a top
+  // and a bottoms that can be worn — and taken off — independently.
+  async function readPieces(imageUrl) {
+    const w = wardrobeCfg();
+    const raw = await aiComplete({
+      model: CFG.models.vision,
+      params: { max_tokens: 700 },
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: fillTemplate(w.splitInstruction, {
+            categories: w.categories.map(c => JSON.stringify(c)).join(", "),
+          }) },
+          { type: "image_url", image_url: { url: imageUrl } },
+        ],
+      }],
+    });
+    const parsed = parseJsonReply(raw);
+    const list = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.garments)) ? parsed.garments : null;
+    if (!list) throw new Error("could not read that picture — model said: " + String(raw).slice(0, 120));
+    return list
+      .filter(g => g && typeof g.description === "string" && g.description.trim())
+      .map(g => ({
+        typed: g.description.trim(),
+        known: {
+          name: typeof g.name === "string" ? g.name.trim() : "",
+          category: w.categories.includes(g.category) ? g.category : null,
+          description: g.description.trim(),
+          tags: Array.isArray(g.tags) ? g.tags : [],
+        },
+      }))
+      .slice(0, 4);
+  }
+
   // Isolates one garment out of the photograph itself, rather than describing
   // it and drawing a new one. The photo goes to the model as an input image, so
   // a print or a logo comes back as the pixels that were there — which the
@@ -2017,6 +2053,101 @@
     });
     return { url: await persist(raw), prompt };
   }
+
+  // Turns one garment into its pieces. The pieces are isolated out of the
+  // garment's own flat lay by the same path that pulls clothes out of a photo
+  // of someone wearing them, so a print or a stripe survives as pixels.
+  //
+  // They share a set name, which is how the rest of the app already keeps
+  // things together: the closet and the scene both take a whole set or none.
+  //
+  // The original is removed only once every piece has been made and saved.
+  // Leaving it would put both the set and its halves in the same wardrobe, and
+  // a picker choosing both dresses her in the pyjamas twice.
+  window.splitItem = async function () {
+    const item = draft;
+    if (!item || draftIsNew || !item.image) {
+      status("Save this garment before splitting it.", "err");
+      return;
+    }
+    const setName = (item.set || "").trim() || item.name || "set";
+    status("Looking at this garment…", "busy");
+    let pieces;
+    try {
+      pieces = await readPieces(item.image);
+    } catch (e) { status(e.message, "err"); return; }
+    if (!pieces.length) {
+      status("Could not see a garment in that picture.", "err");
+      return;
+    }
+    // One garment: not a split but a flatten. A picture found by web search is
+    // usually of somebody wearing the clothes, and this is the same isolate
+    // step used on one half of a pair — so the button does both rather than
+    // refusing the case it is most useful for.
+    //
+    // In place, on this record, with the old picture kept as a variant, so a
+    // worse flat lay than the photograph it came from can be undone.
+    if (pieces.length === 1) {
+      const piece = pieces[0];
+      if (!confirm(`Redraw "${item.name || "this garment"}" as a flat lay of the garment alone, with no person?\n\n` +
+          `• ${(piece.known.name || piece.typed).slice(0, 60)}\n\n` +
+          `One image. The current picture is kept as a variant, so you can go back to it.`)) {
+        status("", "");
+        return;
+      }
+      status("Isolating the garment…", "busy");
+      try {
+        const { url, prompt } = await isolateGarment(item.image, piece.known);
+        acceptImage(url, "wiro", prompt);
+        // Saves and closes the editor, which is why the message comes after.
+        await window.saveItem();
+        status("Redrawn as a flat lay. The old picture is in the variants.", "ok");
+      } catch (e) { status("Could not isolate it: " + e.message, "err"); }
+      return;
+    }
+    if (!confirm(`Split "${item.name || "this garment"}" into ${pieces.length} pieces?\n\n` +
+        pieces.map(p => "• " + (p.known.name || p.typed).slice(0, 50)).join("\n") +
+        `\n\nThey will share the set name "${setName}". This generates ${pieces.length} images, and the original is removed once they are all made.`)) {
+      status("", "");
+      return;
+    }
+    let made = 0;
+    const failures = [];
+    for (let i = 0; i < pieces.length; i++) {
+      const piece = pieces[i];
+      status("Making piece " + (i + 1) + " of " + pieces.length + "…", "busy");
+      try {
+        await addOne({
+          typed: piece.typed,
+          known: { ...piece.known, set: setName },
+          provider: "wiro",
+          model: wardrobeCfg().extractModel,
+          getImage: async (fresh) => {
+            const { url, prompt } = await isolateGarment(item.image, piece.known);
+            fresh.prompt = prompt;
+            return url;
+          },
+        });
+        made += 1;
+      } catch (e) { failures.push(e.message); }
+    }
+    if (made === pieces.length) {
+      // Only now: every piece exists, so the original is redundant rather than
+      // the only copy of anything.
+      const keep = items.filter(x => x.id !== item.id);
+      items = keep;
+      await saveItems();
+      closeEditor();
+      render();
+      status("Split into " + made + " pieces, filed under \"" + setName + "\".", "ok");
+    } else {
+      // Kept on purpose. A half-finished split that also deleted the original
+      // would leave one piece and no way back to the other.
+      render();
+      status("Made " + made + " of " + pieces.length + ". The original is untouched. " +
+        (failures[0] || ""), "err");
+    }
+  };
 
   // The photograph has to be somewhere the image model can fetch, which means
   // uploading it — a data URL is not a URL Wiro can resolve. It is removed

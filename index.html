@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=51"></script>
-  <script src="image-prompt.js?v=26"></script>
+  <script src="site-config.js?v=56"></script>
+  <script src="image-prompt.js?v=27"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -70,6 +70,7 @@
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body, #root { height: 100%; }
+    html, body { max-width: 100%; overflow-x: hidden; }
     @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
     :root {
       --bg: #fdf6f8;
@@ -136,6 +137,24 @@
     .discreet-app { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif !important; background: #ffffff !important; }
     .discreet-app * { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif !important; }
     .discreet-header { background: #f5f5f5 !important; border-bottom: 1px solid #e0e0e0 !important; backdrop-filter: none !important; box-shadow: none !important; padding: 10px 14px !important; }
+    @media (max-width: 480px) {
+      /* Two short rows beat one row plus an empty gap: the controls ride up
+         alongside Back, and the name/sliders block takes the line below. */
+      .chat-header { padding: 6px 10px !important; gap: 4px !important; }
+      .chat-back-btn { order: 0; }
+      .chat-header-btns { order: 1; flex: 1 1 auto; }
+      .chat-header-info { order: 2; flex: 1 1 100% !important; justify-content: flex-start !important; }
+      .chat-icon-btn { padding: 5px 8px !important; font-size: 13px !important; }
+      .chat-header .discreet-toggle { padding: 5px 7px !important; font-size: 13px !important; }
+      /* Name, badges and the three meters share one line instead of stacking. */
+      .chat-header-info { align-items: center !important; gap: 8px !important; }
+      .chat-header-info img { width: 30px !important; height: 30px !important; border-width: 2px !important; }
+      .chat-idblock { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; flex: 1; }
+      .chat-char-name { font-size: 14px !important; }
+      .chat-badges { margin: 0 !important; }
+      .chat-sliders { flex-direction: row !important; gap: 8px !important; max-width: none !important; flex: 1 1 100%; }
+      .chat-slider-row { flex: 1; min-width: 0; }
+    }
     .discreet-chat-header { background: #f5f5f5 !important; border-bottom: 1px solid #e0e0e0 !important; backdrop-filter: none !important; box-shadow: none !important; }
     .discreet-char-name { color: #000000 !important; font-size: 17px !important; font-weight: 600 !important; letter-spacing: 0 !important; }
     .discreet-back-btn { color: #007aff !important; font-size: 17px !important; font-weight: 400 !important; }
@@ -1670,6 +1689,11 @@ const DEFAULT_APPEARANCE = {
 // exactly as they did — their reference is still the clothed image it always
 // was until the body editor converts them.
 const characterAvatar = (c) => (c && (c.avatarImage || c.referenceImage)) || null;
+// An expression slot holds either a bare URL — how the first hand-filled ones
+// were stored — or { url, auto, cropped } once the reader could fill them
+// itself. Everything that displays or sends one goes through here.
+const expressionUrl = (v) => (typeof v === "string" ? v : (v && v.url) || null);
+const expressionIsAuto = (v) => !!(v && typeof v === "object" && v.auto);
 
 const BODY_CFG = (CFG.appearance && CFG.appearance.body) || { fields: [], noneValue: "None", customValue: "Custom" };
 
@@ -1935,6 +1959,11 @@ async function suggestCloset({ character, model }) {
   });
   const parsed = parseJsonReply(raw);
   if (!parsed) return { closet: [], missing: [] };
+  // Reported back rather than kept private. It is the reasoning the picks are
+  // supposed to follow from, so it is also the fastest way to see when they
+  // have not: a closet full of scrubs under "a primary school teacher" says
+  // the picking ignored the character rather than misread them.
+  const who = typeof parsed.who === "string" ? parsed.who.trim() : "";
 
   // Only ids that are really in the library, de-duplicated, capped. A model
   // asked to choose from a list will occasionally return an id that is not on
@@ -1945,7 +1974,8 @@ async function suggestCloset({ character, model }) {
   const missing = (parsed.missing || [])
     .filter(m => typeof m === "string" && m.trim())
     .map(m => m.trim()).slice(0, 8);
-  return { closet, missing };
+  console.info(`[closet] ${who || "(no reasoning given)"} — picked ${closet.length} of ${library.length}`);
+  return { closet, missing, who };
 }
 
 async function autoGenerateCharacter({ vibe, model, constraints = {} }) {
@@ -2207,6 +2237,147 @@ apparent sex and build rather than leaving it out.`;
     appearance: appearanceFromVision(parsed, current),
     age: Number.isFinite(age) && age >= 18 && age <= 100 ? age : null,
   };
+}
+
+// Crops a face out of an uploaded photograph, client-side, so the expression
+// slot holds a head rather than a whole holiday snap. Works on the data URL
+// rather than the hosted copy on purpose: a remote image taints the canvas and
+// toDataURL then throws, and there is no need to go near that.
+//
+// box is [x, y, w, h] as fractions of the image. Returns null rather than
+// throwing — every caller treats a failed crop as "keep the photograph whole",
+// which is a worse reference but never a wrong one.
+// Cuts a rectangle out of a data URL and returns a smaller data URL. rect is
+// { x, y, w, h } as fractions of the image, so callers work in the picture
+// rather than in pixels they would have to have measured first.
+//
+// Works on the data URL rather than the hosted copy on purpose: a remote image
+// taints the canvas and toDataURL then throws, and there is no need to go near
+// that. Returns null rather than throwing — every caller treats a failed crop
+// as "keep the photograph whole", which is a worse reference but never a
+// wrong one.
+function cropDataUrl(dataUrl, rect, maxPx) {
+  return new Promise(resolve => {
+    const { x, y, w, h } = rect || {};
+    if (![x, y, w, h].every(n => typeof n === "number" && isFinite(n)) || !(w > 0 && h > 0)) return resolve(null);
+    const img = new Image();
+    img.onerror = () => resolve(null);
+    img.onload = () => {
+      try {
+        // Clamped to the picture: a padded or dragged box runs off the edge on
+        // any photo where the head is near the top, which is most portraits.
+        let px = Math.max(0, x * img.width);
+        let py = Math.max(0, y * img.height);
+        let pw = Math.min(w * img.width, img.width - px);
+        let ph = Math.min(h * img.height, img.height - py);
+        if (pw < 32 || ph < 32) return resolve(null);
+        const max = maxPx || 768;
+        const scale = Math.min(1, max / Math.max(pw, ph));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(pw * scale);
+        canvas.height = Math.round(ph * scale);
+        canvas.getContext("2d").drawImage(img, px, py, pw, ph, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.92));
+      } catch (e) { console.warn("Crop failed:", e.message); resolve(null); }
+    };
+    img.src = dataUrl;
+  });
+}
+
+// The automatic crop: a head box from the vision model, padded out to head and
+// shoulders. The box is the part a vision model is worst at, so the
+// implausible ones are refused here — a face filling a hundredth of the frame
+// is a mistake, one filling all of it is the model declining to answer.
+function cropFaceFromDataUrl(dataUrl, box) {
+  const cfg = ((CFG.image || {}).expressions || {}).autoFill || {};
+  if (!Array.isArray(box) || box.length !== 4 || box.some(n => typeof n !== "number" || !isFinite(n))) return Promise.resolve(null);
+  const [x, y, w, h] = box;
+  if (!(w > 0 && h > 0)) return Promise.resolve(null);
+  const area = w * h;
+  if (area < (cfg.minBoxFraction ?? 0.01) || area > (cfg.maxBoxFraction ?? 0.9)) return Promise.resolve(null);
+  const pad = cfg.padding ?? 0.45;
+  return cropDataUrl(dataUrl, {
+    x: x - w * pad, y: y - h * pad,
+    w: w * (1 + pad * 2), h: h * (1 + pad * 2),
+  }, cfg.maxCropPx);
+}
+
+// Reads uploaded photographs and says which expression slot each one belongs
+// in, or none. Returns one entry per image in the order given, already filtered
+// to the confident answers — see the note in site-config for why saying no is
+// the whole difficulty here.
+async function classifyExpressionPhotos({ dataUrls }) {
+  const cfg = ((CFG.image || {}).expressions || {});
+  const slots = cfg.slots || [];
+  const auto = cfg.autoFill || {};
+  if (!slots.length || !auto.instruction || !dataUrls.length) return [];
+  const slotList = slots.map(sl => `- "${sl.key}": ${sl.hint || sl.label}`).join("\n");
+  const instruction = auto.instruction.replace("{slots}", slotList);
+
+  const raw = (await aiComplete({
+    model: VISION_MODEL,
+    params: { max_tokens: 60 + 60 * dataUrls.length },
+    messages: [{
+      role: "user",
+      content: [
+        { type: "text", text: instruction },
+        ...dataUrls.map(url => ({ type: "image_url", image_url: { url } })),
+      ],
+    }],
+  })).trim();
+
+  const parsed = parseJsonReply(raw);
+  if (!Array.isArray(parsed)) {
+    console.warn("Expression read returned unparseable reply:", raw.slice(0, 200));
+    return [];
+  }
+  const keys = slots.map(sl => sl.key);
+  const min = auto.minConfidence ?? 0.75;
+  return parsed
+    .map(p => ({
+      index: Math.round(Number(p && p.i)),
+      slot: String((p && p.expression) || "none"),
+      confidence: Number(p && p.confidence),
+      box: Array.isArray(p && p.face) ? p.face.map(Number) : null,
+    }))
+    // "none" is a real answer and the common one, so it is dropped here rather
+    // than treated as a failure. An index the model invented is dropped too.
+    .filter(r => keys.includes(r.slot)
+      && Number.isInteger(r.index) && r.index >= 0 && r.index < dataUrls.length
+      && Number.isFinite(r.confidence) && r.confidence >= min);
+}
+
+// Fills the empty expression slots from photographs that were just uploaded.
+// Only the empty ones: a slot filled by hand is an answer, and this is a guess.
+// Where two photographs claim the same slot the more confident one takes it.
+//
+// Returns { filled, labels } — the new slot map and what to tell them was
+// recognised, since a picture that quietly appears in a grid they were not
+// looking at is not something they can disagree with.
+async function autoFillExpressionSlots({ dataUrls, hostedUrls, existing }) {
+  const slots = ((CFG.image || {}).expressions || {}).slots || [];
+  const filled = { ...(existing || {}) };
+  const labels = [];
+  const taken = new Set(Object.keys(filled).filter(k => filled[k]));
+  let results;
+  try { results = await classifyExpressionPhotos({ dataUrls }); }
+  catch (e) { console.warn("Expression read failed:", e.message); return { filled, labels }; }
+
+  for (const r of [...results].sort((a, b) => b.confidence - a.confidence)) {
+    if (taken.has(r.slot)) continue;
+    const dataUrl = dataUrls[r.index];
+    // The crop is the optional half: a box is what a vision model is worst at,
+    // so a crop that does not come back leaves the whole photograph in the
+    // slot rather than losing the recognition with it.
+    const cropped = await cropFaceFromDataUrl(dataUrl, r.box);
+    const url = (cropped && await persistUploadedPhoto(cropped)) || hostedUrls[r.index] || null;
+    if (!url) continue;
+    filled[r.slot] = { url, auto: true, cropped: !!cropped };
+    taken.add(r.slot);
+    const slot = slots.find(sl => sl.key === r.slot);
+    labels.push((slot && slot.label) || r.slot);
+  }
+  return { filled, labels };
 }
 
 async function generateOpeningScenarios({ character, model, settings, exclude = [] }) {
@@ -2781,11 +2952,11 @@ function CharacterPersonalityPanel({ character, onSave, onClose, model }) {
             onClick={async () => {
               setClosetBusy(true); setClosetNote("");
               try {
-                const { closet: picked, missing } = await suggestCloset({
+                const { closet: picked, missing, who } = await suggestCloset({
                   character: { ...character, closet }, model });
                 if (picked.length) { setCloset(picked); setWorn(w => w.filter(id => picked.includes(id))); }
                 setClosetNote(picked.length
-                  ? `Picked ${picked.length} garments.${missing.length ? ` Nothing in the wardrobe for: ${missing.join(", ")}.` : ""} Save to keep them.`
+                  ? `Picked ${picked.length}${who ? ` for ${who}` : ""}.${missing.length ? ` Nothing in the wardrobe for: ${missing.join(", ")}.` : ""} Save to keep them.`
                   : "Couldn't pick anything — check there are garments in the wardrobe.");
               } catch (e) { setClosetNote(`Failed: ${e.message}`); }
               setClosetBusy(false);
@@ -3377,6 +3548,125 @@ function AppearanceTabFields({ tab, face, onFace, appearance, onAppearance, body
   );
 }
 
+// ─── CROP ─────────────────────────────────────────────────────────────────────
+// A square crop box over one uploaded picture, dragged with a finger or a
+// mouse. Used when an expression photograph is added by hand: the automatic
+// path guesses a head box from the vision model, and this is the answer to
+// what happens when you would rather say where the face is yourself.
+//
+// Square because every slot it fills is displayed and used as a square, and a
+// crop that has to be squashed later is not the crop that was chosen.
+//
+// The box is held in the rendered picture's own pixels rather than the file's,
+// so it needs no knowledge of the original size; the scaling is uniform, so a
+// square on screen is a square in the file. It is converted to fractions at
+// the last moment, which is what cropDataUrl takes.
+function CropBox({ dataUrl, label, onCancel, onConfirm }) {
+  const imgRef = useRef();
+  const [frame, setFrame] = useState(null); // rendered size of the picture
+  const [box, setBox] = useState(null);     // { x, y, size } in that same space
+  const drag = useRef(null);
+
+  // Set up once the picture has been laid out — before that there is no size
+  // to place a box inside of.
+  const onImgLoad = () => {
+    const el = imgRef.current;
+    if (!el) return;
+    const w = el.clientWidth, h = el.clientHeight;
+    const size = Math.round(Math.min(w, h) * 0.8);
+    setFrame({ w, h });
+    // Placed high rather than centred: on a photograph of a person the face is
+    // almost never in the middle, and starting on it saves a drag.
+    setBox({ x: Math.round((w - size) / 2), y: Math.round(Math.min((h - size) / 2, h * 0.08)), size });
+  };
+
+  const clamp = (b) => {
+    if (!frame) return b;
+    const size = Math.max(48, Math.min(b.size, frame.w, frame.h));
+    return {
+      size,
+      x: Math.max(0, Math.min(b.x, frame.w - size)),
+      y: Math.max(0, Math.min(b.y, frame.h - size)),
+    };
+  };
+
+  // One pointer, one gesture: either the whole box moves or one corner drags
+  // the size, with the opposite corner staying where it is.
+  const startDrag = (e, corner) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { corner, startX: e.clientX, startY: e.clientY, box };
+  };
+  const onDrag = (e) => {
+    const d = drag.current;
+    if (!d || !frame) return;
+    const dx = e.clientX - d.startX, dy = e.clientY - d.startY;
+    if (!d.corner) return setBox(clamp({ ...d.box, x: d.box.x + dx, y: d.box.y + dy }));
+    // A square tracks one axis, and the larger movement is the one meant.
+    const along = Math.abs(dx) > Math.abs(dy) ? dx : dy;
+    const sign = d.corner === "se" ? 1 : d.corner === "nw" ? -1 : (d.corner === "ne" ? (Math.abs(dx) > Math.abs(dy) ? 1 : -1) : (Math.abs(dx) > Math.abs(dy) ? -1 : 1));
+    const size = d.box.size + along * sign;
+    const next = { size, x: d.box.x, y: d.box.y };
+    // Corners that are not the anchor move the origin as the size changes.
+    if (d.corner === "nw") { next.x = d.box.x + (d.box.size - size); next.y = d.box.y + (d.box.size - size); }
+    if (d.corner === "ne") { next.y = d.box.y + (d.box.size - size); }
+    if (d.corner === "sw") { next.x = d.box.x + (d.box.size - size); }
+    setBox(clamp(next));
+  };
+  const endDrag = () => { drag.current = null; };
+
+  const handle = (corner, style) => (
+    <div onPointerDown={e => startDrag(e, corner)} onPointerMove={onDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
+      style={{ position: "absolute", width: 26, height: 26, background: "var(--pink)", opacity: 0.85, borderRadius: 4, touchAction: "none", cursor: "nwse-resize", ...style }} />
+  );
+
+  return (
+    <div style={{ ...S.overlay, zIndex: 210 }}>
+      <div style={{ ...S.modal, maxWidth: 480 }}>
+        <div style={S.modalHeader}>
+          <span style={S.modalTitle}>Crop — {label}</span>
+          <button style={S.iconBtn} onClick={onCancel}>✕</button>
+        </div>
+        <div style={{ ...S.modalBody, textAlign: "center" }}>
+          <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 8px", textAlign: "left" }}>
+            Drag the square onto her face, and its corners to resize. Head and shoulders works better than a tight
+            crop on the features.
+          </p>
+          {/* overflow hidden so the box's darkening shadow stops at the edge of
+              the picture instead of dimming the whole dialog — which also means
+              the handles have to sit inside the corners rather than on them. */}
+          <div style={{ position: "relative", display: "inline-block", lineHeight: 0, maxWidth: "100%", touchAction: "none", overflow: "hidden" }}>
+            <img ref={imgRef} src={dataUrl} alt="to crop" onLoad={onImgLoad}
+              style={{ maxWidth: "100%", maxHeight: "55vh", display: "block", userSelect: "none" }} draggable={false} />
+            {box && (
+              <div onPointerDown={e => startDrag(e, null)} onPointerMove={onDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
+                style={{ position: "absolute", left: box.x, top: box.y, width: box.size, height: box.size, border: "2px solid var(--pink)", boxShadow: "0 0 0 9999px rgba(0,0,0,0.45)", touchAction: "none", cursor: "move" }}>
+                {handle("nw", { left: 0, top: 0 })}
+                {handle("ne", { right: 0, top: 0, cursor: "nesw-resize" })}
+                {handle("sw", { left: 0, bottom: 0, cursor: "nesw-resize" })}
+                {handle("se", { right: 0, bottom: 0 })}
+              </div>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+            <button style={S.btnSecondary} onClick={onCancel}>Cancel</button>
+            <div style={{ flex: 1 }} />
+            {/* Skipping the crop is a real answer: a photograph that is already
+                a head shot has nothing to cut off, and the whole picture in a
+                slot has always been allowed. */}
+            <button style={S.btnSecondary} onClick={() => onConfirm(null)}>Use whole photo</button>
+            <button style={S.btnPrimary} disabled={!box || !frame}
+              onClick={() => onConfirm({ x: box.x / frame.w, y: box.y / frame.h, w: box.size / frame.w, h: box.size / frame.h })}>
+              Use crop
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── APPEARANCE EDITOR ────────────────────────────────────────────────────────
 // Everything about how a character looks, and the two images that carry it.
 // Was two modals — a face editor that re-shot the base image and a body editor
@@ -3435,11 +3725,14 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
   // reaches for when the scene names that expression — see the note in
   // site-config under image.expressions.
   const [expressions, setExpressions] = useState(() => ({ ...(character.expressionPhotos || {}) }));
+  const [exprNote, setExprNote] = useState("");
   const expressionRef = useRef();
   // Which slot the hidden file input is currently filling. Held in a ref
   // rather than state because the change event reads it, and a click that set
   // state would not have re-rendered the input before the picker opened.
   const expressionSlot = useRef(null);
+  // { slot, dataUrl } while the crop box is open over a picked photograph.
+  const [cropping, setCropping] = useState(null);
 
   const setFaceField = (groupKey, fieldKey, value) =>
     setFace(f => ({ ...f, [groupKey]: { ...f[groupKey], [fieldKey]: value } }));
@@ -3534,23 +3827,57 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
       // outstanding at the time gets the warning below rather than silence.
       setUsePhotos(true);
       if (hostedUrls.some(u => !u)) setError("Some photos could not be uploaded — they are shown faded and will not be used.");
+
+      // Read the expressions off them while they are here. Nothing is
+      // overwritten and nothing is forced: most photographs come back as none,
+      // which is the honest answer for an ordinary face.
+      setBusy("expressions");
+      const { filled, labels } = await autoFillExpressionSlots({ dataUrls, hostedUrls, existing: expressions });
+      // Merged against the latest state rather than replacing it: a slot filled
+      // by hand during the read is an answer, and this is still only a guess.
+      setExpressions(x => {
+        const next = { ...x };
+        for (const key of Object.keys(filled)) if (!expressionUrl(next[key])) next[key] = filled[key];
+        return next;
+      });
+      setExprNote(labels.length
+        ? `Filled from your photos: ${labels.join(", ")}. Check them below — clear any you disagree with.`
+        : "No clear expressions in those photos, so nothing was filled in. Upload one per slot below if you want them.");
     } catch (err) { setError(err.message); }
     setBusy("");
   };
 
+  // Picking a file opens the crop box rather than filling the slot. The
+  // automatic path guesses where the face is; by hand, saying so is the point.
   const addExpression = async (e) => {
     const file = (e.target.files || [])[0];
     const slot = expressionSlot.current;
     e.target.value = "";
     if (!file || !slot) return;
+    setError("");
+    try { setCropping({ slot, dataUrl: await readFileAsDataUrl(file) }); }
+    catch (err) { setError(err.message); }
+  };
+
+  // rect is null when they chose the whole photograph, and a crop that fails
+  // falls back to it too — a slot holding the uncropped picture is what this
+  // has always been, and is better than an empty one.
+  const finishCrop = async (rect) => {
+    const { slot, dataUrl } = cropping || {};
+    setCropping(null);
+    if (!slot || !dataUrl) return;
     setBusy(`expr:${slot}`); setError("");
     try {
-      const url = await persistUploadedPhoto(await readFileAsDataUrl(file));
+      const maxPx = (((CFG.image || {}).expressions || {}).autoFill || {}).maxCropPx;
+      const cropped = rect ? await cropDataUrl(dataUrl, rect, maxPx) : null;
+      if (rect && !cropped) setError("That crop could not be made, so the whole photo was used.");
       // No local data-URL preview here, unlike the photo strip: this one is
       // only ever useful to the image model, and a picture it cannot fetch
       // would sit in the grid looking filled while doing nothing.
+      const url = await persistUploadedPhoto(cropped || dataUrl);
       if (!url) throw new Error("that photo could not be uploaded");
-      setExpressions(x => ({ ...x, [slot]: url }));
+      setExpressions(x => ({ ...x, [slot]: { url, auto: false, cropped: !!cropped } }));
+      setExprNote("");
     } catch (err) { setError(err.message); }
     setBusy("");
   };
@@ -3826,13 +4153,17 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
                     <div onClick={() => { if (busy) return; expressionSlot.current = slot.key; expressionRef.current.click(); }}
                       title={slot.hint || slot.label}
                       style={{ width: 72, height: 72, borderRadius: 8, background: "var(--bg3)", cursor: busy ? "default" : "pointer", position: "relative", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", border: expressions[slot.key] ? "2px solid var(--pink)" : "2px dashed var(--bg4, #6664)" }}>
-                      {expressions[slot.key]
-                        ? <img src={expressions[slot.key]} alt={slot.label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      {expressionUrl(expressions[slot.key])
+                        ? <img src={expressionUrl(expressions[slot.key])} alt={slot.label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                         : <span style={{ fontSize: 20, color: "var(--text3)" }}>{busy === `expr:${slot.key}` ? "…" : "+"}</span>}
+                      {expressionIsAuto(expressions[slot.key]) && (
+                        <span title="Recognised from your photos — clear it if it is wrong"
+                          style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.55)", color: "#fff", fontSize: 9, textAlign: "center", letterSpacing: 0.4 }}>AUTO</span>
+                      )}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
                       <span style={{ fontSize: 11, color: "var(--text3)" }}>{slot.label}</span>
-                      {expressions[slot.key] && (
+                      {expressionUrl(expressions[slot.key]) && (
                         <button onClick={() => setExpressions(x => { const next = { ...x }; delete next[slot.key]; return next; })}
                           title="Remove"
                           style={{ border: "none", background: "none", color: "var(--text3)", fontSize: 11, cursor: "pointer", padding: 0 }}>✕</button>
@@ -3842,6 +4173,7 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
                 ))}
               </div>
               <input ref={expressionRef} type="file" accept="image/*" style={{ display: "none" }} onChange={addExpression} />
+              {exprNote && <p style={{ fontSize: 11, color: "var(--text3)", margin: "6px 0 0" }}>{exprNote}</p>}
 
               <div style={S.divider} />
 
@@ -3895,6 +4227,12 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
         </div>
       </div>
 
+      {cropping && (
+        <CropBox dataUrl={cropping.dataUrl}
+          label={((((CFG.image || {}).expressions || {}).slots || []).find(sl => sl.key === cropping.slot) || {}).label || cropping.slot}
+          onCancel={() => setCropping(null)} onConfirm={finishCrop} />
+      )}
+
       {lightbox && (
         <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
           onClick={() => setLightbox(null)}>
@@ -3912,7 +4250,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const safeCharacter = character || null;
   const [form, setForm] = useState(() => safeCharacter ? { ...safeCharacter } : {
     id: Date.now().toString(), lastUsedAt: Date.now(), name: "", persona: "", nsfw: false,
-    referenceImage: null, backgroundImage: null, autoImage: false, sourcePhotos: [],
+    referenceImage: null, backgroundImage: null, autoImage: false, sourcePhotos: [], expressionPhotos: {},
     gender: "Female", customGender: "", sliders: { ...DEFAULT_SLIDERS }, disabledSliders: [],
     age: "", maritalStatus: "", relationship: "", relationshipCustom: "",
     appearance: { ...DEFAULT_APPEARANCE },
@@ -3962,6 +4300,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   // image model can fetch — null while it is still going up, or if it failed.
   const [photos, setPhotos] = useState(() =>
     (safeCharacter && safeCharacter.sourcePhotos || []).map(url => ({ url, hosted: url })));
+  const [exprNote, setExprNote] = useState("");
   const fileRef = useRef();
 
   const handleVibeGenerate = async () => {
@@ -4009,11 +4348,11 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       // clothes have already been picked by hand.
       if (!(merged.closet || []).length) {
         try {
-          const { closet, missing } = await suggestCloset({ character: merged, model: settings.selectedModel });
+          const { closet, missing, who } = await suggestCloset({ character: merged, model: settings.selectedModel });
           if (closet.length) merged.closet = closet;
-          setClosetNote(missing.length
-            ? `Stocked ${closet.length} garments. Nothing in the wardrobe for: ${missing.join(", ")}.`
-            : (closet.length ? `Stocked ${closet.length} garments from the wardrobe.` : ""));
+          setClosetNote(closet.length
+            ? `Stocked ${closet.length} garments${who ? ` for ${who}` : ""}.${missing.length ? ` Nothing in the wardrobe for: ${missing.join(", ")}.` : ""}`
+            : "");
         } catch (e) { console.warn("Closet suggestion failed:", e.message); }
       }
       setForm(merged);
@@ -4119,6 +4458,20 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       setAppearanceNote(`Couldn't turn ${dataUrls.length > 1 ? "those photos" : "that photo"} into a base image (${err.message}) — it is being used as-is, so chat images will copy its framing and clothing.`);
     }
     setImgStage("");
+
+    // Sort the same photographs into expression slots while they are here.
+    // Only the clear ones — most faces come back as none — and the result is
+    // shown rather than filed away silently, since a slot they cannot see is
+    // one they cannot disagree with.
+    if (hosted.length) {
+      const { filled, labels } = await autoFillExpressionSlots({
+        dataUrls, hostedUrls, existing: form.expressionPhotos,
+      });
+      if (labels.length) {
+        setForm(f => ({ ...f, expressionPhotos: filled }));
+        setExprNote(`Recognised ${labels.join(", ")} — used when a chat scene calls for that expression. Change them in the appearance editor.`);
+      }
+    }
 
     // The age is still worth reading off the photo: it is not an appearance
     // setting, nothing else can estimate it, and it is offered rather than
@@ -4351,10 +4704,10 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
               onClick={async () => {
                 setClosetLoading(true); setClosetNote("");
                 try {
-                  const { closet, missing } = await suggestCloset({ character: form, model: settings.selectedModel });
+                  const { closet, missing, who } = await suggestCloset({ character: form, model: settings.selectedModel });
                   if (closet.length) setForm(f => ({ ...f, closet }));
                   setClosetNote(closet.length
-                    ? `Stocked ${closet.length} garments.${missing.length ? ` Nothing in the wardrobe for: ${missing.join(", ")}.` : ""}`
+                    ? `Stocked ${closet.length}${who ? ` for ${who}` : ""}.${missing.length ? ` Nothing in the wardrobe for: ${missing.join(", ")}.` : ""}`
                     : "Couldn't pick anything — is there a persona, and are there garments in the wardrobe?");
                 } catch (e) { setClosetNote(`Failed: ${e.message}`); }
                 setClosetLoading(false);
@@ -4452,6 +4805,20 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
                     style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6, background: "var(--bg3)", opacity: p.hosted ? 1 : 0.45 }} />
                 ))}
               </div>
+              {!!exprNote && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
+                  {(((CFG.image || {}).expressions || {}).slots || [])
+                    .filter(slot => expressionUrl((form.expressionPhotos || {})[slot.key]))
+                    .map(slot => (
+                      <div key={slot.key} style={{ textAlign: "center" }}>
+                        <img src={expressionUrl(form.expressionPhotos[slot.key])} alt={slot.label}
+                          style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 6, background: "var(--bg3)", display: "block" }} />
+                        <span style={{ fontSize: 10, color: "var(--text3)" }}>{slot.label}</span>
+                      </div>
+                    ))}
+                </div>
+              )}
+              {!!exprNote && <p style={{ fontSize: 11, color: "var(--text3)", margin: "4px 0 0" }}>{exprNote}</p>}
               <p style={{ fontSize: 11, color: "var(--text3)", margin: "4px 0 0" }}>
                 {photos.length > 1
                   ? `${photos.length} photos of her, read together — different angles and lighting describe a face better than one shot does.`
@@ -4846,7 +5213,13 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
               status: "active",
               steps: (i.steps || []).map(st => ({ ...st, done: false })),
             }));
-      return { ...prev, currentSessionId: newSessionId, sliders: resetSliders, charOutfit: null, userOutfit: null, staging: null, intentions };
+      // worn and wornState go with the outfit text. They were being left
+      // behind, so a character who ended the last scene in a bra and one shoe
+      // began the next one — a coffee shop at noon, per the freshly inferred
+      // prose — still wearing them, and it was those flat lays that reached
+      // the image model. The words said one thing and the pictures another,
+      // and the pictures win.
+      return { ...prev, currentSessionId: newSessionId, sliders: resetSliders, charOutfit: null, userOutfit: null, worn: [], wornState: {}, staging: null, intentions };
     });
     setMessages([]);
     setMessagesLoaded(false);
@@ -4880,12 +5253,36 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
         ? `\n- intentions: up to ${intentCfg.maxActive} things ${currentChar.name} privately wants out of THIS situation and would work toward without saying so. Concrete and achievable in a conversation, not moods. Each needs a goal (second person, under 15 words) and nerve 0-100 for how much courage it takes her. An empty array is fine if the scenario sets nothing up.${intentionTone ? ` ${intentionTone}` : ""}`
         : "";
       const intentionField = wantIntentions ? `, "intentions": [{"goal": "...", "nerve": 40}]` : "";
+      // Her own clothes, offered by number so the scenario can dress her out
+      // of them rather than inventing an outfit beside a closet full of
+      // photographed garments. Same numbering the tracker uses.
+      let closetList = [];
+      try {
+        const library = await loadWardrobeLibrary();
+        closetList = closetGarments(currentChar, library).filter(g => g.image);
+      } catch (e) {
+        console.warn("[scene] wardrobe unavailable, dressing in words only:", e.message);
+        closetList = [];
+      }
+      console.info(`[scene] inferring setup for "${scenario.label || "(no label)"}" — ${currentChar.name} has ${(currentChar.closet || []).length} in the closet, ${closetList.length} usable`);
+      // Its own section at the end rather than a bullet in the middle. Buried
+      // in the list it sat directly above "use null for anything the scenario
+      // does not support", which is an invitation to answer null, and it was
+      // one line of instruction against a numbered list of garments.
+      const closetAsk = closetList.length
+        ? `\n\nWARDROBE — these are ${currentChar.name}'s own clothes:\n` +
+          closetList.map((g, i) => `${i + 1}. ${g.name || "unnamed"}${g.category ? ` (${g.category})` : ""}`).join("\n") +
+          `\n\n"worn" is which of those she has on for this scene, as an array of their numbers. This is required and must be an array — never null. Dress her as someone would really be dressed, from the skin out: underwear FIRST — both halves, something on top and something underneath, chosen separately — and then the clothes the scene calls for over them. A bra is not underwear on its own. Skip a half only where the scene genuinely has her without it. Take a whole set or none of it, never two of something she would only wear one of, and use [] only if genuinely nothing here suits the scene. charOutfit must then describe those same clothes and nothing else.`
+        : "";
+      const closetField = closetList.length ? `, "worn": [1, 2]` : "";
       const raw = await aiComplete({
         // The conversation model: reading a scene and inferring what it implies
         // is the task the small model kept failing at for wardrobe and staging.
         model: settings.selectedModel,
         messages: [{ role: "user", content:
-`Given this opening scenario, infer the starting state of the scene. Base everything on the setting and context — be specific, realistic and concrete.
+`${scenario.blank
+  ? `No scene has been chosen — the conversation is starting cold. Infer an ordinary, plausible starting state for ${currentChar.name}: a normal moment in her own life, on a normal day. Dress her casually for that, in what she would actually have on around the house or out doing something unremarkable — not an outfit for an occasion. Keep the location and poses ordinary too, or null where nothing suggests one.`
+  : `Given this opening scenario, infer the starting state of the scene. Base everything on the setting and context — be specific, realistic and concrete.`}
 
 Character: ${currentChar.name}, ${currentChar.age || ""} ${currentChar.gender || ""}, ${appearanceDesc}
 Persona: ${currentChar.persona || ""}
@@ -4902,12 +5299,19 @@ Infer:
 - userPose: the User's body position, same phrasing, e.g. "standing in the doorway"
 - proximity: physical distance between them, e.g. "across the room", "an arm's length apart"${intentionAsk}
 
-Keep each value under 15 words. Use null for anything the scenario genuinely does not support.
-Return ONLY valid JSON: {"charOutfit": "...", "userOutfit": "...", "location": "...", "charPose": "...", "userPose": "...", "proximity": "..."${intentionField}}
+Keep each value under 15 words. Use null for anything the scenario genuinely does not support.${closetAsk}
+Return ONLY valid JSON: {"charOutfit": "...", "userOutfit": "...", "location": "...", "charPose": "...", "userPose": "...", "proximity": "..."${closetField}${intentionField}}
 No other text.` }]
       });
       const parsed = parseJsonReply(raw);
-      if (!parsed) return;
+      // Was silent. A reply the parser cannot read looked exactly like a scene
+      // that set nothing — no outfit, no staging, no garments, no error — and
+      // that is the case worth being able to recognise, because it is the one
+      // a longer prompt makes more likely.
+      if (!parsed) {
+        console.warn("[scene] setup reply could not be parsed as JSON:", String(raw || "").slice(0, 300));
+        return;
+      }
       commitCharacter(prev => {
         const next = { ...prev };
         let changed = false;
@@ -4915,6 +5319,31 @@ No other text.` }]
         const userOutfit = cleanOutfitUpdate(parsed.userOutfit);
         if (charOutfit) { next.charOutfit = charOutfit; changed = true; }
         if (userOutfit) { next.userOutfit = userOutfit; changed = true; }
+        // Garments she owns, chosen for this scene. Only numbers that are
+        // really on the list count, and the prose above stands whether or not
+        // any of them did: the closet cannot cover every scenario, and a
+        // scene it cannot dress should still be dressed in words.
+        console.info(`[scene] closet offered ${closetList.length}, worn returned ${JSON.stringify(parsed.worn)}`);
+        if (closetList.length && Array.isArray(parsed.worn)) {
+          const worn = [...new Set(parsed.worn
+            .map(n => closetList[Number(n) - 1])
+            .filter(Boolean)
+            .map(g => g.id))];
+          if (worn.length) {
+            next.worn = worn;
+            next.wornState = {};
+            // The prose is rewritten from the garments actually chosen, the
+            // same way tapping one in the closet writes its name. Left alone
+            // it was invented in the same breath and could name a black dress
+            // while the flat lays showed scrubs — and then the chat model and
+            // the image model are describing different afternoons.
+            const names = worn
+              .map(id => (closetList.find(g => g.id === id) || {}).name)
+              .filter(Boolean);
+            if (names.length) next.charOutfit = names.join(", ");
+            changed = true;
+          }
+        }
         const staging = { ...(prev.staging || EMPTY_STAGING) };
         let stagingChanged = false;
         for (const key of STAGING_KEYS) {
@@ -4922,6 +5351,7 @@ No other text.` }]
           if (value) { staging[key] = value; stagingChanged = true; }
         }
         if (stagingChanged) { next.staging = staging; changed = true; }
+        console.info(`[scene] applied — outfit ${charOutfit ? "yes" : "no"}, staging ${stagingChanged ? "yes" : "no"}, worn ${(next.worn || []).length}`);
         // Only seeded into an empty list, so a hand-written goal is never
         // displaced by one the scenario suggested.
         if (wantIntentions && Array.isArray(parsed.intentions) && activeIntentions(prev).length === 0) {
@@ -4968,15 +5398,24 @@ No other text.` }]
       // Everything worn is listed, not only what is visible: she is the one
       // who might take the jumper off, and the bra under it is the reason that
       // is worth doing.
-      let wornList = [];
+      // The whole closet, not only what she has on, with the worn ones marked.
+      //
+      // It used to be the worn list alone, and that made dressing
+      // one-directional: the vocabulary could say a jacket had come off but
+      // had no way to say one had gone on, so "she puts on a jacket" changed
+      // the prose and left the garments untouched. One list of everything she
+      // owns fixes it — a garment that is not currently worn, reported "on",
+      // is a garment she has just put on.
+      let trackList = [];
       try {
         const library = await loadWardrobeLibrary();
-        wornList = closetGarments({ closet: currentChar.worn || [] }, library);
-      } catch { wornList = []; }
-      const wornBlock = wornList.length
-        ? `\n\n${currentChar.name} is wearing these specific garments:\n` +
-          wornList.map((g, i) => `${i + 1}. ${g.name || "unnamed"}${g.category ? ` (${g.category})` : ""}`).join("\n") +
-          `\n\nFor each one report how it is being worn NOW, as "garments": an object keyed by those numbers.\nUse exactly one of these words:\n- "on" — worn normally, as intended\n- "open" — undone, unbuttoned, unzipped but still on\n- "aside" — pulled down, pushed up, off one shoulder, round the ankles: still on her but out of place\n- "off" — taken off completely and no longer being worn\nOmit a garment entirely if nothing about it changed and it is simply on. Never guess: only report what the conversation shows.`
+        trackList = closetGarments(currentChar, library);
+      } catch { trackList = []; }
+      const wornIds = new Set(currentChar.worn || []);
+      const wornBlock = trackList.length
+        ? `\n\nThese are ${currentChar.name}'s own clothes. The ones marked WEARING are on her right now; the rest are in her wardrobe:\n` +
+          trackList.map((g, i) => `${i + 1}. ${g.name || "unnamed"}${g.category ? ` (${g.category})` : ""}${wornIds.has(g.id) ? " — WEARING" : ""}`).join("\n") +
+          `\n\nReport any garment whose state CHANGED in the conversation above, as "garments": an object keyed by those numbers.\nUse exactly one of these words:\n- "on" — she is now wearing it normally. For something not marked WEARING, this means she has just put it on.\n- "open" — undone, unbuttoned, unzipped, but still on\n- "aside" — pulled down, pushed up, off one shoulder, round the ankles: still on her but out of place\n- "off" — taken off completely and no longer being worn\nOmit every garment that did not change. Only report what the conversation actually shows: putting something on needs her to have put it on, not merely to own it.`
         : "";
       const raw = await aiComplete({
         // The conversation model, not the 8B one. Two people, partial states
@@ -5011,7 +5450,7 @@ Rules:
 ${wornBlock}
 
 Return ONLY valid JSON:
-{"charOutfit": null, "charEvidence": null, "userOutfit": null, "userEvidence": null${wornList.length ? ', "garments": {}' : ""}}
+{"charOutfit": null, "charEvidence": null, "userOutfit": null, "userEvidence": null${trackList.length ? ', "garments": {}' : ""}}
 No other text.` }]
       });
       const parsed = parseJsonReply(raw);
@@ -5033,14 +5472,21 @@ No other text.` }]
       // will eventually restate one wrongly.
       const statuses = {};
       const removed = new Set();
+      const added = [];
       const reported = (parsed.garments && typeof parsed.garments === "object") ? parsed.garments : {};
       for (const [key, value] of Object.entries(reported)) {
-        const garment = wornList[Number(key) - 1];
+        const garment = trackList[Number(key) - 1];
         if (!garment) continue;
         const status = String(value || "").trim().toLowerCase();
-        if (status === "off") removed.add(garment.id);
-        else if (["open", "aside"].includes(status)) statuses[garment.id] = status;
-        else if (status === "on") statuses[garment.id] = "on";
+        if (status === "off") { removed.add(garment.id); continue; }
+        if (!["on", "open", "aside"].includes(status)) continue;
+        // Anything she was not already wearing has just been put on.
+        if (!wornIds.has(garment.id)) added.push(garment.id);
+        statuses[garment.id] = status;
+      }
+      if (Object.keys(reported).length) {
+        console.info(`[wardrobe] garments changed: ${JSON.stringify(reported)}` +
+          `${added.length ? ` (put on ${added.length})` : ""}${removed.size ? ` (took off ${removed.size})` : ""}`);
       }
       if (!charProposed && !userProposed && !Object.keys(reported).length) return;
       commitIfCurrent(epoch, prev => {
@@ -5056,14 +5502,18 @@ No other text.` }]
         // was: taking a jacket off left her with no wardrobe references and
         // sent the whole outfit back to being words.
         const prevWorn = prev.worn || [];
-        const worn = removed.size ? prevWorn.filter(id => !removed.has(id)) : prevWorn;
+        const kept = removed.size ? prevWorn.filter(id => !removed.has(id)) : prevWorn;
+        // Put-on garments go on the end, so the ones she was already wearing
+        // keep their place and the newest thing is the one that drops off if
+        // the visible cap is ever reached.
+        const worn = added.length ? [...kept, ...added.filter(id => !kept.includes(id))] : kept;
         const wornState = {};
         for (const id of worn) {
           const next = statuses[id] || (prev.wornState || {})[id];
           if (next && next !== "on") wornState[id] = next;
         }
         const sameOutfits = charOutfit === prev.charOutfit && userOutfit === prev.userOutfit;
-        const sameWorn = worn.length === prevWorn.length;
+        const sameWorn = worn.length === prevWorn.length && worn.every((id, i) => id === prevWorn[i]);
         const sameState = JSON.stringify(wornState) === JSON.stringify(prev.wornState || {});
         if (sameOutfits && sameWorn && sameState) return prev;
         return { ...prev, charOutfit, userOutfit, worn, wornState };
@@ -5652,7 +6102,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       {!discreetMode && <div style={S.chatBgOverlay} />}
 
       {/* Header */}
-      <div style={S.chatHeader} className={discreetMode ? "discreet-chat-header" : ""}>
+      <div style={S.chatHeader} className={"chat-header " + (discreetMode ? "discreet-chat-header" : "")}>
         {discreetMode ? (
           <>
             <button style={S.backBtn} className="discreet-back-btn" onClick={onBack}>‹ Back</button>
@@ -5669,20 +6119,20 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
           </>
         ) : (
           <>
-            <button style={S.backBtn} onClick={onBack}>← Back</button>
-            <div style={S.chatHeaderInfo}>
+            <button style={S.backBtn} className="chat-back-btn" onClick={onBack}>← Back</button>
+            <div style={S.chatHeaderInfo} className="chat-header-info">
               {characterAvatar(character) && (
                 <img src={characterAvatar(character)} alt="Edit face" title="Edit face"
                   style={{ ...S.chatAvatar, cursor: "pointer" }}
                   onClick={() => setShowAppearanceEditor(true)} />
               )}
-              <div style={{ minWidth: 0 }}>
-                <span style={S.chatCharName}>{character.name}</span>
-                <div style={{ display: "flex", gap: 5, marginTop: 2, marginBottom: 4 }}>
+              <div style={{ minWidth: 0 }} className="chat-idblock">
+                <span style={S.chatCharName} className="chat-char-name">{character.name}</span>
+                <div style={{ display: "flex", gap: 5, marginTop: 2, marginBottom: 4 }} className="chat-badges">
                   {character.gender && <span style={{ ...S.genderBadge, fontSize: 9 }}>{character.gender === "Custom" ? (character.customGender || "Custom") : character.gender}</span>}
                   {character.nsfw && <span style={{ ...S.nsfwBadge, fontSize: 9 }}>NSFW</span>}
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 140, maxWidth: 200 }}>
+                <div className="chat-sliders" style={{ display: "flex", flexDirection: "column", gap: 3, width: "100%", minWidth: 0, maxWidth: 200 }}>
                   {[
                     { key: "familiarity",      icon: "🤝", label: "Familiarity",  color: "#5080c8" },
                     { key: "likesUser",        icon: "💛", label: "Likes",        color: "#c87830" },
@@ -5690,7 +6140,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                   ].filter(({ key }) => !(character.disabledSliders || []).includes(key)).map(({ key, icon, label, color }) => {
                     const val = (character.sliders || DEFAULT_SLIDERS)[key] ?? DEFAULT_SLIDERS[key] ?? 50;
                     return (
-                      <div key={key} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <div key={key} className="chat-slider-row" style={{ display: "flex", alignItems: "center", gap: 4 }}>
                         <span style={{ fontSize: 9, width: 12 }}>{icon}</span>
                         <div style={{ flex: 1, height: 4, borderRadius: 2, background: "rgba(0,0,0,0.08)" }}>
                           <div style={{ width: `${val}%`, height: "100%", borderRadius: 2, background: color, transition: "width 0.6s ease" }} />
@@ -5702,16 +6152,16 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                 </div>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <div className="chat-header-btns" style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
               <button className="discreet-toggle" title={theme === "dark" ? "Light theme" : "Dark theme"} onClick={onToggleTheme}>{theme === "dark" ? "☀" : "🌙"}</button>
               <button className="discreet-toggle" title="Discreet mode" onClick={onToggleDiscreet}>👁</button>
-              <button style={S.iconBtnLight} title="Image gallery" onClick={() => setShowGallery(true)}>🖼</button>
-              <button style={S.iconBtnLight} title="New conversation" onClick={handleRestart}>↺</button>
+              <button style={S.iconBtnLight} className="chat-icon-btn" title="Image gallery" onClick={() => setShowGallery(true)}>🖼</button>
+              <button style={S.iconBtnLight} className="chat-icon-btn" title="New conversation" onClick={handleRestart}>↺</button>
               {/* Personality button */}
-              <button style={S.iconBtnLight} title="Character settings" onClick={() => setShowPersonality(true)}>⚙</button>
+              <button style={S.iconBtnLight} className="chat-icon-btn" title="Character settings" onClick={() => setShowPersonality(true)}>⚙</button>
               {/* Background button */}
               <div style={{ position: "relative" }}>
-                <button style={S.iconBtnLight} title="Change background" onClick={() => setShowBgMenu(v => !v)}>🖼</button>
+                <button style={S.iconBtnLight} className="chat-icon-btn" title="Change background" onClick={() => setShowBgMenu(v => !v)}>🖼</button>
                 {showBgMenu && (
                   <div style={S.bgMenu}>
                     <div style={S.bgMenuTitle}>Set Background</div>
@@ -5788,8 +6238,12 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                       onClick={() => { setOpeningScenarios(null); setOpeningLoading(true); generateOpeningScenarios({ character, model: settings.selectedModel, settings, exclude: seenScenarioLabels }).then(s => { setOpeningScenarios(s); setSeenScenarioLabels(prev => [...prev, ...s.map(sc => sc.label)]); }).catch(() => {}).finally(() => setOpeningLoading(false)); }}>
                       ↺ Different options
                     </button>
+                    {/* Starting blank used to set nothing at all — no outfit,
+                        no staging, no clothes — so a character with a closet
+                        full of garments began undressed. There is no scene to
+                        read, so it dresses her for an ordinary day instead. */}
                     <button style={{ ...S.btnSecondary, marginTop: 0 }}
-                      onClick={() => setOpeningScenarios(null)}>
+                      onClick={() => { setOpeningScenarios(null); inferScenarioSetup({ blank: true }, character); }}>
                       Skip — start blank
                     </button>
                   </div>
@@ -6739,11 +7193,11 @@ const S = {
   btnSecondary: { background:"var(--blue-bg)", border:"1px solid var(--blue-border)", color:"var(--blue)", borderRadius:20, padding:"10px 22px", cursor:"pointer", fontSize:13, fontWeight:700 },
   iconBtn: { background:"transparent", border:"none", color:"var(--text3)", cursor:"pointer", fontSize:16, padding:"4px 8px" },
   iconBtnLight: { background:"var(--bg3)", border:"1px solid var(--border)", borderRadius:10, padding:"7px 12px", cursor:"pointer", fontSize:14, color:"var(--text2)", fontWeight:600 },
-  chatWindow: { height:"100dvh", minHeight:"-webkit-fill-available", display:"flex", flexDirection:"column", position:"relative", backgroundSize:"cover", backgroundPosition:"center", backgroundRepeat:"no-repeat" },
+  chatWindow: { height:"100dvh", width:"100%", overflowX:"hidden", minHeight:"-webkit-fill-available", display:"flex", flexDirection:"column", position:"relative", backgroundSize:"cover", backgroundPosition:"center", backgroundRepeat:"no-repeat" },
   chatBgOverlay: { position:"absolute", inset:0, zIndex:0, background:"linear-gradient(to bottom, rgba(var(--bg-rgb),0.75) 0%, rgba(var(--bg-rgb),0.45) 40%, rgba(var(--bg-rgb),0.82) 100%)" },
-  chatHeader: { position:"relative", zIndex:10, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 16px", background:"rgba(var(--bg-rgb),0.95)", backdropFilter:"blur(12px)", borderBottom:"1px solid var(--border)", boxShadow:"0 2px 8px var(--shadow)" },
+  chatHeader: { position:"relative", zIndex:10, display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8, maxWidth:"100%", padding:"12px 16px", background:"rgba(var(--bg-rgb),0.95)", backdropFilter:"blur(12px)", borderBottom:"1px solid var(--border)", boxShadow:"0 2px 8px var(--shadow)" },
   backBtn: { background:"transparent", border:"none", color:"var(--blue)", cursor:"pointer", fontSize:14, fontWeight:700, padding:"4px 8px" },
-  chatHeaderInfo: { display:"flex", alignItems:"center", gap:10, flex:1, justifyContent:"center" },
+  chatHeaderInfo: { display:"flex", alignItems:"center", gap:10, flex:"1 1 160px", minWidth:0, justifyContent:"center" },
   chatAvatar: { width:34, height:34, borderRadius:"50%", objectFit:"cover", border:"3px solid var(--pink-light)" },
   chatCharName: { fontSize:16, fontWeight:800, color:"var(--pink)" },
   bgMenu: { position:"absolute", right:0, top:"110%", zIndex:20, background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:14, padding:8, minWidth:190, boxShadow:"0 8px 24px var(--shadow)" },
