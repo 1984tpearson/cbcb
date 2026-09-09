@@ -634,6 +634,48 @@ window.ImagePrompt = {
       return written || buildAppearancePrompt(appearance);
     }
 
+    // The same words with the body marks taken out, for the one reader whose
+    // output becomes an image prompt. See CFG.image.bodyMarks for why: a mark
+    // the extractor is told about is a mark it writes a scene around, and a
+    // scene written around a navel piercing has already decided that the
+    // midriff is bare.
+    //
+    // Sentence granularity, because that is how these descriptions are built —
+    // the vision model is asked for two or three sentences and gives a
+    // distinguishing feature its own one. A mark sharing a sentence with real
+    // description survives, which is the deliberate trade: losing the build and
+    // the colouring to remove a piercing is a worse outcome than the piercing.
+    //
+    // Pure and exported so the rule can be checked across many descriptions in
+    // a script rather than one generation at a time.
+    function stripBodyMarks(text) {
+      const cfg = (CFG.image && CFG.image.bodyMarks) || {};
+      const terms = cfg.terms || [];
+      const keep = cfg.keepTerms || [];
+      const source = String(text || "").trim();
+      if (!source || !terms.length) return source;
+
+      // Escaped because the lists are config the owner can edit, and a stray
+      // bracket in one should not throw from inside a prompt build.
+      const esc = t => String(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const anyOf = list => new RegExp("\\b(?:" + list.map(esc).join("|") + ")\\b", "i");
+      const markRe = anyOf(terms);
+      const keepRe = keep.length ? anyOf(keep) : null;
+
+      // Kept with their terminators so what survives still reads as prose.
+      const sentences = source.match(/[^.!?]+[.!?]*\s*/g) || [source];
+      const kept = sentences.filter(sentence => {
+        if (!markRe.test(sentence)) return true;
+        return keepRe ? keepRe.test(sentence) : false;
+      });
+
+      // Everything stripped means the description was nothing but marks. An
+      // empty appearance is worse than one carrying a piercing — the extractor
+      // would then be told nothing at all about who it is looking at.
+      const result = kept.join("").replace(/\s+/g, " ").trim();
+      return result || source;
+    }
+
     function buildAppearancePrompt(appearance, { measurements = true } = {}) {
       if (!appearance) return "";
       const a = appearance;
@@ -716,7 +758,9 @@ window.ImagePrompt = {
     // the same time, and says which of the viewer's own parts are in the shot.
     async function extractScene({ messages, character, model, aiComplete }) {
       const recent = messages.slice(-10).filter(m => m.role !== "image").map(m => `${m.role === "user" ? "User" : character.name}: ${m.content}`).join("\n");
-      const appearanceDesc = appearanceWords(character.appearance);
+      // Stripped, not the full words: this is the one path whose output is
+      // handed to the image model. See stripBodyMarks.
+      const appearanceDesc = stripBodyMarks(appearanceWords(character.appearance));
       const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
       const ageDesc = character.age ? `${character.age} year old` : "";
       // charDesc may be passed in already built — the lab holds it as editable
@@ -936,7 +980,7 @@ window.ImagePrompt = {
       ACTION_TEXT_RE, extractActionText,
       EMPTY_STAGING, STAGING_KEYS, hasStaging, buildStagingImageDesc,
       HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
-      appearancePhrasePreview, buildAppearancePrompt, appearanceWords, pickFaceVariation,
+      appearancePhrasePreview, buildAppearancePrompt, appearanceWords, stripBodyMarks, pickFaceVariation,
       buildFacePrompt, buildFaceEditPrompt, faceFieldPhrase, isFaceUnset, isFaceStructureUnset,
       buildBodyBasePrompt, buildUploadBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
       pickExpressionReference,

@@ -1680,6 +1680,48 @@
       // can render literally instead. Tested: the trimmed version behaves the
       // same, without the face and frame tokens.
       povBase: "first person POV through the viewer's own eyes",
+
+      // ── Body marks and the image path ────────────────────────────────────
+      // Tattoos already reach chat images only as pixels in the base image,
+      // never as words — the base image is the source of truth for what is on
+      // her skin, and a second account of it only argues with the picture.
+      // Piercings, scars, moles and birthmarks are the same kind of thing and
+      // were not covered, because they arrive by a different route: the vision
+      // model's written `appearance.description`, which is handed to the scene
+      // extractor. Told about a navel piercing, the extractor writes a scene
+      // that shows one — and showing one means baring the midriff, so a detail
+      // that should have been incidental starts deciding the framing and the
+      // clothing of every photograph.
+      //
+      // So the description is stripped of them on the way to the extractor
+      // ONLY. The [APPEARANCE] note the chat model reads keeps them: knowing
+      // she has a navel piercing is exactly the sort of thing her prose should
+      // be able to mention, and prose cannot force a camera anywhere.
+      bodyMarks: {
+        // A sentence is dropped when it names one of these…
+        terms: [
+          "tattoo", "tattoos", "tattooed", "ink",
+          "piercing", "piercings", "pierced", "stud", "studs",
+          "navel", "belly button", "belly-button", "belly ring", "navel ring",
+          "nipple ring", "septum",
+          "birthmark", "birthmarks", "scar", "scars",
+          "mole", "moles", "beauty mark", "beauty spot",
+          "stretch marks",
+        ],
+        // …and does NOT also carry one of these. A description often opens
+        // with "a slender build, fair skin that shows no prominent scars" —
+        // one sentence holding the build, the height and the colouring, which
+        // happens to say the word "scars". Dropping that whole sentence to
+        // remove a mark that is not even there would cost far more than it
+        // saves, so a sentence doing real descriptive work is always kept.
+        keepTerms: [
+          "build", "height", "tall", "short", "slender", "slim", "curvy",
+          "frame", "figure", "athletic", "stocky", "petite",
+          "hair", "eyes", "eye", "skin", "complexion", "face", "facial",
+          "nose", "lips", "mouth", "jaw", "cheek", "cheekbones", "brows",
+          "shoulders", "freckles",
+        ],
+      },
       povArmsModifier: "the viewer's own hand and forearm in the foreground, entering frame from the camera",
       povArmsOwnedModifier: "the foreground hand and arm belong to the viewer, one pair only",
       // Phrased as what IS in the shot, not what is absent. "no hands or arms
