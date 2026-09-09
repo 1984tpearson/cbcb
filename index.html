@@ -6088,6 +6088,22 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     dataApi.saveGallery(character.id, next).catch(e => setError(e.message));
   };
 
+  // Promotes a picture already taken of her to the avatar — the clothed
+  // portrait shown on her card, in the chat header and everywhere else she
+  // appears. Deliberately touches avatarImage ONLY: referenceImage is the nude
+  // base the image model learns her body from, and a dressed gallery shot put
+  // there would quietly change what every future generation is built on. See
+  // the note above characterAvatar.
+  //
+  // The background is left alone even when it was following the old avatar. It
+  // is set from this same grid one button along, so anyone who wanted both
+  // can say so in two taps — whereas a background that moved on its own would
+  // be a change nobody asked for behind a dialog that did not mention it.
+  const handleSetAvatar = (url) => {
+    commitCharacter(prev => ({ ...prev, avatarImage: url }));
+    setShowGallery(false);
+  };
+
   const handleSetBackground = (url) => {
     setBgImage(url);
     commitCharacter(prev => ({ ...prev, backgroundImage: url }));
@@ -6422,7 +6438,16 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
                         <p style={{ fontSize:10, color:"white", margin:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.prompt}</p>
                       </div>
                       <div style={{ position:"absolute", top:6, right:6, display:"flex", gap:4 }}>
-                        <button style={{ background:"var(--pink)", border:"none", borderRadius:6, padding:"4px 8px", fontSize:10, color:"white", cursor:"pointer", fontWeight:700 }}
+                        {/* Marked when it is already the avatar, so the grid
+                            answers "which one is her picture" without having
+                            to remember which one was tapped. */}
+                        <button title={character.avatarImage === item.url ? "Already her avatar" : "Use as avatar"}
+                          style={{ background: character.avatarImage === item.url ? "var(--blue)" : "rgba(0,0,0,0.5)", border:"none", borderRadius:6, padding:"4px 8px", fontSize:10, color:"white", cursor:"pointer", fontWeight:700 }}
+                          onClick={e => { e.stopPropagation(); handleSetAvatar(item.url); }}>
+                          {character.avatarImage === item.url ? "★" : "☆"} AV
+                        </button>
+                        <button title="Use as chat background"
+                          style={{ background:"var(--pink)", border:"none", borderRadius:6, padding:"4px 8px", fontSize:10, color:"white", cursor:"pointer", fontWeight:700 }}
                           onClick={e => { e.stopPropagation(); handleSetBackground(item.url); setShowGallery(false); }}>
                           🌅 BG
                         </button>
