@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=66"></script>
-  <script src="image-prompt.js?v=31"></script>
+  <script src="site-config.js?v=67"></script>
+  <script src="image-prompt.js?v=32"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -473,7 +473,7 @@ const {
   HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
   appearancePhrasePreview, buildAppearancePrompt, appearanceWords, pickFaceVariation,
   buildFacePrompt, buildFaceEditPrompt, isFaceUnset, isFaceStructureUnset,
-  buildBodyBasePrompt, buildUploadBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
+  buildBodyBasePrompt, buildUploadBasePrompt, buildAvatarPrompt, buildExpressionPrompt, buildChatCharDesc, appearanceDiffKeys,
   pickExpressionReference,
   isUserUndressed, povSelfBody, isIntimateScene,
   visibleWornGarments,
@@ -2038,6 +2038,24 @@ async function generateSubjectBaseImage({ subject, imageModel, extra }) {
   });
 }
 
+// One expression slot, generated from the base image instead of uploaded.
+//
+// This is what makes expressions work at all for a face that was generated
+// rather than photographed — which is most of them, and every user profile
+// that did not start from a photo. Before it, a slot could only be filled from
+// a photograph, so the picker had nothing to offer and stayed hidden.
+//
+// Anchored to the base image, like the avatar: the reference carries the
+// identity and the prompt carries only the expression.
+async function generateExpressionPhoto({ base, slot, imageModel, extra }) {
+  return generateImageWiro({
+    prompt: buildExpressionPrompt({ expression: slot.hint || slot.label, extra }),
+    model: imageModel,
+    initImage: base,
+    seed: Math.floor(Math.random() * 2147483647),
+  });
+}
+
 // The clothed portrait, anchored to the base image so it is a portrait of that
 // person rather than a fresh one. An empty outfit is filled by asking the
 // language model what they would wear, and handed back through onOutfit so the
@@ -3061,7 +3079,8 @@ function UserProfileEditor({ persona, settings, title, onSave, onClose }) {
               <ExpressionSlots expressions={expressions} onChange={setExpressions}
                 disabled={imgLoading || analysing} note={exprNote}
                 warnNoPhotos={!(form.sourcePhotos || []).length}
-                subject="you" onError={setError} />
+                subject="you" onError={setError}
+                baseImage={form.referenceImage} imageModel={settings.imageModel} />
 
               <div style={S.divider} />
 
@@ -4282,7 +4301,7 @@ function CropBox({ dataUrl, label, onCancel, onConfirm }) {
 // subject is the word for whose face this is — "her" in the character editors,
 // "you" in the user's profile — so the copy reads correctly on both without
 // two versions of it.
-function ExpressionSlots({ expressions, onChange, disabled, note, warnNoPhotos, subject = "her", onError }) {
+function ExpressionSlots({ expressions, onChange, disabled, note, warnNoPhotos, subject = "her", onError, baseImage, imageModel }) {
   // { slot, dataUrl } while the crop box is open over a picked photograph.
   const [cropping, setCropping] = useState(null);
   const [busySlot, setBusySlot] = useState("");
@@ -4328,6 +4347,20 @@ function ExpressionSlots({ expressions, onChange, disabled, note, warnNoPhotos, 
     setBusySlot("");
   };
 
+  // Generating needs a base image to anchor to — without one the model would
+  // invent a stranger's face, which is worse than an empty slot.
+  const canGenerate = !!baseImage && !!imageModel;
+  const generate = async (slot) => {
+    setBusySlot(slot.key); fail("");
+    try {
+      const url = await generateExpressionPhoto({ base: baseImage, slot, imageModel });
+      // gen, not auto: "auto" means recognised from photographs you supplied,
+      // and a made one is a different claim about where the face came from.
+      onChange({ ...expressions, [slot.key]: { url, auto: false, gen: true } });
+    } catch (err) { fail(err.message); }
+    setBusySlot("");
+  };
+
   const off = disabled || !!busySlot;
 
   return (
@@ -4337,6 +4370,7 @@ function ExpressionSlots({ expressions, onChange, disabled, note, warnNoPhotos, 
         One photo of {subject} per expression. When a scene calls for one, that photo is sent with the base
         image, so the smile in the picture is {subject === "you" ? "yours" : "hers"} rather than one the generator made up. An empty slot changes
         nothing — the image is generated exactly as it is now.
+        {canGenerate ? " Tap a tile to upload a photograph, or ✦ to make one from the base image." : " Tap a tile to upload a photograph."}
       </p>
       {warnNoPhotos && (
         <p style={{ fontSize: 11, color: "var(--blue)", margin: "0 0 6px" }}>
@@ -4357,14 +4391,25 @@ function ExpressionSlots({ expressions, onChange, disabled, note, warnNoPhotos, 
                 <span title="Recognised from your photos — clear it if it is wrong"
                   style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.55)", color: "#fff", fontSize: 9, textAlign: "center", letterSpacing: 0.4 }}>AUTO</span>
               )}
+              {expressions[slot.key] && expressions[slot.key].gen && (
+                <span title="Made from the base image — regenerate or replace it with a photo"
+                  style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.55)", color: "#fff", fontSize: 9, textAlign: "center", letterSpacing: 0.4 }}>MADE</span>
+              )}
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
               <span style={{ fontSize: 11, color: "var(--text3)" }}>{slot.label}</span>
-              {expressionUrl(expressions[slot.key]) && (
-                <button onClick={() => { const next = { ...expressions }; delete next[slot.key]; onChange(next); }}
-                  title="Remove"
-                  style={{ border: "none", background: "none", color: "var(--text3)", fontSize: 11, cursor: "pointer", padding: 0 }}>✕</button>
-              )}
+              <span style={{ display: "flex", gap: 4 }}>
+                {canGenerate && (
+                  <button onClick={() => { if (!off) generate(slot); }}
+                    title={expressionUrl(expressions[slot.key]) ? "Make it again from the base image" : "Make this one from the base image"}
+                    style={{ border: "none", background: "none", color: "var(--pink)", fontSize: 11, cursor: off ? "default" : "pointer", padding: 0 }}>✦</button>
+                )}
+                {expressionUrl(expressions[slot.key]) && (
+                  <button onClick={() => { const next = { ...expressions }; delete next[slot.key]; onChange(next); }}
+                    title="Remove"
+                    style={{ border: "none", background: "none", color: "var(--text3)", fontSize: 11, cursor: "pointer", padding: 0 }}>✕</button>
+                )}
+              </span>
             </div>
           </div>
         ))}
@@ -4846,7 +4891,8 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
 
               <ExpressionSlots expressions={expressions} onChange={setExpressions}
                 disabled={!!busy} note={exprNote} warnNoPhotos={!hostedPhotos.length}
-                subject="her" onError={setError} />
+                subject="her" onError={setError}
+                baseImage={baseUrl} imageModel={settings.imageModel} />
 
               <div style={S.divider} />
 
@@ -7678,6 +7724,11 @@ function PhotoStudio({ characters, userCharacter, onBack }) {
     .map(s => ({ ...s, garments: library ? closetGarments({ closet: s.closet }, library).filter(g => g.image) : [] }));
 
   const inShot = new Set(resolved.map(s => s.charId));
+  // The user is in the photograph but is not a character: no row, no gallery,
+  // nothing that browses one. Everything that files a picture against a person
+  // skips them.
+  const galleryOwners = resolved.filter(s => s.charId !== USER_SUBJECT_ID);
+  const trackable = galleryOwners[0] || null;
   // Counted from the list that is actually sent rather than from a formula
   // beside it: expression photographs spend the budget too, and a second
   // expression of the same count is a second thing to keep in step.
@@ -7726,16 +7777,22 @@ function PhotoStudio({ characters, userCharacter, onBack }) {
         initImage: studioReferenceImages(resolved, choices).join(","),
         // Worth recovering: a studio shot is one you set going and then put the
         // phone down on. Only one gallery can be named for a recovery, so it is
-        // the first person in the shot — the one the prompt is built around.
-        track: { characterId: resolved[0].charId, label: "Photo studio" },
+        // the first REAL person in the shot — the user is not a character and
+        // has no gallery to recover into, so a shot of them alone is tracked
+        // nowhere rather than under an id nothing can browse.
+        track: trackable ? { characterId: trackable.charId, label: "Photo studio" } : undefined,
       });
       setShots(s => [{ url, prompt, names: resolved.map((x, i) => studioSubjectName(x, i)) }, ...s]);
       setStatus("");
       // Into the gallery of everybody in it. A group shot filed under one
       // person is a picture the others can never find, and the gallery is
       // where the app already looks for pictures of someone.
+      // Everyone except the user: they are a subject, not a character, and
+      // nothing in the app browses a gallery under their synthetic id. The
+      // shot is still in the studio's own strip, which is where a photograph
+      // of yourself is looked for.
       const failed = [];
-      for (const s of resolved) {
+      for (const s of galleryOwners) {
         try {
           const gallery = await dataApi.getGallery(s.charId);
           await dataApi.saveGallery(s.charId, [{ url, prompt, date: Date.now() }, ...gallery].slice(0, GALLERY_LIMIT));

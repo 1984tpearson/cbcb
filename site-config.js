@@ -2157,6 +2157,31 @@
           // a second copy of a phone photograph.
           maxCropPx: 768,
         },
+
+        // Making a slot rather than uploading one.
+        //
+        // Until this existed a slot could only be filled from a photograph,
+        // which meant expressions worked for a face built from photos and not
+        // at all for one that was generated — and a generated face is the
+        // usual case. Nothing was broken; there was simply never anything to
+        // pick, so the control stayed hidden and read as broken.
+        //
+        // Anchored to the base image, exactly as the avatar is: the reference
+        // carries who this is, so the prompt says only what the face is doing.
+        // Re-describing hair and colouring alongside an inputImage pulls the
+        // result towards a fresh person instead of the same one smiling.
+        generate: {
+          preamble: "A head and shoulders photograph of the person in the reference image, the same face, same hair, same skin",
+          // {expression} is the slot's hint, which is already written as a
+          // description of a face rather than a label.
+          expressionTemplate: "their expression: {expression}",
+          framing: "head and shoulders, face filling most of the frame, looking towards the camera",
+          // Plain and even, so the crop carries an expression and not a mood.
+          // A dramatic light here would be copied into every chat and studio
+          // image the slot is used in, which is not what the slot is for.
+          lighting: "flat even lighting, plain neutral background",
+          suffix: "photographic, sharp focus on the face, natural skin texture",
+        },
       },
 
       // The one ceiling on reference images, for every screen that sends any:
