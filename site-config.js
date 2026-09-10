@@ -1595,6 +1595,37 @@
       // person: everything about the person is in the reference image.
       styleModifiers: "photorealistic, sharp focus, natural skin texture, true to life colour, high detail",
 
+      // ── Who is in the frame, anatomically ────────────────────────────────
+      // buildChatCharDesc emits the gender as the raw enum, so a subject line
+      // read "Anna, 22 year old, Female" — a form field rather than a
+      // description, and the weakest possible way to say it. In an explicit
+      // shot of two women the model overrode it and gave one of them a penis,
+      // because its prior for two people in a sex act is far stronger than one
+      // capitalised word.
+      //
+      // So the studio says it in prose — "a 22 year old woman" — and in an
+      // explicit shot says the negative too, which is the part a prior this
+      // strong actually needs.
+      sexWords: {
+        Female: "woman",
+        Male: "man",
+        "Non-binary": "non-binary person",
+      },
+      // {age}, {sex} and {height} are substituted; each drops out when empty.
+      subjectDescTemplate: "a {age} year old {sex}{height}",
+      // Appended only when the shot reads as explicit. Deliberately not gated
+      // on any character's NSFW toggle: this adds no explicit content of its
+      // own, it only stops the model drawing anatomy that belongs to nobody in
+      // the photograph, and that is as wrong in a tame shot as an explicit one.
+      //
+      // Named parts rather than "correct anatomy": a model cannot act on a
+      // word like correct, and the whole failure is that it filled a gap with
+      // its own assumption. Only the sexes actually present are asserted.
+      anatomyGuard: " Every body in this photograph belongs to one of the people described above — there is nobody else in the frame and no other body parts. {sexes}",
+      // One clause per distinct sex present, joined. {who} is a name or a list
+      // of names, {sex} the word above.
+      anatomySexClause: "{who} has the body and genitals of a {sex}, and no anatomy of any other sex.",
+
       // The pickers. `id` is what a chip stores, `text` is what reaches the
       // prompt — the chip says "Leaning on a wall", the model is told the
       // sentence that actually renders one.

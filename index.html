@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=57"></script>
+  <script src="site-config.js?v=58"></script>
   <script src="image-prompt.js?v=28"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -6554,11 +6554,62 @@ function studioChoiceText(list, choice) {
   return opt ? opt.text : "";
 }
 
-// Age, gender and height only, from the same function the chat path uses. The
-// reference image says how they look, and saying it again in words cannot make
-// the picture more like itself.
+// Age, sex and height only. The reference image says how they look, and saying
+// it again in words cannot make the picture more like itself.
+//
+// Not buildChatCharDesc, which the studio used to borrow: it emits the gender
+// as the stored enum, so a subject line read "Anna, 22 year old, Female".
+// That is a form field, and against the model's prior for two people in a sex
+// act it lost — which is how a photograph of two women came back with a penis
+// in it. Said as prose, "a 22 year old woman" is the same fact stated in the
+// register the rest of the prompt is written in.
+function studioSexWord(character) {
+  const words = studioCfg().sexWords || {};
+  const gender = character.gender === "Custom"
+    ? (character.customGender || "") : (character.gender || "");
+  return words[gender] || String(gender || "").toLowerCase();
+}
+
 function studioCharDesc(character) {
-  try { return buildChatCharDesc(character) || ""; } catch { return ""; }
+  try {
+    const cfg = studioCfg();
+    const a = character.appearance;
+    const height = (a && a.height != null)
+      ? ", " + fillTemplate(CFG.appearance.heightMeasurementTemplate, { cm: sliderToCm(a.height) })
+      : "";
+    const sex = studioSexWord(character);
+    const age = character.age || "";
+    // With no age the template's "a  year old woman" would be wrong, so the
+    // pieces that survive are assembled directly rather than through it.
+    if (!age) return sex ? ("a " + sex + height) : height.replace(/^, /, "");
+    if (!sex) return age + " year old" + height;
+    return fillTemplate(cfg.subjectDescTemplate, { age, sex, height });
+  } catch { return ""; }
+}
+
+// The sexes actually present, asserted, for a shot the model would otherwise
+// fill in from its own prior. Grouped so two women produce one clause naming
+// both rather than two clauses saying the same thing.
+function studioAnatomyGuard(subjects) {
+  const cfg = studioCfg();
+  const bySex = new Map();
+  subjects.forEach((s, i) => {
+    const sex = studioSexWord(s.character);
+    if (!sex) return;
+    if (!bySex.has(sex)) bySex.set(sex, []);
+    bySex.get(sex).push(studioSubjectName(s, i));
+  });
+  if (!bySex.size) return "";
+  const clauses = [...bySex.entries()].map(([sex, names]) => {
+    const who = names.length === 1 ? names[0]
+      : names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
+    // "have" reads wrong for one name and right for several; the template is
+    // written for one, so the plural is fixed up here rather than by keeping
+    // two nearly identical templates in the config.
+    const clause = fillTemplate(cfg.anatomySexClause, { who, sex });
+    return names.length === 1 ? clause : clause.replace(" has ", " each have ");
+  });
+  return fillTemplate(cfg.anatomyGuard, { sexes: clauses.join(" ") });
 }
 
 // In a group shot a person needs a handle the model can attach clothes to, and
@@ -6648,7 +6699,18 @@ function buildStudioPrompt({ subjects, choices }) {
   // the full stop it needs to not run into the style modifiers behind it.
   let extra = (choices.notes || "").trim();
   if (extra && !/[.!?]$/.test(extra)) extra += ".";
-  const text = [body, extra, cfg.styleModifiers].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+
+  // Only where it can matter. isIntimateScene reads the assembled text, and is
+  // handed nsfw:true rather than any character's toggle: this clause adds no
+  // explicit content, it only stops the model inventing anatomy for people it
+  // has already been told the sex of — which is as wrong on a tame character
+  // as an explicit one. Read AFTER the notes are folded in, since "having sex"
+  // is typed there as often as it is chosen from a picker.
+  const guard = isIntimateScene([body, extra].join(" "), null, true)
+    ? studioAnatomyGuard(subjects)
+    : "";
+
+  const text = [body, extra, guard, cfg.styleModifiers].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
