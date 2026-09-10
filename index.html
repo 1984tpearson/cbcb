@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=61"></script>
+  <script src="site-config.js?v=62"></script>
   <script src="image-prompt.js?v=30"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -299,7 +299,12 @@
     // SiteConfig missing whatever was added last, and since aiComplete lives
     // there now, the symptom would be every reply and every image failing with
     // a TypeError rather than anything that names the cause.
-    if (!window.SiteConfig || typeof window.SiteConfig.aiComplete !== "function") {
+    // Every export the app calls through window.SiteConfig at runtime, not
+    // just the first one that broke. A stale cached copy missing any of them
+    // fails at a call site with a TypeError naming a function, which points
+    // at anything except the caching that actually caused it.
+    const REQUIRED_EXPORTS = ["aiComplete", "parseJsonReply", "garmentGender", "garmentFitsGender"];
+    if (!window.SiteConfig || REQUIRED_EXPORTS.some(k => typeof window.SiteConfig[k] !== "function")) {
       document.body.innerHTML =
         '<div style="padding:28px;font-family:system-ui,sans-serif;line-height:1.6;max-width:520px;margin:0 auto;color:#3a2b30">' +
         '<h1 style="font-size:17px">Loading an old cached copy of site-config.js</h1>' +
@@ -603,6 +608,14 @@ function resolveUserPersona(character, settings) {
   return hasUserPersona(character.userPersonaOverride)
     ? normaliseUserPersona(character.userPersonaOverride)
     : normaliseUserPersona(settings.userPersona);
+}
+
+// Whose wardrobe a subject shops from. Same unwrapping as personaGenderWord —
+// "Custom" is a label, not an answer — and it is deliberately the only thing
+// the clothing filter reads off a person.
+function subjectGenderOf(subject) {
+  if (!subject) return "";
+  return subject.gender === "Custom" ? (subject.customGender || "") : (subject.gender || "");
 }
 
 // A gender of "Custom" is a label, not an answer — every prompt that reads one
@@ -1989,7 +2002,7 @@ function randomiseFaceAndBody(currentFace, currentBody, currentAvatar) {
 // an appearance — a character, or the user.
 
 function subjectCharDesc(subject) {
-  const genderDesc = subject.gender === "Custom" ? (subject.customGender || "") : (subject.gender || "");
+  const genderDesc = subjectGenderOf(subject);
   const ageDesc = subject.age ? `${subject.age} year old` : "";
   return [ageDesc, genderDesc, buildAppearancePrompt(subject.appearance, { measurements: false })]
     .filter(Boolean).join(", ");
@@ -2068,7 +2081,13 @@ async function suggestAvatarOutfit({ character, model }) {
 async function suggestCloset({ character, model }) {
   const cfg = (CFG.wardrobe.closet || {});
   if (!cfg.instruction) return { closet: [], missing: [] };
-  const library = (await loadWardrobeLibrary()).filter(g => g && g.id && g.image);
+  // Cut-matched before the model ever sees the list, not after: this is a
+  // one-shot request with no picker to correct it, so a bra offered to a man
+  // is a bra he ends up owning. Unisex and untagged garments still pass, and a
+  // character whose gender says nothing still sees everything.
+  const library = (await loadWardrobeLibrary())
+    .filter(g => g && g.id && g.image)
+    .filter(g => window.SiteConfig.garmentFitsGender(g, subjectGenderOf(character), CFG));
   if (!library.length) return { closet: [], missing: [] };
 
   const desc = [
@@ -3076,12 +3095,18 @@ function SettingsPanel({ settings, onSave, onClose }) {
 // It exists so that nothing downstream ever has to search the whole library.
 // Matching what a character is wearing against two hundred garments is both
 // expensive and unreliable; matching it against the twenty they own is neither.
-function ClosetPicker({ selected, onChange, onClose }) {
+function ClosetPicker({ selected, onChange, onClose, subjectGender }) {
   const [library, setLibrary] = useState(null);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
   const [set, setSet] = useState("");
+  // On by default and switched off in one tap. The cut of a garment is a
+  // strong hint about who it is for and a poor rule about who may wear it, so
+  // it filters the shelf rather than locking it — and a garment already in
+  // the closet is never hidden, whichever way the switch is set, because a
+  // filter that hides a choice you have already made looks like data loss.
+  const [matchCut, setMatchCut] = useState(true);
 
   useEffect(() => {
     let live = true;
@@ -3097,7 +3122,13 @@ function ClosetPicker({ selected, onChange, onClose }) {
   const withImages = (library || []).filter(g => g && g.image);
   const sets = [...new Set(withImages.map(g => (g.set || "").trim()).filter(Boolean))].sort();
   const categories = [...new Set(withImages.map(g => g.category).filter(Boolean))];
+  const chosenIds = new Set(selected);
+  const cutHides = (g) => matchCut && !chosenIds.has(g.id)
+    && !window.SiteConfig.garmentFitsGender(g, subjectGender, CFG);
+  // Only worth offering the switch when it is actually holding something back.
+  const hiddenByCut = withImages.filter(cutHides).length;
   const shown = withImages.filter(g => {
+    if (cutHides(g)) return false;
     if (category && g.category !== category) return false;
     if (set && (g.set || "").trim() !== set) return false;
     if (!query.trim()) return true;
@@ -3105,7 +3136,7 @@ function ClosetPicker({ selected, onChange, onClose }) {
     return query.toLowerCase().split(/\s+/).every(word => hay.includes(word));
   });
 
-  const chosen = new Set(selected);
+  const chosen = chosenIds;
   const toggle = (id) => onChange(chosen.has(id) ? selected.filter(x => x !== id) : [...selected, id]);
 
   // Config order, so the headings appear in the same sequence every time
@@ -3153,6 +3184,14 @@ function ClosetPicker({ selected, onChange, onClose }) {
                   </select>
                 )}
               </div>
+              {(hiddenByCut > 0 || !matchCut) && (
+                <button style={{ ...S.msgActionBtn, marginTop: 6, color: "var(--pink)" }}
+                  onClick={() => setMatchCut(v => !v)}>
+                  {matchCut
+                    ? `Showing what fits — ${hiddenByCut} other${hiddenByCut === 1 ? "" : "s"} hidden. Show everything`
+                    : "Showing everything. Show only what fits"}
+                </button>
+              )}
               {/* Grouped under a heading per category rather than one long
                   grid. A wardrobe is not a flat list once it has more than a
                   screenful in it: "the boots" is found by looking under Shoes,
@@ -3420,7 +3459,7 @@ function CharacterPersonalityPanel({ character, onSave, onClose, model, settings
           </button>
           {closetNote && <p style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>{closetNote}</p>}
           {showClosetPicker && (
-            <ClosetPicker selected={closet} onChange={setCloset} onClose={() => setShowClosetPicker(false)} />
+            <ClosetPicker selected={closet} onChange={setCloset} subjectGender={subjectGenderOf({ gender, customGender })} onClose={() => setShowClosetPicker(false)} />
           )}
 
           <div style={S.divider} />
@@ -7381,7 +7420,7 @@ function StudioSubjectCard({ subject, index, count, library, onChange, onRemove,
       </div>
 
       {showPicker && (
-        <ClosetPicker selected={subject.closet} onChange={choose} onClose={() => setShowPicker(false)} />
+        <ClosetPicker selected={subject.closet} onChange={choose} subjectGender={subjectGenderOf(c)} onClose={() => setShowPicker(false)} />
       )}
     </div>
   );
