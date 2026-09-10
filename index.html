@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=70"></script>
+  <script src="site-config.js?v=71"></script>
   <script src="image-prompt.js?v=32"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -293,7 +293,15 @@
   // on-load pass, which would also run it for visitors who never unlock.
   // A proxy failure is not fatal: loadConfig falls back to the built-in
   // defaults and reports why, so the app still starts on a dead network.
+  // Which copy of the app is actually running. index.html has no ?v= of its
+  // own — nothing can cache-bust the page that does the cache-busting — so a
+  // phone can sit on a cached build for days while the fix it is missing looks
+  // like the bug still happening. One line in the console settles it, and
+  // BUILD moves with anything worth telling apart.
+  const BUILD = "2026-09-10 intentions/confirm-endings";
+
   async function bootApp() {
+    console.info(`[boot] app build ${BUILD}, site-config ?v=${(document.querySelector('script[src*="site-config.js"]') || {}).src?.split("v=")[1] || "?"}`);
     // A cached site-config.js older than this page is served whenever the ?v=
     // on its script tag has not moved with the file. The app then boots into a
     // SiteConfig missing whatever was added last, and since aiComplete lives
@@ -997,6 +1005,18 @@ function quoteIsIn(quote, haystack) {
   return parts.length > 0 && parts.every(x => hay.includes(x));
 }
 
+// The one check that asks no model anything. Undressing is the step that has
+// been wrongly ticked every time, and it is also the piece of state this app
+// already tracks exactly: while charOutfit still reads "a yellow floral dress",
+// she is dressed, and no reading of the scene gets a vote on it. A judge can be
+// argued into anything; the wardrobe tracker cannot.
+function outfitBlocks(text, outfit, cfg) {
+  const guard = cfg && cfg.outfitGuard;
+  if (!guard || !guard.match) return false;
+  if (!new RegExp(guard.match, "i").test(String(text || ""))) return false;
+  return !new RegExp(guard.clearWhen || "^\\s*$", "i").test(String(outfit || ""));
+}
+
 // Applies the judge's verdicts. Pure, and separate from the call that produced
 // them, because the phase rules here are the whole feature: which climb a delta
 // lands on, when a step is ticked off without being done, and what may end an
@@ -1011,6 +1031,7 @@ function applyIntentionVerdicts(all, judged, updates, cfg, evidence) {
   // already stand, long before the excerpt begins.
   const said = (evidence && evidence.recent) || "";
   const standing = ((evidence && evidence.scene) || "") + "\n" + said;
+  const outfit = (evidence && evidence.outfit) || "";
   const maxDelta = cfg.maxDeltaPerTurn || 20;
   const out = [...all];
   let changed = false;
@@ -1024,7 +1045,9 @@ function applyIntentionVerdicts(all, judged, updates, cfg, evidence) {
     const status = ["active", "abandoned"].includes(u.status) ? u.status : (current.status || "active");
     const progress = Math.max(0, Math.min(100, (Number(current.progress) || 0) + delta));
     const step = activeStep(current);
-    const done = u.done === true && quoteIsIn(u.doneBecause, said);
+    const blocked = (t) => outfitBlocks(t, outfit, cfg);
+    const done = u.done === true && quoteIsIn(u.doneBecause, said)
+      && !blocked(step ? step.text : current.goal);
 
     // Steps the situation has settled — done by someone else, or made pointless
     // by what has happened. They are ticked off without her doing them, which
@@ -1039,7 +1062,8 @@ function applyIntentionVerdicts(all, judged, updates, cfg, evidence) {
     // being asked twice, an over-read one usually does not.
     const stepList = intentionSteps(current);
     const mootIdx = (quoteIsIn(u.mootBecause, standing) ? (Array.isArray(u.moot) ? u.moot : []) : [])
-      .map(Number).filter(n => Number.isInteger(n) && n >= 0 && n < stepList.length);
+      .map(Number).filter(n => Number.isInteger(n) && n >= 0 && n < stepList.length)
+      .filter(n => !blocked(stepList[n].text));
     const currentIdx = step ? stepList.indexOf(step) : -1;
     const pick = (step && (done || mootIdx.includes(currentIdx)))
       ? step
@@ -1062,7 +1086,7 @@ function applyIntentionVerdicts(all, judged, updates, cfg, evidence) {
     // it. So the steps have to be settled first, one turn at a time, by the
     // rule above. Being fed the cake still works: whatever settled the steps
     // settles them, and the goal lands on the turn after.
-    if (u.goalDone === true && quoteIsIn(u.goalBecause, said) && !activeStep(next)) {
+    if (u.goalDone === true && quoteIsIn(u.goalBecause, said) && !blocked(current.goal) && !activeStep(next)) {
       out[idx] = { ...next, status: "achieved" };
       changed = true;
       continue;
@@ -6373,6 +6397,81 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     }
   };
 
+  // Second opinion on the verdicts that END something, asked of a model shown
+  // none of the framing that produces them.
+  //
+  // The judge has to see the goal and the ladder — it cannot score progress
+  // toward something it has not been told about — and seeing them is precisely
+  // what makes it read a charged scene as an accomplished one. Told "GOAL: have
+  // sex with Tim" over "CURRENT STEP: get naked in front of Tim", it ticked the
+  // undressing off in a conversation where she is lying on the bed fully
+  // dressed, twice, through two rewrites of advancePrompt instructing it not to.
+  // The instruction was never the problem: a model handed the shape of a story
+  // fills it in, and every prompt describing the ladder hands it that shape.
+  //
+  // So the claims are re-asked flat: no goal, no ladder, no wants, no name of
+  // whose intention it is, and no hint that the answer is meant to be yes. One
+  // batched call per turn, and only when something was proposed for ticking, so
+  // the usual turn still costs nothing.
+  //
+  // Anything unconfirmed comes back with its ending fields stripped rather than
+  // dropped whole — the delta on that entry is untouched, so a turn that really
+  // did move things along still moves them along.
+  const confirmEndings = async (updates, judged, recent, model, cfg) => {
+    const claims = [];
+    for (const u of updates) {
+      const target = judged[Number(u && u.i)];
+      if (!target) continue;
+      const steps = intentionSteps(target);
+      const step = activeStep(target);
+      if (u.done === true) claims.push({ u, field: "done", text: step ? step.text : target.goal });
+      if (u.goalDone === true) claims.push({ u, field: "goalDone", text: target.goal });
+      for (const n of (Array.isArray(u.moot) ? u.moot : [])) {
+        if (steps[Number(n)]) claims.push({ u, field: "moot", idx: Number(n), text: steps[Number(n)].text });
+      }
+    }
+    if (claims.length === 0) return updates;
+
+    let confirmed = null;
+    try {
+      const raw = await aiComplete({ model, messages: [{ role: "user", content:
+        fillTemplate(cfg.confirmPrompt, {
+          recent,
+          claims: claims.map((c, i) => `${i}. ${c.text}`).join("\n"),
+        }) }] });
+      const parsed = parseJsonReply(raw);
+      if (Array.isArray(parsed)) confirmed = parsed;
+    } catch (e) {
+      console.warn("Intention confirmation failed:", e.message);
+    }
+    // A confirmation that could not be obtained is not a confirmation. Ticks
+    // are terminal and there is no turn later that undoes one, so the failure
+    // has to fall on the side of leaving the step where it is.
+    const quoteFor = (i) => {
+      if (!confirmed) return "";
+      const hit = confirmed.find(x => Number(x && x.i) === i);
+      return hit ? String(hit.quote || "") : "";
+    };
+
+    const out = updates.map(u => ({ ...u }));
+    const at = (u) => out[updates.indexOf(u)];
+    const kept = { moot: new Map() };
+    claims.forEach((c, i) => {
+      const quote = quoteFor(i);
+      const ok = quote && quoteIsIn(quote, recent);
+      console.info(`[intention] "${c.text}" — ${c.field} ${ok ? "confirmed" : "REJECTED"}`
+        + (quote ? ` :: ${quote.slice(0, 80)}` : " :: nothing quoted"));
+      if (c.field === "moot") {
+        if (!kept.moot.has(c.u)) kept.moot.set(c.u, []);
+        if (ok) kept.moot.get(c.u).push(c.idx);
+      } else if (!ok) {
+        at(c.u)[c.field] = false;
+      }
+    });
+    for (const [u, list] of kept.moot) at(u).moot = list;
+    return out;
+  };
+
   // Forms new intentions, and moves existing ones along. Folded into one pass
   // so a turn costs at most one extra call, and usually none: generation only
   // runs when there is room and enough conversation to base a want on.
@@ -6418,8 +6517,10 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
           fillTemplate(cfg.advancePrompt, { name: currentChar.name, list, recent, scene }) }] });
         const updates = parseJsonReply(raw);
         if (Array.isArray(updates)) {
+          const checked = await confirmEndings(updates, existing, recent, advanceModel, cfg);
           commitIfCurrent(epoch, prev => {
-            const all = applyIntentionVerdicts(prev.intentions || [], existing, updates, cfg, { scene, recent });
+            const all = applyIntentionVerdicts(prev.intentions || [], existing, checked, cfg,
+              { scene, recent, outfit: currentChar.charOutfit });
             return all ? { ...prev, intentions: all } : prev;
           });
         }
