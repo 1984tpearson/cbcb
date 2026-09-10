@@ -7110,6 +7110,39 @@ function studioAnatomyGuard(subjects) {
   return fillTemplate(cfg.anatomyGuard, { sexes: clauses.join(" ") });
 }
 
+// The user, shaped so the studio can treat them as one more subject.
+//
+// The studio is the one screen in the app that draws several people from
+// several reference images, which makes it the one place the user's own base
+// image has a job — everywhere else the camera is behind their eyes. Every
+// field the studio reads off a character, the profile already carries; only
+// the id had to be invented. The closet is empty and stays that way: clothes
+// in the studio are chosen per shot from the whole wardrobe, not from the
+// person, so the user reaches the same picker as anybody else.
+//
+// The global profile, never a character's userPersonaOverride: an override is
+// who you are to that one character in that one conversation, and a group
+// photograph is not in it.
+const USER_SUBJECT_ID = "__you__";
+
+function userStudioCharacter(persona) {
+  const p = normaliseUserPersona(persona);
+  if (!hasUserPersona(p)) return null;
+  return {
+    id: USER_SUBJECT_ID,
+    // The real name, blank included. studioSubjectName already turns a blank
+    // one into "the first person", which is what the prompt wants — "You
+    // wears a coat" is not a sentence, and it is the sentence the group
+    // garment clause would have built. tileLabel is for the picker only.
+    name: p.name,
+    tileLabel: p.name ? p.name + " (you)" : "You",
+    gender: p.gender, customGender: p.customGender, age: p.age,
+    appearance: p.appearance,
+    referenceImage: p.referenceImage, avatarImage: p.avatarImage,
+    closet: [],
+  };
+}
+
 // In a group shot a person needs a handle the model can attach clothes to, and
 // an unnamed character has none. "the second person" is a poor name but it is
 // a stable one, which is the whole requirement.
@@ -7354,7 +7387,11 @@ function StudioSubjectCard({ subject, index, count, library, onChange, onRemove,
   );
 }
 
-function PhotoStudio({ characters, onBack }) {
+function PhotoStudio({ characters, userCharacter, onBack }) {
+  // The user is offered last and never chosen for you: the default subject is
+  // still picked from the characters alone, so opening the studio puts the
+  // same person in the frame it always did.
+  const castables = userCharacter ? [...characters, userCharacter] : characters;
   const cfg = studioCfg();
   const [library, setLibrary] = useState(null);
   // Ordered, and the order is load-bearing: it is the order the reference
@@ -7389,7 +7426,7 @@ function PhotoStudio({ characters, onBack }) {
   // wardrobe. A character deleted while the studio is open drops out rather
   // than becoming a row with nothing in it.
   const resolved = subjects
-    .map(s => ({ ...s, character: characters.find(c => c.id === s.charId) }))
+    .map(s => ({ ...s, character: castables.find(c => c.id === s.charId) }))
     .filter(s => s.character)
     .map(s => ({ ...s, garments: library ? closetGarments({ closet: s.closet }, library).filter(g => g.image) : [] }));
 
@@ -7474,18 +7511,18 @@ function PhotoStudio({ characters, onBack }) {
 
         <div style={S.studioCard}>
           <h3 style={S.studioHeading}>Who</h3>
-          {characters.length === 0 && <p style={{ fontSize: 13, color: "var(--text3)" }}>No characters yet.</p>}
+          {castables.length === 0 && <p style={{ fontSize: 13, color: "var(--text3)" }}>No characters yet.</p>}
           <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 8px" }}>
             {"Tap to add or remove. Up to " + cfg.maxCharacters + " people in one shot" +
               (resolved.length ? " — " + resolved.length + " in it now." : ".")}
           </p>
           <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
-            {characters.map(c => {
+            {castables.map(c => {
               const on = inShot.has(c.id);
               // Characters without a base image are marked rather than left
               // out: one missing from the row looks like one gone missing.
               return (
-                <button key={c.id} title={c.name || ""}
+                <button key={c.id} title={c.tileLabel || c.name || ""}
                   // A plain toggle in both directions, including down to
                   // nobody. Anything cleverer — tap-to-swap while one person is
                   // in the shot, tap-to-add once there are two — means the same
@@ -7498,7 +7535,7 @@ function PhotoStudio({ characters, onBack }) {
                     ? <img src={characterAvatar(c)} alt="" style={{ width: "100%", aspectRatio: "3/4", objectFit: "cover", display: "block" }} />
                     : <div style={{ ...S.gridTileFallback, aspectRatio: "3/4" }}>{(c.name || "?").slice(0, 1).toUpperCase()}</div>}
                   <div style={{ fontSize: 11, fontWeight: 700, padding: "5px 4px", color: on ? "var(--pink)" : "var(--text2)" }}>
-                    {c.name || "Unnamed"}
+                    {c.tileLabel || c.name || "Unnamed"}
                   </div>
                 </button>
               );
@@ -7668,7 +7705,7 @@ function App() {
     setActiveChar(char);
   };
 
-  if (showStudio) return <PhotoStudio characters={orderedCharacters} onBack={() => setShowStudio(false)} />;
+  if (showStudio) return <PhotoStudio characters={orderedCharacters} userCharacter={userStudioCharacter(settings.userPersona)} onBack={() => setShowStudio(false)} />;
 
   if (activeChar) return <ChatWindow character={activeChar} settings={settings} onBack={() => setActiveChar(null)} onUpdateCharacter={updateCharacter} discreetMode={discreetMode} onToggleDiscreet={toggleDiscreet} theme={theme} onToggleTheme={toggleTheme} />;
 
