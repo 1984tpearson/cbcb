@@ -2737,8 +2737,9 @@ function ImageTimings() {
 // here without this file being touched.
 //
 // One profile is the default, edited from Settings, and a character can hold an
-// override of the same shape — see resolveUserPersona.
-const USER_TABS = ["You", ...APPEARANCE_TABS, "Images"];
+// override of the same shape — see resolveUserPersona. Its tab list is defined
+// with the other two, further down: it is built from APPEARANCE_TABS, and a
+// const cannot be read above the line that declares it.
 
 function UserProfileEditor({ persona, settings, title, onSave, onClose }) {
   const [form, setForm] = useState(() => normaliseUserPersona(persona));
@@ -3871,6 +3872,12 @@ const APPEARANCE_TABS = ["Face", "Hair", "Body", "Tattoos"];
 // The generator is the same tabs plus the things that are not about how she
 // looks, and an Images tab that creates rather than replaces.
 const FORM_TABS = ["Character", ...APPEARANCE_TABS, "Images"];
+// The user's own editor is the same shape again, with the first tab about him
+// rather than her. Defined here rather than next to UserProfileEditor, which
+// is written above this point: these three are read while the file is being
+// evaluated, not when a component renders, so one that spreads APPEARANCE_TABS
+// from higher up the file crashes the whole app before it can mount.
+const USER_TABS = ["You", ...APPEARANCE_TABS, "Images"];
 
 function TabBar({ tabs, active, onChange }) {
   return (
