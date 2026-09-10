@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=60"></script>
-  <script src="image-prompt.js?v=29"></script>
+  <script src="site-config.js?v=61"></script>
+  <script src="image-prompt.js?v=30"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -393,7 +393,39 @@ const REACTIVE_MAX_DRIFT = CFG.reactiveMaxDrift;
 
 const SLIDER_DEFS = CFG.sliderDefs.map(def => ({ ...def, previewFn: v => personalitySliderPreview(def.key, v) }));
 
-const DEFAULT_USER_PERSONA = { name: "", gender: "", notes: "" };
+// The user, described the same way a character is. Everything past name,
+// gender and notes was added when the user got their own creator; appearance
+// is null rather than a copy of DEFAULT_APPEARANCE for the same reason face is
+// null on a character — an untouched profile must describe nobody, not "medium
+// skin, athletic, 50th-percentile height", so that every prompt built for a
+// user who has never opened the editor is byte-identical to what it was.
+const DEFAULT_USER_PERSONA = {
+  name: "", gender: "", customGender: "", age: "", notes: "",
+  appearance: null,
+  // Same two-image split as a character, and the same rule about which is
+  // which: referenceImage is the nude base and is never rendered, avatarImage
+  // is the clothed portrait and is never sent to the image model.
+  referenceImage: null, avatarImage: null,
+};
+
+function normaliseUserPersona(persona) {
+  return { ...DEFAULT_USER_PERSONA, ...(persona || {}) };
+}
+
+// Whether a profile says anything at all. The per-character override used to
+// test three fields by hand; it now has as many as a character does, and an
+// override switched on with only an appearance filled in is still an override.
+function hasUserPersona(persona) {
+  if (!persona) return false;
+  return !!(persona.name || persona.gender || persona.notes || persona.age
+    || persona.appearance || persona.referenceImage || persona.avatarImage);
+}
+
+// The user's own portrait, with the same fallback characterAvatar gives a
+// character: profiles that predate the split have only a reference image.
+function userPersonaAvatar(persona) {
+  return (persona && (persona.avatarImage || persona.referenceImage)) || null;
+}
 
 // Kept as a list (rather than a bare constant) so the Settings dropdown and
 // per-model config pattern can grow to multiple Wiro models later without
@@ -568,19 +600,63 @@ function buildAppearanceSystemNote(appearance) {
 }
 
 function resolveUserPersona(character, settings) {
-  return (character.userPersonaOverride && (character.userPersonaOverride.name || character.userPersonaOverride.gender || character.userPersonaOverride.notes))
-    ? character.userPersonaOverride
-    : (settings.userPersona || DEFAULT_USER_PERSONA);
+  return hasUserPersona(character.userPersonaOverride)
+    ? normaliseUserPersona(character.userPersonaOverride)
+    : normaliseUserPersona(settings.userPersona);
+}
+
+// A gender of "Custom" is a label, not an answer — every prompt that reads one
+// wants the sentence the user typed instead.
+function personaGenderWord(persona) {
+  if (!persona) return "";
+  return persona.gender === "Custom" ? (persona.customGender || "") : (persona.gender || "");
 }
 
 function buildUserPersonaNote(persona) {
   if (!persona) return "";
   const parts = [];
   if (persona.name) parts.push(fillTemplate(CFG.prompts.userPersonaName, { name: persona.name }));
-  if (persona.gender) parts.push(fillTemplate(CFG.prompts.userPersonaGender, { gender: persona.gender }));
+  const gender = personaGenderWord(persona);
+  if (gender) parts.push(fillTemplate(CFG.prompts.userPersonaGender, { gender }));
+  if (persona.age) parts.push(fillTemplate(CFG.prompts.userPersonaAge, { age: persona.age }));
+  // Measurements off, exactly as the character editors ask for it: this is
+  // read aloud by a language model, and a chest measurement in the middle of
+  // "who you are talking to" reads as a dossier rather than as a person.
+  const look = persona.appearance
+    ? buildAppearancePrompt(persona.appearance, { measurements: false })
+    : "";
+  if (look) parts.push(fillTemplate(CFG.prompts.userPersonaAppearance, { appearance: look }));
   if (persona.notes) parts.push(persona.notes);
   if (parts.length === 0) return "";
   return fillTemplate(CFG.prompts.userPersonaNote, { details: parts.join("; ") });
+}
+
+// What the viewer's own body looks like, for the POV frames that actually draw
+// it. Deliberately much shorter than the written note above — the image model
+// is being told the colour of a forearm, not introduced to a person — so it is
+// colouring and build only, and it says nothing at all until the user has
+// built an appearance.
+function buildViewerDesc(persona) {
+  if (!persona || !persona.appearance) return "";
+  const a = persona.appearance;
+  const skin = a.skinTone === "Custom" ? a.skinToneCustom : a.skinTone;
+  const ethnicity = a.ethnicity === "Custom" ? a.ethnicityCustom : a.ethnicity;
+  // null build means "leave as it is" — the same unset the appearance editors
+  // use — so it says nothing rather than falling through to the middle tier.
+  const buildTier = a.build != null ? tierFor(CFG.appearance.buildTiers, a.build) : null;
+  // Only the leading clause of the tier phrase. The full phrase is written for
+  // a whole-body prompt ("slim and lean, light build"); here it is describing a
+  // forearm at the edge of the frame, and the rest is detail the shot has no
+  // room for.
+  const build = buildTier ? String(buildTier.phrase || "").split(",")[0].trim() : "";
+  // Gender is deliberately absent. The one frame where the viewer's sex can be
+  // drawn wrong already gets povViewerSex from viewerGender, and saying it here
+  // too put "the viewer is a man, the viewer's own body is male" into the same
+  // prompt. Everywhere else the shot is a forearm, which has no sex to get
+  // wrong and every reason not to invite a second figure into the frame.
+  return [ethnicity && ethnicity.toLowerCase(),
+    skin && `${String(skin).toLowerCase()} skin`, build && build.toLowerCase(),
+  ].filter(Boolean).join(", ");
 }
 
 // Short-phrase preview for each personality/behaviour/relationship slider.
@@ -1906,6 +1982,57 @@ function randomiseFaceAndBody(currentFace, currentBody, currentAvatar) {
 //
 // Returns "" on any failure: an avatar in a generic top is a worse picture,
 // not a broken one, so this must never be the thing that stops a generation.
+// ─── SHARED IMAGE GENERATION ──────────────────────────────────────────────────
+// One definition of what a base image and what an avatar are, so the character
+// generator, the appearance editor and the user's own profile cannot drift into
+// building them differently. A "subject" is anything with a gender, an age and
+// an appearance — a character, or the user.
+
+function subjectCharDesc(subject) {
+  const genderDesc = subject.gender === "Custom" ? (subject.customGender || "") : (subject.gender || "");
+  const ageDesc = subject.age ? `${subject.age} year old` : "";
+  return [ageDesc, genderDesc, buildAppearancePrompt(subject.appearance, { measurements: false })]
+    .filter(Boolean).join(", ");
+}
+
+// The nude 3/4-length base. anchored: false because on a first generation there
+// is no reference image for the hold clauses to talk about.
+async function generateSubjectBaseImage({ subject, imageModel, extra }) {
+  // A face the user has not chosen a shape for gets a different one each click,
+  // so Regen offers a genuinely different face to pick from. Gated on the
+  // structure alone: lipstick and a ponytail have no opinion about a jawline.
+  const faceVariation = isFaceStructureUnset(subject.appearance && subject.appearance.face) ? pickFaceVariation() : "";
+  const body = normaliseBody(subject.appearance && subject.appearance.body);
+  return generateImageWiro({
+    prompt: buildBodyBasePrompt({
+      body,
+      charDesc: subjectCharDesc(subject),
+      anchored: false,
+      extra: [extra || "", faceVariation].filter(Boolean).join(", "),
+    }),
+    model: imageModel,
+    seed: Math.floor(Math.random() * 2147483647),
+  });
+}
+
+// The clothed portrait, anchored to the base image so it is a portrait of that
+// person rather than a fresh one. An empty outfit is filled by asking the
+// language model what they would wear, and handed back through onOutfit so the
+// caller can write it into the visible box rather than deciding it invisibly.
+async function generateSubjectAvatar({ subject, base, imageModel, textModel, onOutfit }) {
+  let avatarCfg = normaliseAvatar(subject.appearance && subject.appearance.avatar);
+  if (!String(avatarCfg.outfit || "").trim()) {
+    const outfit = await suggestAvatarOutfit({ character: subject, model: textModel });
+    if (outfit) { avatarCfg = { ...avatarCfg, outfit }; if (onOutfit) onOutfit(outfit); }
+  }
+  return generateImageWiro({
+    prompt: buildAvatarPrompt({ charDesc: subjectCharDesc(subject), avatar: avatarCfg }),
+    model: imageModel,
+    initImage: base,
+    seed: Math.floor(Math.random() * 2147483647),
+  });
+}
+
 async function suggestAvatarOutfit({ character, model }) {
   const cfg = (CFG.appearance.body || {});
   if (!cfg.avatarOutfitPrompt) return "";
@@ -2580,8 +2707,312 @@ function ImageTimings() {
   );
 }
 
+// ─── USER PROFILE EDITOR ──────────────────────────────────────────────────────
+// The user's own character creator. Same tabs, same fields and the same two
+// images as a character, because "who you are talking to" is answered by the
+// same kinds of facts as "who is talking to you" — and because a second set of
+// appearance fields written for the user is a second set to keep in step.
+//
+// Everything past the first tab is AppearanceTabFields, shared verbatim with
+// CharacterForm and AppearanceEditor, so a field added to the config appears
+// here without this file being touched.
+//
+// One profile is the default, edited from Settings, and a character can hold an
+// override of the same shape — see resolveUserPersona.
+const USER_TABS = ["You", ...APPEARANCE_TABS, "Images"];
+
+function UserProfileEditor({ persona, settings, title, onSave, onClose }) {
+  const [form, setForm] = useState(() => normaliseUserPersona(persona));
+  const [tab, setTab] = useState("You");
+  const [error, setError] = useState("");
+  const [note, setNote] = useState("");
+  const [imgLoading, setImgLoading] = useState(false);
+  const [imgStage, setImgStage] = useState("");
+  const [imgPrompt, setImgPrompt] = useState("");
+  const [analysing, setAnalysing] = useState(false);
+  const fileRef = useRef();
+
+  // The appearance stays null until something is actually changed, so a profile
+  // nobody has opened describes nobody rather than describing the defaults.
+  // Every patch below is what turns it into an object.
+  const appearance = { ...DEFAULT_APPEARANCE, ...(form.appearance || {}) };
+  const patchAppearance = (patch) => setForm(f => ({
+    ...f, appearance: { ...DEFAULT_APPEARANCE, ...(f.appearance || {}), ...patch },
+  }));
+  const formFace = normaliseFace(form.appearance && form.appearance.face);
+  const setFormFace = (groupKey, fieldKey, value) => setForm(f => {
+    const face = normaliseFace(f.appearance && f.appearance.face);
+    return { ...f, appearance: { ...DEFAULT_APPEARANCE, ...(f.appearance || {}),
+      face: { ...face, [groupKey]: { ...face[groupKey], [fieldKey]: value } } } };
+  });
+  const formBody = normaliseBody(form.appearance && form.appearance.body);
+  const patchBody = (patch) => setForm(f => ({
+    ...f, appearance: { ...DEFAULT_APPEARANCE, ...(f.appearance || {}),
+      body: { ...normaliseBody(f.appearance && f.appearance.body), ...patch } },
+  }));
+  const formAvatar = normaliseAvatar(form.appearance && form.appearance.avatar);
+  const patchAvatar = (patch) => setForm(f => ({
+    ...f, appearance: { ...DEFAULT_APPEARANCE, ...(f.appearance || {}),
+      avatar: { ...normaliseAvatar(f.appearance && f.appearance.avatar), ...patch } },
+  }));
+
+  // The same subject shape the character generator hands the image helpers:
+  // a name, a gender, an age and an appearance. The user has all four.
+  const subject = { ...form, appearance, persona: form.notes };
+
+  const handleGenerateBase = async () => {
+    setImgLoading(true); setImgStage("base"); setError(""); setNote("");
+    try {
+      const base = await generateSubjectBaseImage({
+        subject, imageModel: settings.imageModel, extra: imgPrompt.trim(),
+      });
+      setForm(f => ({
+        ...f,
+        referenceImage: base,
+        // The old portrait belongs to the old base image. A clothed portrait of
+        // a different face is worse than none, and none is what makes Save
+        // generate one.
+        avatarImage: null,
+        appearance: { ...DEFAULT_APPEARANCE, ...(f.appearance || {}),
+          baseSnapshot: snapshotOf({ ...DEFAULT_APPEARANCE, ...(f.appearance || {}) }, normaliseBody(f.appearance && f.appearance.body)) },
+      }));
+    } catch (e) { setError(e.message); }
+    setImgStage(""); setImgLoading(false);
+  };
+
+  const generateAvatarFor = async (base) => generateSubjectAvatar({
+    subject, base, imageModel: settings.imageModel,
+    textModel: settings.selectedModel, onOutfit: outfit => patchAvatar({ outfit }),
+  });
+
+  const handleGenerateAvatar = async () => {
+    if (!form.referenceImage) { setError("Generate a base image first — the portrait is a portrait of it."); return; }
+    setImgLoading(true); setImgStage("avatar"); setError("");
+    try {
+      const avatar = await generateAvatarFor(form.referenceImage);
+      setForm(f => ({ ...f, avatarImage: avatar }));
+    } catch (e) { setError(e.message); }
+    setImgStage(""); setImgLoading(false);
+  };
+
+  // Photographs of the actual person, turned into a base image the same way the
+  // character generator does it. The expression slots it also fills are not
+  // done here: they exist so a chat scene can call for her surprised face, and
+  // nothing ever renders the user's.
+  const handleFileUpload = async (e) => {
+    const files = Array.from(e.target.files || []).slice(0, MAX_REFERENCE_IMAGES);
+    if (!files.length) return;
+    e.target.value = "";
+    let dataUrls;
+    try { dataUrls = await Promise.all(files.map(readFileAsDataUrl)); }
+    catch (err) { setError(err.message); return; }
+
+    setError(""); setNote(""); setAnalysing(true); setImgStage("base");
+    setForm(f => ({ ...f, referenceImage: dataUrls[0], avatarImage: null }));
+
+    // Wiro is handed a URL it can fetch, never the data URL — the data URL
+    // renders locally but anchors nothing.
+    const hostedUrls = await Promise.all(dataUrls.map(persistUploadedPhoto));
+    const hosted = hostedUrls.filter(Boolean);
+    let describedFrom = hosted[0] || dataUrls[0];
+    try {
+      if (!hosted.length) throw new Error("the image could not be uploaded for the generator to read");
+      const base = await generateImageWiro({
+        prompt: buildUploadBasePrompt({ extra: imgPrompt.trim() }),
+        model: settings.imageModel,
+        initImage: joinReferenceImages(hosted),
+        seed: Math.floor(Math.random() * 2147483647),
+      });
+      describedFrom = base;
+      // Every shape and colour field is set to "leave as it is". The photo is
+      // the only account of how you look, and a field left at its default is
+      // not neutral — it would put "medium skin, athletic" into every
+      // regeneration, arguing with the picture next to it.
+      setForm(f => {
+        const next = { ...DEFAULT_APPEARANCE, ...(f.appearance || {}), ...UNSET_APPEARANCE };
+        return { ...f, referenceImage: base, avatarImage: null,
+          appearance: { ...next, baseSnapshot: snapshotOf(next, normaliseBody(next.body)) } };
+      });
+      setNote(`Base image generated from ${hosted.length > 1 ? `your ${hosted.length} photos` : "your photo"}. The appearance settings are not used for it — the photos describe you — but they still feed what characters read about you.`);
+    } catch (err) {
+      console.error("Base image from upload failed:", err);
+      setNote(`Couldn't turn ${dataUrls.length > 1 ? "those photos" : "that photo"} into a base image (${err.message}) — it is being used as-is.`);
+    }
+    setImgStage("");
+
+    // And a written description, because on this path the appearance settings
+    // describe nobody: they were never filled in, and nothing is going to fill
+    // them in now.
+    try {
+      const written = await describeAppearanceFromImage({ imageUrl: describedFrom });
+      setForm(f => ({ ...f, appearance: { ...DEFAULT_APPEARANCE, ...(f.appearance || {}), description: written } }));
+    } catch (err) { console.error("Description read failed:", err); }
+    setAnalysing(false);
+  };
+
+  // Saving with a base image but no portrait makes the portrait first: the base
+  // image is nude and never rendered, so a profile saved without one has
+  // nothing to show.
+  const handleSave = async () => {
+    if (form.referenceImage && !form.avatarImage) {
+      setImgLoading(true); setImgStage("avatar"); setError("");
+      try {
+        const avatar = await generateAvatarFor(form.referenceImage);
+        setImgLoading(false); setImgStage("");
+        onSave({ ...form, avatarImage: avatar });
+        onClose();
+        return;
+      } catch (e) {
+        // Saved anyway: a profile with no portrait is fixable from here, and
+        // losing everything typed in because an image call failed is not.
+        setError(`${e.message} — saved without a portrait.`);
+        setImgLoading(false); setImgStage("");
+      }
+    }
+    onSave(form);
+    onClose();
+  };
+
+  const busyLabel = imgStage === "avatar" ? "Portrait…" : imgStage === "base" ? "Base…" : "…";
+
+  return (
+    <div style={S.overlay}>
+      <div style={{ ...S.modal, maxWidth: 520 }}>
+        <div style={S.modalHeader}>
+          <span style={S.modalTitle}>{title || "Your Profile"}</span>
+          <button style={S.iconBtn} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalBody}>
+          <TabBar tabs={USER_TABS} active={tab} onChange={setTab} />
+
+          {tab === "You" && (
+            <div style={tabPanel}>
+              <p style={{ fontSize: 12, color: "var(--text4)", margin: "4px 0 8px" }}>
+                What characters know about you. Everything here is optional — a
+                blank field is one they are told nothing about.
+              </p>
+
+              <label style={S.label}>Your Name</label>
+              <input style={S.input} placeholder="e.g. Tim" value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+
+              <label style={S.label}>Your Gender</label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {GENDERS.map(g => (
+                  <button key={g} style={form.gender === g ? S.genderBtnOn : S.genderBtnOff}
+                    onClick={() => setForm(f => ({ ...f, gender: g }))}>{g}</button>
+                ))}
+              </div>
+              {form.gender === "Custom" && (
+                <input style={{ ...S.input, marginTop: 8 }} placeholder="Describe gender identity..."
+                  value={form.customGender || ""} onChange={e => setForm(f => ({ ...f, customGender: e.target.value }))} />
+              )}
+
+              <label style={{ ...S.label, marginTop: 8 }}>Your Age</label>
+              <input style={S.input} placeholder="e.g. 34" value={form.age}
+                onChange={e => setForm(f => ({ ...f, age: e.target.value }))} />
+
+              {/* Ethnicity sits here rather than on an appearance tab for the
+                  same reason it does on a character: it is read as who someone
+                  is, and it is the one appearance field that also reaches the
+                  written prompts. */}
+              <ColourField field={ETHNICITY_FIELD} appearance={appearance} onChange={patchAppearance} />
+
+              <label style={{ ...S.label, marginTop: 8 }}>Other Details</label>
+              <textarea style={{ ...S.input, height: 90, resize: "vertical" }}
+                placeholder="Anything else characters should know about you (optional)"
+                value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+            </div>
+          )}
+
+          {APPEARANCE_TABS.includes(tab) && (
+            <div style={tabPanel}>
+              <AppearanceTabFields tab={tab} hasCharacterTab
+                face={formFace} onFace={setFormFace}
+                appearance={appearance} onAppearance={patchAppearance}
+                body={formBody} onBody={patchBody} />
+            </div>
+          )}
+
+          {tab === "Images" && (
+            <div style={tabPanel}>
+              <p style={{ fontSize: 12, color: "var(--text4)", margin: "4px 0 8px" }}>
+                Two images, and they do different jobs. The base image is the
+                full-length one everything else is generated from and is never
+                shown. The portrait is what you see next to your own messages.
+              </p>
+
+              <label style={S.label}>Portrait</label>
+              {userPersonaAvatar(form) ? (
+                <img src={userPersonaAvatar(form)} alt="your portrait"
+                  style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 8, background: "var(--bg3)", display: "block" }} />
+              ) : (
+                <p style={{ fontSize: 12, color: "var(--text4)" }}>None yet — generating a base image and saving makes one.</p>
+              )}
+
+              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                <button style={S.btnPrimary} onClick={handleGenerateBase} disabled={imgLoading || analysing}>
+                  {imgLoading && imgStage === "base" ? busyLabel : form.referenceImage ? "Regenerate Base" : "Generate Base"}
+                </button>
+                <button style={S.btnSecondary} onClick={handleGenerateAvatar} disabled={imgLoading || analysing || !form.referenceImage}>
+                  {imgLoading && imgStage === "avatar" ? busyLabel : "Regenerate Portrait"}
+                </button>
+                <button style={S.btnSecondary} onClick={() => fileRef.current && fileRef.current.click()} disabled={imgLoading || analysing}>
+                  Use Photos
+                </button>
+                <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleFileUpload} />
+              </div>
+
+              <label style={{ ...S.label, marginTop: 12 }}>Extra Image Notes</label>
+              <input style={S.input} placeholder="Anything to add to the image prompt (optional)"
+                value={imgPrompt} onChange={e => setImgPrompt(e.target.value)} />
+
+              <label style={S.label}>Portrait Outfit</label>
+              <input style={S.input} placeholder="Left blank, one is chosen for you"
+                value={formAvatar.outfit || ""} onChange={e => patchAvatar({ outfit: e.target.value })} />
+              <p style={{ fontSize: 11, color: "var(--text4)", marginTop: -4 }}>
+                Describes the photograph, not you — it reaches the portrait only, never the base image.
+              </p>
+
+              {analysing && <p style={{ fontSize: 12, color: "var(--text4)" }}>Reading your photos…</p>}
+              {note && <p style={{ fontSize: 12, color: "var(--text4)" }}>{note}</p>}
+
+              <p style={{ fontSize: 11, color: "var(--text4)", marginTop: 12 }}>
+                Chat images are shot from your point of view, so the base image
+                is not sent to the image model — what it uses from here is your
+                colouring and build, in the frames where your own hands or body
+                are actually in shot.
+              </p>
+            </div>
+          )}
+
+          {error && <p style={{ color: "var(--pink)", fontSize: 12, marginTop: 8 }}>{error}</p>}
+        </div>
+        <div style={S.modalFooter}>
+          <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
+          <button style={S.btnPrimary} onClick={handleSave} disabled={imgLoading || analysing}>
+            {imgLoading ? busyLabel : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsPanel({ settings, onSave, onClose }) {
-  const [form, setForm] = useState(() => ({ ...settings, userPersona: { ...DEFAULT_USER_PERSONA, ...(settings.userPersona || {}) } }));
+  const [form, setForm] = useState(() => ({ ...settings, userPersona: normaliseUserPersona(settings.userPersona) }));
+  // The user's profile is a screen of its own rather than a third block of
+  // fields here: it has as many tabs as the character creator does, and
+  // Settings is already long enough to scroll past.
+  const [showProfile, setShowProfile] = useState(false);
+  const persona = form.userPersona;
+  const summary = [
+    persona.name,
+    personaGenderWord(persona),
+    persona.age,
+    persona.appearance ? "appearance set" : "",
+    persona.referenceImage ? "images set" : "",
+  ].filter(Boolean).join(" · ");
   return (
     <div style={S.overlay}>
       <div style={S.modal}>
@@ -2612,27 +3043,27 @@ function SettingsPanel({ settings, onSave, onClose }) {
           <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>About You</span>
           <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 4 }}>Used by characters so they know who they're talking to. Applies to all characters by default — individual characters can override this.</p>
 
-          <label style={S.label}>Your Name</label>
-          <input style={S.input} placeholder="e.g. Tim" value={form.userPersona.name}
-            onChange={e => setForm(f => ({ ...f, userPersona: { ...f.userPersona, name: e.target.value } }))} />
-
-          <label style={S.label}>Your Gender</label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {GENDERS.map(g => (
-              <button key={g} style={form.userPersona.gender === g ? S.genderBtnOn : S.genderBtnOff}
-                onClick={() => setForm(f => ({ ...f, userPersona: { ...f.userPersona, gender: g } }))}>{g}</button>
-            ))}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {userPersonaAvatar(persona) && (
+              <img src={userPersonaAvatar(persona)} alt="you"
+                style={{ width: 48, height: 48, borderRadius: "50%", objectFit: "cover", flexShrink: 0, background: "var(--bg3)" }} />
+            )}
+            <span style={{ fontSize: 12, color: "var(--text3)", flex: 1, minWidth: 0 }}>
+              {summary || "Nothing set yet."}
+            </span>
+            <button style={S.btnPrimary} onClick={() => setShowProfile(true)}>Edit</button>
           </div>
-
-          <label style={S.label}>Other Details</label>
-          <textarea style={{ ...S.input, height: 70, resize: "vertical" }} placeholder="Anything else characters should know about you (optional)"
-            value={form.userPersona.notes} onChange={e => setForm(f => ({ ...f, userPersona: { ...f.userPersona, notes: e.target.value } }))} />
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
           <button style={S.btnPrimary} onClick={() => { onSave(form); onClose(); }}>Save</button>
         </div>
       </div>
+      {showProfile && (
+        <UserProfileEditor persona={persona} settings={form} title="Your Profile"
+          onSave={p => setForm(f => ({ ...f, userPersona: p }))}
+          onClose={() => setShowProfile(false)} />
+      )}
     </div>
   );
 }
@@ -2842,7 +3273,7 @@ function ClosetStrip({ closet, worn, wornState, onRemove, onToggleWorn, maxWorn 
 }
 
 // ─── CHARACTER PERSONALITY PANEL (in-chat) ────────────────────────────────────
-function CharacterPersonalityPanel({ character, onSave, onClose, model }) {
+function CharacterPersonalityPanel({ character, onSave, onClose, model, settings }) {
   const [sliders, setSliders] = useState(character.sliders || DEFAULT_SLIDERS);
   const [disabledSliders, setDisabledSliders] = useState(character.disabledSliders || []);
   const [reactiveEnabled, setReactiveEnabled] = useState(character.reactiveEnabled !== false);
@@ -2880,7 +3311,11 @@ function CharacterPersonalityPanel({ character, onSave, onClose, model }) {
   const [memoryGenLoading, setMemoryGenLoading] = useState(false);
   const [memoryGenError, setMemoryGenError] = useState("");
   const [useUserPersonaOverride, setUseUserPersonaOverride] = useState(!!character.userPersonaOverride);
-  const [userPersonaOverride, setUserPersonaOverride] = useState(character.userPersonaOverride || { ...DEFAULT_USER_PERSONA });
+  const [userPersonaOverride, setUserPersonaOverride] = useState(() => normaliseUserPersona(character.userPersonaOverride));
+  // The override is the same shape as the global profile and is edited in the
+  // same screen — appearance, images and all. A character who is told you look
+  // different needs the same fields to say it with.
+  const [showOverrideEditor, setShowOverrideEditor] = useState(false);
 
   return (
     <div style={S.overlay}>
@@ -3209,19 +3644,18 @@ Return ONLY the JSON object, no other text.` }] });
           {useUserPersonaOverride && (
             <div style={{ marginTop: 8 }}>
               <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 6 }}>Overrides your global "About You" settings just for {character.name}.</p>
-              <label style={S.label}>Your Name</label>
-              <input style={S.input} placeholder="e.g. Tim" value={userPersonaOverride.name}
-                onChange={e => setUserPersonaOverride(p => ({ ...p, name: e.target.value }))} />
-              <label style={S.label}>Your Gender</label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {GENDERS.map(g => (
-                  <button key={g} style={userPersonaOverride.gender === g ? S.genderBtnOn : S.genderBtnOff}
-                    onClick={() => setUserPersonaOverride(p => ({ ...p, gender: g }))}>{g}</button>
-                ))}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {userPersonaAvatar(userPersonaOverride) && (
+                  <img src={userPersonaAvatar(userPersonaOverride)} alt="you"
+                    style={{ width: 48, height: 48, borderRadius: "50%", objectFit: "cover", flexShrink: 0, background: "var(--bg3)" }} />
+                )}
+                <span style={{ fontSize: 12, color: "var(--text3)", flex: 1, minWidth: 0 }}>
+                  {[userPersonaOverride.name, personaGenderWord(userPersonaOverride), userPersonaOverride.age,
+                    userPersonaOverride.appearance ? "appearance set" : "",
+                    userPersonaOverride.referenceImage ? "images set" : ""].filter(Boolean).join(" · ") || "Nothing set yet."}
+                </span>
+                <button style={S.btnPrimary} onClick={() => setShowOverrideEditor(true)}>Edit</button>
               </div>
-              <label style={S.label}>Other Details</label>
-              <textarea style={{ ...S.input, height: 60, resize: "vertical" }} placeholder="Anything else this character should know about you"
-                value={userPersonaOverride.notes} onChange={e => setUserPersonaOverride(p => ({ ...p, notes: e.target.value }))} />
             </div>
           )}
         </div>
@@ -3230,6 +3664,12 @@ Return ONLY the JSON object, no other text.` }] });
           <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, disabledSliders, reactiveEnabled, intentionsEnabled, intentions: intentions.filter(i => (i.goal || "").trim()).map(i => ({ ...i, steps: (i.steps || []).filter(st => (st.text || "").trim()) })), memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, closet, worn, staging: hasStaging(staging) ? staging : null, explicitDetail: explicitDetail.trim() || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
         </div>
       </div>
+      {showOverrideEditor && (
+        <UserProfileEditor persona={userPersonaOverride} settings={settings || {}}
+          title={`You, for ${character.name}`}
+          onSave={setUserPersonaOverride}
+          onClose={() => setShowOverrideEditor(false)} />
+      )}
     </div>
   );
 }
@@ -4523,32 +4963,14 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const handleGenerateImage = async () => {
     setImgLoading(true); setError("");
     try {
-      const appearanceDesc = buildAppearancePrompt(form.appearance, { measurements: false });
-      const genderDesc = form.gender === "Custom" ? (form.customGender || "") : (form.gender || "");
-      const ageDesc = form.age ? `${form.age} year old` : "";
-      const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-
-      // Each click of Regen should offer a genuinely different face to pick
-      // from. Chat images deliberately do not do this — they pass the chosen
-      // base image instead, and need the face to stay put.
-      //
-      // Gated on the structure alone, not the whole face. The pools describe
-      // face shape, cheekbones, nose, mouth, eyes and skin, so a chosen face
-      // shape is the only thing they compete with — lipstick and a ponytail
-      // have no opinion about a jawline.
-      const faceVariation = isFaceStructureUnset(form.appearance && form.appearance.face) ? pickFaceVariation() : "";
-      const extra = [imgPrompt.trim(), faceVariation].filter(Boolean).join(", ");
       const body = normaliseBody(form.appearance && form.appearance.body);
 
-      // Built by the same function the body editor uses, so there is one
-      // definition of what a base image is rather than this screen keeping a
-      // private one. anchored: false because on a first generation there is no
-      // reference image for the hold clauses to talk about.
+      // Built by the same function the body editor and the user's own profile
+      // use, so there is one definition of what a base image is rather than
+      // this screen keeping a private one.
       setImgStage("base");
-      const base = await generateImageWiro({
-        prompt: buildBodyBasePrompt({ body, charDesc, anchored: false, extra }),
-        model: settings.imageModel,
-        seed: Math.floor(Math.random() * 2147483647),
+      const base = await generateSubjectBaseImage({
+        subject: form, imageModel: settings.imageModel, extra: imgPrompt.trim(),
       });
 
       // The avatar is NOT generated here. Every click of Regen used to make two
@@ -4580,22 +5002,11 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   // that person rather than a fresh one. Returns the finished form so Save can
   // use it directly — setForm would not have landed by the time onSave ran.
   const generateAvatarFor = async (base) => {
-    const genderDesc = form.gender === "Custom" ? (form.customGender || "") : (form.gender || "");
-    const ageDesc = form.age ? `${form.age} year old` : "";
-    const charDesc = [ageDesc, genderDesc, buildAppearancePrompt(form.appearance, { measurements: false })].filter(Boolean).join(", ");
-
-    let avatarCfg = normaliseAvatar(form.appearance && form.appearance.avatar);
     // An empty outfit is filled by asking what she would wear, and written back
     // into the box so it is visible and editable rather than decided invisibly.
-    if (!String(avatarCfg.outfit || "").trim()) {
-      const outfit = await suggestAvatarOutfit({ character: form, model: settings.selectedModel });
-      if (outfit) { avatarCfg = { ...avatarCfg, outfit }; patchAvatar({ outfit }); }
-    }
-    const avatar = await generateImageWiro({
-      prompt: buildAvatarPrompt({ charDesc, avatar: avatarCfg }),
-      model: settings.imageModel,
-      initImage: base,
-      seed: Math.floor(Math.random() * 2147483647),
+    const avatar = await generateSubjectAvatar({
+      subject: form, base, imageModel: settings.imageModel,
+      textModel: settings.selectedModel, onOutfit: outfit => patchAvatar({ outfit }),
     });
     setGeneratedImages(prev => prev.map(pair => (pair.base === base ? { ...pair, avatar } : pair)));
     return avatar;
@@ -4986,7 +5397,7 @@ function CharacterCard({ character, onSelect, onEdit, onEditAppearance, onDelete
 }
 
 // ─── MESSAGE BUBBLE ───────────────────────────────────────────────────────────
-function MessageBubble({ msg, index, isLastAI, characterName, onDelete, onEdit, onRegenerate, regenLoading, onExpandImage, discreetMode }) {
+function MessageBubble({ msg, index, isLastAI, characterName, onDelete, onEdit, onRegenerate, regenLoading, onExpandImage, discreetMode, userAvatar }) {
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState(msg.content);
   const [showRegen, setShowRegen] = useState(false);
@@ -5036,8 +5447,13 @@ function MessageBubble({ msg, index, isLastAI, characterName, onDelete, onEdit, 
     ? isUser ? { ...S.userBubbleText, fontWeight: 400 } : { ...S.bubbleText, color: "#000", fontWeight: 400 }
     : isUser ? S.userBubbleText : S.bubbleText;
 
+  // Your own portrait beside your own messages, once you have one. Not in
+  // discreet mode: that view exists to look like an ordinary messaging app
+  // from across a room, and a face in it is the thing it is hiding.
+  const showUserAvatar = isUser && !discreetMode && !!userAvatar;
+
   return (
-    <div style={{ ...S.bubbleWrapper, justifyContent: isUser ? "flex-end" : "flex-start" }} className="msg-anim">
+    <div style={{ ...S.bubbleWrapper, justifyContent: isUser ? "flex-end" : "flex-start", alignItems: "flex-start", gap: showUserAvatar ? 8 : 0 }} className="msg-anim">
       <div style={{ maxWidth: "75%" }}>
         <div style={bubbleStyle}>
           {isAI && !discreetMode && <span style={S.bubbleName}>{characterName}</span>}
@@ -5078,6 +5494,10 @@ function MessageBubble({ msg, index, isLastAI, characterName, onDelete, onEdit, 
           </div>
         )}
       </div>
+      {showUserAvatar && (
+        <img src={userAvatar} alt="you"
+          style={{ width: 30, height: 30, borderRadius: "50%", objectFit: "cover", flexShrink: 0, marginTop: 2, background: "var(--bg3)" }} />
+      )}
     </div>
   );
 }
@@ -5955,6 +6375,8 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         keepSceneVerbatim: true,
         garmentRefs: worn.length > 0,
         viewerGender: resolveUserPersona(character, settings).gender,
+        // Only reaches the frames that draw the viewer — see buildPovModifiers.
+        viewerDesc: buildViewerDesc(resolveUserPersona(character, settings)),
       });
       const url = await generateImageWiro({
         prompt: fullPrompt,
@@ -6081,6 +6503,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         contact: extracted.touching,
         viewerBody: extracted.viewerBody,
         viewerGender: resolveUserPersona(character, settings).gender,
+        viewerDesc: buildViewerDesc(resolveUserPersona(character, settings)),
         garmentRefs: worn.length > 0,
         clothingState: extracted.clothingState,
       });
@@ -6301,7 +6724,8 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
           <MessageBubble key={i} msg={msg} index={i} isLastAI={i === lastAIIndex}
             characterName={character.name} onDelete={handleDeleteMessage}
             onEdit={handleEditMessage} onRegenerate={handleRegenerate} regenLoading={regenLoading}
-            onExpandImage={(url) => setLightboxImg(url)} discreetMode={discreetMode} />
+            onExpandImage={(url) => setLightboxImg(url)} discreetMode={discreetMode}
+            userAvatar={userPersonaAvatar(resolveUserPersona(character, settings))} />
         ))}
 
         {(loading || regenLoading) && (
@@ -6499,7 +6923,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       )}
 
       {showPersonality && (
-        <CharacterPersonalityPanel character={character} model={settings.selectedModel} onSave={handlePersonalitySave} onClose={() => setShowPersonality(false)} />
+        <CharacterPersonalityPanel character={character} model={settings.selectedModel} settings={settings} onSave={handlePersonalitySave} onClose={() => setShowPersonality(false)} />
       )}
 
       {/* Opened from the header avatar. commitCharacter both updates the chat's

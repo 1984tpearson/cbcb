@@ -1143,6 +1143,13 @@
       alsoTrueHeader: "Also true of you:",
       userPersonaName: "their name is {name}",
       userPersonaGender: "their gender is {gender}",
+      userPersonaAge: "they are {age}",
+      // The user's appearance, once they have built one. Kept to the same
+      // comma-separated shape the character appearance settings produce, and
+      // introduced as something the character can see rather than as a fact
+      // they were told — a character reciting the viewer's measurements back
+      // at them reads as a dossier, not as somebody in the room.
+      userPersonaAppearance: "they look like this: {appearance}",
     },
 
     // ── Wardrobe (wardrobe.html) ─────────────────────────────────────────────
@@ -1925,6 +1932,11 @@
       // of every other shot: a clause the model cannot use is a clause it can
       // still render literally.
       povViewerSex: "the viewer is {viewer}",
+      // The viewer's own colouring and build, and ONLY in the frames where
+      // their body is actually drawn. Everywhere else the viewer is a camera,
+      // and a clause describing a body the shot does not contain is one the
+      // model can render anyway — as a second person in the frame.
+      povViewerDesc: "the viewer's own body is {desc}",
 
       // What the POV clause says about the viewer's own body in an explicit
       // shot — where it is, and that it is joined to her rather than near her.

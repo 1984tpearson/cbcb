@@ -198,9 +198,14 @@ window.ImagePrompt = {
       return words[String(gender || "").trim()] || "";
     }
 
-    function buildPovModifiers(sceneText, staging, nsfw, userOutfit, contact, viewerBody, viewerGender) {
+    function buildPovModifiers(sceneText, staging, nsfw, userOutfit, contact, viewerBody, viewerGender, viewerDesc) {
       const scene = sceneText || "";
       const parts = [POV_BASE];
+      // Said once, and only where the viewer's body is in the frame at all.
+      // Every branch below that draws the viewer calls this; the branches that
+      // keep the viewer a camera deliberately do not, because a description of
+      // a body the shot does not contain is an invitation to draw one.
+      const selfDesc = () => (viewerDesc ? fillTemplate(CFG.image.povViewerDesc, { desc: viewerDesc }) : "");
       if (contact && viewerBody) {
         // viewerBody already says whose the limb is and where it enters, so
         // "the foreground hand and arm belong to the viewer, one pair only"
@@ -225,8 +230,9 @@ window.ImagePrompt = {
           // render literally for no reason.
           const viewerPhrase = viewerSexPhrase(viewerGender);
           if (viewerPhrase) parts.push(fillTemplate(CFG.image.povViewerSex, { viewer: viewerPhrase }));
+          parts.push(selfDesc());
         } else {
-          parts.push(viewerBody);
+          parts.push(viewerBody, selfDesc());
         }
         // What the viewer is wearing is decided by the tracked outfit, never
         // by the scene text: "naked" in a scene prompt is almost always
@@ -253,11 +259,14 @@ window.ImagePrompt = {
         // of the viewer. The shot is just as explicit and was just as static,
         // so it gets the motion clause too. Not the contact clause: with no
         // viewerBody there is no "point the scene describes" to point back at.
-        parts.push(POV_INTIMATE_MOTION);
+        parts.push(POV_INTIMATE_MOTION, selfDesc());
       } else {
-        parts.push(POV_ARMS_OWNED_MODIFIER);
+        // Arms only. The colouring still applies — a pair of forearms is the
+        // one part of the viewer this shot does draw — but nothing else about
+        // the body is in frame, so only the colouring is offered.
+        parts.push(POV_ARMS_OWNED_MODIFIER, selfDesc());
       }
-      return parts.join(", ");
+      return parts.filter(Boolean).join(", ");
     }
 
     // The prompt is assembled from sources that each describe the scene in their
@@ -967,7 +976,7 @@ window.ImagePrompt = {
     function assembleImagePrompt({
       scenePrompt, charDesc, charOutfit, userOutfit, staging, nsfw,
       explicitDetail, messages, characterName, styleModifiers,
-      contact: contactOverride, name, keepSceneVerbatim, viewerBody, viewerGender, subjectNoun,
+      contact: contactOverride, name, keepSceneVerbatim, viewerBody, viewerGender, viewerDesc, subjectNoun,
       garmentRefs, clothingState,
     }) {
       const contact = contactOverride !== undefined
@@ -981,7 +990,7 @@ window.ImagePrompt = {
         ? scenePrompt
         : stripViewerLimbs(scenePrompt);
       const parts = {
-        pov: buildPovModifiers(scene, staging, nsfw, userOutfit, contact, viewerBody, viewerGender),
+        pov: buildPovModifiers(scene, staging, nsfw, userOutfit, contact, viewerBody, viewerGender, viewerDesc),
         name: name || "",
         charDesc: charDesc || "",
         // Two ways to say what she has on, and only ever one of them.

@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Site Settings</title>
-<script src="site-config.js?v=60"></script>
+<script src="site-config.js?v=61"></script>
 <style>
   :root {
     --pink: #d4547a; --pink-bg: #fdf1f4; --pink-border: #f0c4d1;
@@ -541,6 +541,8 @@
         field("About the user", p + "userPersonaNote", "area", "{details}"),
         field("User name fragment", p + "userPersonaName", "area", "{name}"),
         field("User gender fragment", p + "userPersonaGender", "area", "{gender}"),
+        field("User age fragment", p + "userPersonaAge", "area", "{age}"),
+        field("User appearance fragment", p + "userPersonaAppearance", "area", "{appearance}"),
       ],
     )];
   }
@@ -674,6 +676,7 @@
         field("Viewer is touching something", i + "povArmsModifier", "area"),
         field("Scene already names the viewer's limbs", i + "povArmsOwnedModifier", "area"),
         field("Viewer is touching nothing", i + "povNoLimbs", "area"),
+        field("The viewer's own colouring and build", i + "povViewerDesc", "area", "{desc}"),
         field("Intimate scene", i + "povIntimateModifier", "area"),
         field("Intimate scene — bodies joined", i + "povIntimateContact", "area",
           "Asserts the contact rather than permitting it. Without this an explicit shot came out a half-second before anything happened."),
