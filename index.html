@@ -1645,7 +1645,18 @@ const UNSET_APPEARANCE = {
   eyeColour: "", eyeColourCustom: "",
   skinTone: "", skinToneCustom: "",
   ethnicity: "", ethnicityCustom: "",
-  height: null, build: null, buildCustom: "",
+  // Height is deliberately absent, where it used to be nulled. Everything on
+  // this list is unset because the photograph accounts for it better than a
+  // slider can — but a photograph cropped at mid-thigh carries no scale at
+  // all, so unsetting height defers to nothing, it just deletes the fact. And
+  // height is the one appearance value still sent with every chat image, so a
+  // null here made a character whose height reached no prompt anywhere.
+  //
+  // Absent rather than 50: this object is spread over the form's current
+  // appearance, so leaving the key out keeps whatever height is already
+  // there — the default, or a number the user has already set — instead of
+  // flattening it back to the middle.
+  build: null, buildCustom: "",
   // The tattoo field too: the photograph is the only record of her ink.
   body: { tattoos: "Any", tattoosCustom: "" },
   chest: null, chestCustom: "",
@@ -2460,7 +2471,16 @@ function renderMessageContent(text, isUser, overrideStyle) {
 // its value for when it's switched back on, contributes nothing to the system
 // prompt, and is never drifted by the reactivity pass. onToggleOff is optional
 // so slider groups that don't support switching off (appearance) still work.
-function SliderRow({ def, value, onChange, off, onToggleOff }) {
+//
+// activateOnChange makes an off slider draggable rather than inert: the drag
+// itself turns it on. A disabled range input is the wrong affordance for a
+// value the user is trying to set — it looks like a slider, so it gets
+// dragged, and nothing happens, with the only way through being a 9px chip in
+// the corner. Dragging a slider is about as unambiguous a statement of intent
+// as the UI has. Opt-in, because for a personality slider "off" is a real
+// position that a stray drag should not silently leave.
+function SliderRow({ def, value, onChange, off, onToggleOff, activateOnChange }) {
+  const inert = off && !activateOnChange;
   return (
     <div style={{ marginBottom: 14, opacity: off ? 0.42 : 1 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
@@ -2477,7 +2497,7 @@ function SliderRow({ def, value, onChange, off, onToggleOff }) {
           )}
         </span>
       </div>
-      <input type="range" min={0} max={100} value={value} disabled={off} onChange={e => onChange(Number(e.target.value))} />
+      <input type="range" min={0} max={100} value={value} disabled={inert} onChange={e => onChange(Number(e.target.value))} />
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
         <span style={{ fontSize: 10, color: "#4a4840" }}>{def.left}</span>
         <span style={{ fontSize: 10, color: "#4a4840" }}>{def.right}</span>
@@ -3472,10 +3492,13 @@ function AppearanceTabFields({ tab, face, onFace, appearance, onAppearance, body
             every chat image, and it is sent in centimetres, which a band would
             round away. */}
         {/* The slider has no null position, so "leave as it is" is the OFF
-            toggle SliderRow already carries for the personality sliders. */}
+            toggle SliderRow already carries for the personality sliders.
+            Unlike those, an unset height slider still drags: onChange sets a
+            number, and a number is not null, so the drag turns it on by
+            itself. The chip stays for deliberately unsetting it again. */}
         <div style={{ marginTop: 12 }}>
           <SliderRow def={APPEARANCE_SLIDER_DEFS[0]} value={appearance.height ?? 50}
-            off={appearance.height == null}
+            off={appearance.height == null} activateOnChange
             onToggleOff={off => onAppearance({ height: off ? null : 50 })}
             onChange={v => onAppearance({ height: v })} />
         </div>
