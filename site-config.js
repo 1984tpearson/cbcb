@@ -1427,6 +1427,21 @@
         // So this says outright that the clothes may be hidden and that the
         // action outranks them.
         refClause: "wearing the clothes in the reference images, which may be partly hidden, pushed aside or out of frame — what she is doing matters more than showing them, and the pose must never be changed to make them visible",
+        // The base image is nude, which is the whole point of it: tattoos
+        // hidden under clothes in the reference are tattoos the model never
+        // learns about. The cost is that it sees a tattooed torso and a
+        // garment and paints the first over the second, so the ink ends up on
+        // top of the shirt.
+        //
+        // Nothing in any prompt has ever mentioned tattoos — they travel as
+        // pixels by design — so there was no wording for the model to be
+        // wrong about, only a gap. Same shape as the navel piercing: the fix
+        // is to say the thing that was being left unsaid.
+        //
+        // Written so it is a no-op on a nude shot: it speaks only about skin
+        // that clothing covers, and where nothing covers her it asks for
+        // nothing.
+        skinClause: "her tattoos, marks and skin markings are on her skin and underneath whatever she is wearing — no tattoo or marking is drawn on top of, or showing through, any garment, and skin the clothing covers is not visible",
       },
 
       // What a generation costs, per endpoint family. Dezgo prices by family and
@@ -1584,6 +1599,12 @@
         // Some chosen, some not. Without this the people with no garments
         // quietly become the model's invention.
         garmentsGroupRest: " Everyone not listed is dressed as they are in their own reference image.",
+        // Appended whenever anyone in the shot has been dressed out of the
+        // wardrobe. The reference photographs are nude, so the model sees a
+        // tattooed body and a flat lay and puts the ink over the garment; the
+        // studio has the same gap the chat path does, for the same reason.
+        // Silent on anyone left nude, since it speaks only about covered skin.
+        skinUnderClothes: " Tattoos, marks and skin markings sit on the skin underneath the clothing — none are drawn on top of, or showing through, any garment.",
         together: " Together they are {v}.",
         setting: " The setting is {v}.",
         lighting: " Lit by {v}.",

@@ -964,9 +964,14 @@ window.ImagePrompt = {
         // Without garments it falls back to the tracked sentence, which is
         // all there was before the wardrobe existed and all there is for a
         // character with no closet.
+        // The skin clause rides with the clothing in both forms, because the
+        // problem is the same either way: the reference is nude and tattooed,
+        // and whatever dresses her has to say that the ink goes under it. It
+        // is worded to ask for nothing where no clothing covers her, so a nude
+        // shot is unaffected even when a tracked outfit is still on record.
         wardrobe: garmentRefs
-          ? joinPromptParts([CFG.wardrobe.chat.refClause, clothingState || ""])
-          : (charOutfit ? `wearing ${charOutfit}` : ""),
+          ? joinPromptParts([CFG.wardrobe.chat.refClause, clothingState || "", CFG.wardrobe.chat.skinClause])
+          : (charOutfit ? joinPromptParts([`wearing ${charOutfit}`, CFG.wardrobe.chat.skinClause]) : ""),
         staging: buildStagingImageDesc(staging),
         scene: scene || "",
         explicit: isIntimateScene(scene, staging, nsfw) ? (explicitDetail || "") : "",
