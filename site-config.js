@@ -2564,6 +2564,312 @@
     return cut === want;
   }
 
+  // ── Generations that outlive the page that asked for them ──────────────────
+  //
+  // Wiro does the work on its own servers and bills for it whether or not
+  // anyone collects the result. The proxy used to wait and hand the image back,
+  // but its wall-clock limit meant a slow generation came back 504 while Wiro
+  // finished anyway, so the waiting moved into the browser — and that made the
+  // browser the only thing holding the task id. A phone locking freezes the
+  // page's timers mid-poll and may discard the page outright, which is why
+  // "start an image and put the phone down" lost pictures.
+  //
+  // So the id is written to storage before the first poll, and any later visit
+  // to either page can collect what Wiro finished in the meantime. This lives
+  // here rather than in index.html because wardrobe.html generates images too,
+  // and a garment left running should be collectable from whichever page is
+  // opened next — which only works if both pages read the same list and
+  // understand every kind of entry in it.
+  const PENDING_IMAGES_KEY = "personachat_pending_images";
+  // Where a recovered picture goes when it belongs to nothing yet: a character
+  // that was still being created has no gallery to file into.
+  const RECOVERED_TRAY_KEY = "personachat_recovered_images";
+  // A task Wiro has forgotten is not worth asking about forever, and a stale
+  // entry means every later visit spends two polls learning nothing.
+  const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+  const PENDING_LIMIT = 20;
+  const TRAY_LIMIT = 12;
+  const DEFAULT_GALLERY_LIMIT = 200;
+
+  // localStorage throws rather than returning null in a locked-down browser,
+  // and a generation must not fail because of where its receipt is kept.
+  function readStore(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return Array.isArray(parsed) ? parsed : fallback;
+    } catch { return fallback; }
+  }
+  function writeStore(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  }
+
+  function pendingImages() {
+    return readStore(PENDING_IMAGES_KEY, [])
+      .filter(p => p && p.taskId && (Date.now() - (p.startedAt || 0)) < PENDING_MAX_AGE_MS);
+  }
+  function recordPendingImage(entry) {
+    writeStore(PENDING_IMAGES_KEY,
+      [entry, ...pendingImages().filter(p => p.taskId !== entry.taskId)].slice(0, PENDING_LIMIT));
+  }
+  function dropPendingImage(taskId) {
+    writeStore(PENDING_IMAGES_KEY, pendingImages().filter(p => p.taskId !== taskId));
+  }
+
+  function recoveredImages() { return readStore(RECOVERED_TRAY_KEY, []); }
+  function addRecoveredImage(entry) {
+    writeStore(RECOVERED_TRAY_KEY, [entry, ...recoveredImages()].slice(0, TRAY_LIMIT));
+  }
+  function dropRecoveredImage(id) {
+    writeStore(RECOVERED_TRAY_KEY, recoveredImages().filter(e => e.id !== id));
+  }
+  function clearRecoveredImages() { writeStore(RECOVERED_TRAY_KEY, []); }
+
+  // Tasks this tab is already waiting on. The recovery sweep reads the same
+  // list from storage, so without this it would poll a generation a screen is
+  // still waiting for, collect it first, and file a second copy while the
+  // screen that asked also receives one.
+  const activeImageTasks = new Set();
+  function claimImageTask(taskId) {
+    if (activeImageTasks.has(taskId)) return false;
+    activeImageTasks.add(taskId);
+    return true;
+  }
+  function releaseImageTask(taskId) { activeImageTasks.delete(taskId); }
+
+  // Poll quickly at first — a fast generation should not wait on a slow
+  // schedule — then ease off: past a dozen polls this is a slow one, and a
+  // check every two seconds is traffic against a rate limit shared with the
+  // generations themselves.
+  const POLL_SCHEDULE_MS = [900, 900, 1200, 1500, 2000, 2000, 2000, 2000, 2500, 2500, 3000, 3000, 4000];
+  // Where a poll goes when Wiro says it is rate limiting us, unless it sends a
+  // Retry-After of its own. Backing off is the only useful response: polling
+  // harder cannot make the image arrive sooner, and it is what caused this.
+  const THROTTLE_BACKOFF_MS = [4000, 8000, 12000, 20000];
+  const MAX_POLLS = 160;
+  const MAX_TRANSIENT_POLL_FAILURES = 8;
+
+  // setTimeout, but a backgrounded tab that comes back does not have to wait
+  // out the rest of a timer the browser froze. Returning to the app polls at
+  // once.
+  function sleepUnlessVisible(ms) {
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        document.removeEventListener("visibilitychange", onVisible);
+        resolve();
+      };
+      const onVisible = () => { if (!document.hidden) finish(); };
+      const timer = setTimeout(finish, ms);
+      document.addEventListener("visibilitychange", onVisible);
+    });
+  }
+
+  // Asks the proxy whether a task has finished. Returns the image URL, or null
+  // if it is still running after `maxPolls` asks.
+  //
+  // A failure to get an answer is transient by definition: polling is a read,
+  // the task runs on Wiro either way, and giving up throws away an image that
+  // is generated and billed regardless. Only a 4xx is fatal — that is this
+  // client asking for something wrong, and asking again will not fix it.
+  async function pollImageTask({ taskId, outputFormat, modelId, startedAt, maxPolls = MAX_POLLS, onTiming }) {
+    let throttled = 0;
+    let nextWaitMs = null;
+    let transientFailures = 0;
+    for (let attempt = 0; attempt < maxPolls; attempt++) {
+      await sleepUnlessVisible(nextWaitMs ?? POLL_SCHEDULE_MS[Math.min(attempt, POLL_SCHEDULE_MS.length - 1)]);
+      nextWaitMs = null;
+      let statusRes;
+      try {
+        statusRes = await fetch(IMAGE_PROXY_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "status", taskId, outputFormat }),
+        });
+      } catch {
+        transientFailures++;
+        if (transientFailures > MAX_TRANSIENT_POLL_FAILURES) {
+          throw new Error(`Wiro error: lost contact with the image proxy. Task ${taskId} may still finish.`);
+        }
+        continue;
+      }
+      if (statusRes.status === 202) {
+        // Still generating — but read the body, because it also says whether
+        // Wiro is rate limiting us. Throttled polls are not progress: they are
+        // this client competing with its own generations for the project's
+        // request budget, and the answer is to ask less often.
+        const pending = await statusRes.json().catch(() => null);
+        if (pending && pending.throttled) {
+          nextWaitMs = (pending.retryAfterSeconds > 0)
+            ? pending.retryAfterSeconds * 1000
+            : THROTTLE_BACKOFF_MS[Math.min(throttled, THROTTLE_BACKOFF_MS.length - 1)];
+          throttled++;
+        }
+        continue;
+      }
+      if (statusRes.status >= 500 || statusRes.status === 429) {
+        transientFailures++;
+        if (transientFailures > MAX_TRANSIENT_POLL_FAILURES) {
+          throw new Error(`Wiro error: the image proxy kept failing (${statusRes.status}). Task ${taskId} may still finish.`);
+        }
+        nextWaitMs = THROTTLE_BACKOFF_MS[Math.min(transientFailures - 1, THROTTLE_BACKOFF_MS.length - 1)];
+        continue;
+      }
+      if (!statusRes.ok) {
+        const err = await statusRes.text().catch(() => "");
+        throw new Error(`Wiro error: ${statusRes.status} ${err}`);
+      }
+      transientFailures = 0;
+      const done = await statusRes.json();
+      if (onTiming) {
+        const t = (done && done.timing) || {};
+        onTiming({
+          at: Date.now(),
+          model: modelId,
+          total: Number(((Date.now() - (startedAt || Date.now())) / 1000).toFixed(1)),
+          queued: t.queuedSeconds ?? null,
+          generating: t.generatingSeconds ?? null,
+          postprocess: t.postprocessSeconds ?? null,
+          throttled,
+        });
+      }
+      return (done && done.imageUrl) || null;
+    }
+    return null;
+  }
+
+  // Copy to Supabase Storage — Wiro's CDN is not somewhere to keep a gallery.
+  // The upload function fetches the URL itself, so the bytes never touch the
+  // browser. Falls back to the original URL, which at least still renders.
+  async function persistGeneratedImage(imageUrl) {
+    try {
+      const res = await fetch(UPLOAD_IMAGE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceUrl: imageUrl,
+          token: ACCESS_TOKEN,
+          filename: `img_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        }),
+      });
+      if (res.ok) {
+        const { url } = await res.json();
+        if (url) return url;
+      }
+    } catch {}
+    return imageUrl;
+  }
+
+  // Where a recovered picture goes. `dest` is recorded when the generation is
+  // submitted, because by the time it is collected the screen that knew is
+  // gone. Entries written before dest existed carried a bare characterId, and
+  // still mean the gallery.
+  async function fileRecoveredImage(entry, url, opts) {
+    const dest = entry.dest || (entry.characterId ? { kind: "gallery", characterId: entry.characterId } : { kind: "tray" });
+    const label = entry.label || dest.label || "Recovered generation";
+    if (dest.kind === "gallery" && dest.characterId) {
+      const limit = (opts && opts.galleryLimit) || DEFAULT_GALLERY_LIMIT;
+      const body = await call("get_gallery", { characterId: dest.characterId });
+      const gallery = Array.isArray(body.gallery) ? body.gallery : [];
+      const next = [{ url, prompt: label, date: Date.now() }, ...gallery].slice(0, limit);
+      await call("save_gallery", { characterId: dest.characterId, gallery: next });
+      return { kind: "gallery", characterId: dest.characterId };
+    }
+    if (dest.kind === "wardrobe" && dest.garmentId) {
+      // Read-modify-write of the one row the whole library lives in. Read
+      // fresh rather than trusting whatever this page loaded minutes ago:
+      // between then and now the picture may not be the only thing that
+      // changed about the wardrobe.
+      const body = await call("get_chat", { characterId: WARDROBE_ROW_ID });
+      const items = Array.isArray(body.messages) ? body.messages : [];
+      const idx = items.findIndex(g => g && g.id === dest.garmentId);
+      // A garment deleted while its picture was generating has nowhere to put
+      // it, so the tray keeps it rather than dropping it on the floor.
+      if (idx < 0) { addRecoveredImage({ id: String(Date.now()) + Math.random().toString(36).slice(2), url, label, date: Date.now() }); return { kind: "tray" }; }
+      // Only fills a gap. A picture chosen while this one was still generating
+      // is the more recent decision, and silently replacing it would undo a
+      // choice that was made after the one being collected.
+      if (items[idx].image) { addRecoveredImage({ id: String(Date.now()) + Math.random().toString(36).slice(2), url, label, date: Date.now() }); return { kind: "tray" }; }
+      items[idx] = { ...items[idx], image: url };
+      await call("save_chat", { characterId: WARDROBE_ROW_ID, messages: items });
+      return { kind: "wardrobe", garmentId: dest.garmentId, name: items[idx].name || "" };
+    }
+    addRecoveredImage({ id: String(Date.now()) + Math.random().toString(36).slice(2), url, label, date: Date.now() });
+    return { kind: "tray" };
+  }
+
+  // One recovered generation, or false if it is still running.
+  async function collectOnePendingImage(entry, onCollected, opts) {
+    // A short patience: this is a check for something already finished, not a
+    // wait for something still running.
+    let imageUrl = null;
+    try {
+      imageUrl = await pollImageTask({ ...entry, maxPolls: 2 });
+    } catch {
+      dropPendingImage(entry.taskId); // Wiro no longer knows about it
+      return false;
+    }
+    if (!imageUrl) return false; // still going — leave it for next time
+    dropPendingImage(entry.taskId);
+    try {
+      const url = await persistGeneratedImage(imageUrl);
+      const filedTo = await fileRecoveredImage(entry, url, opts);
+      if (onCollected) onCollected({ ...entry, url, filedTo });
+      return true;
+    } catch (e) {
+      console.warn("Could not file a recovered image:", e);
+      return false;
+    }
+  }
+
+  // Collect anything Wiro finished while nobody was looking. Called on open,
+  // on returning to the tab, and on a slow timer while it is in front.
+  async function collectPendingImages(opts) {
+    const options = opts || {};
+    let collected = 0;
+    for (const entry of pendingImages()) {
+      if (!claimImageTask(entry.taskId)) continue;
+      try {
+        if (await collectOnePendingImage(entry, options.onCollected, options)) collected += 1;
+      } finally {
+        releaseImageTask(entry.taskId);
+      }
+    }
+    return collected;
+  }
+
+  // Wires the sweep to the events that mean "someone might be looking now".
+  // Returns a stop function. Framework-free so wardrobe.html can use it too.
+  function startImageTaskSweeps(opts) {
+    const options = opts || {};
+    const everyMs = options.everyMs || 20000;
+    let sweeping = false;
+    let stopped = false;
+    const sweep = async () => {
+      // Hidden means nobody is looking and the browser may be freezing us
+      // mid-poll; the visibility handler picks it up on the way back.
+      if (stopped || sweeping || document.hidden || !pendingImages().length) return;
+      sweeping = true;
+      try { await collectPendingImages(options); }
+      catch (e) { console.warn("Could not check for finished images:", e); }
+      finally { sweeping = false; }
+    };
+    sweep();
+    const timer = setInterval(sweep, everyMs);
+    const onVisible = () => { if (!document.hidden) sweep(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }
+
   function fillTemplate(template, values) {
     return String(template == null ? "" : template)
       .replace(/\{(\w+)\}/g, (match, key) => (key in values ? String(values[key]) : match));
@@ -2579,6 +2885,19 @@
     AI_PROXY_URL,
     call,
     aiComplete,
+    // Recoverable image generation — see the block above.
+    pendingImages,
+    recordPendingImage,
+    dropPendingImage,
+    claimImageTask,
+    releaseImageTask,
+    pollImageTask,
+    persistGeneratedImage,
+    collectPendingImages,
+    startImageTaskSweeps,
+    recoveredImages,
+    dropRecoveredImage,
+    clearRecoveredImages,
     parseJsonReply,
     clone,
     deepMerge,

@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Wardrobe</title>
-<script src="site-config.js?v=68"></script>
+<script src="site-config.js?v=69"></script>
 <script src="image-prompt.js?v=32"></script>
 <style>
   :root {
@@ -245,6 +245,11 @@
     #editor .sheet { padding:14px; }
     .foot button { flex:1; min-height:42px; }
   }
+#recoveredTray { margin: 0 0 14px; }
+#recoveredTray .tray { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+#recoveredTray figure { margin: 0; flex: 0 0 auto; width: 120px; }
+#recoveredTray img { width: 120px; height: 120px; object-fit: cover; border-radius: 8px; display: block; }
+#recoveredTray figcaption { font-size: 11px; opacity: .75; margin: 4px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -319,6 +324,7 @@
 
   <main>
     <div id="banner"></div>
+    <div id="recoveredTray" hidden></div>
     <div class="grid" id="grid"></div>
     <div class="empty" id="empty" hidden></div>
   </main>
@@ -436,7 +442,8 @@
   // first symptom is a TypeError naming a function nobody has heard of —
   // unreadable on a phone, and indistinguishable from a broken deploy. So it
   // is checked once, up front, and named for what it is.
-  const REQUIRED_EXPORTS = ["aiComplete", "parseJsonReply", "call", "WARDROBE_ROW_ID", "IMAGE_PROXY_URL", "garmentGender", "garmentFitsGender"];
+  const REQUIRED_EXPORTS = ["aiComplete", "parseJsonReply", "call", "WARDROBE_ROW_ID", "IMAGE_PROXY_URL", "garmentGender", "garmentFitsGender",
+    "recordPendingImage", "dropPendingImage", "pollImageTask", "startImageTaskSweeps", "recoveredImages"];
   const missing = REQUIRED_EXPORTS.filter(k => !window.SiteConfig || window.SiteConfig[k] === undefined);
   if (missing.length) {
     document.body.innerHTML =
@@ -451,6 +458,11 @@
   const {
     DEFAULTS, clone, loadConfig, fillTemplate, call, aiComplete, parseJsonReply,
     WARDROBE_ROW_ID, ACCESS_TOKEN, IMAGE_PROXY_URL, UPLOAD_IMAGE_URL,
+    // Generations that outlive this page — see the block in site-config.js.
+    // Shared with index.html on purpose: a garment left generating when the
+    // phone locks should be collectable from whichever page is opened next.
+    recordPendingImage, dropPendingImage, claimImageTask, releaseImageTask,
+    pollImageTask, startImageTaskSweeps, recoveredImages, dropRecoveredImage,
   } = window.SiteConfig;
 
   let CFG = clone(DEFAULTS);
@@ -535,6 +547,8 @@
       status("Could not load the wardrobe: " + e.message, "err");
     }
     render();
+    renderRecoveredTray();
+    startRecoverySweeps();
   }
 
   function wardrobeCfg() { return CFG.wardrobe || DEFAULTS.wardrobe; }
@@ -627,6 +641,55 @@
       if (!q) return true;
       const hay = [it.name, it.description, it.category, garmentGender(it), it.set, (it.tags || []).join(" ")].join(" ").toLowerCase();
       return hay.includes(q);
+    });
+  }
+
+  // ── Pictures that finished while nobody was looking ────────────────────────
+  //
+  // A generation runs on Wiro's servers and is billed whether or not this page
+  // is still open to collect it, and a phone locking mid-generation freezes
+  // these polls or discards the page. The sweep below collects what finished,
+  // putting a garment's picture back on its row where the row exists. What has
+  // no row — a piece isolated out of a photograph, a garment abandoned before
+  // it was saved — lands in this strip instead of being lost.
+  function renderRecoveredTray() {
+    const el = document.getElementById("recoveredTray");
+    if (!el) return;
+    const list = recoveredImages();
+    el.hidden = list.length === 0;
+    if (!list.length) { el.innerHTML = ""; return; }
+    el.innerHTML =
+      '<p class="hint">Finished while you were away, with nothing to file them under. ' +
+      'Open one to save it, or dismiss it.</p><div class="tray">' +
+      list.map(t =>
+        '<figure><a href="' + esc(t.url) + '" target="_blank" rel="noreferrer">' +
+        '<img src="' + esc(t.url) + '" alt="" /></a>' +
+        '<figcaption>' + esc(t.label || "Recovered picture") + '</figcaption>' +
+        '<button type="button" data-tray="' + esc(t.id) + '">Dismiss</button></figure>').join("") +
+      "</div>";
+    el.querySelectorAll("button[data-tray]").forEach(b => {
+      b.onclick = () => { dropRecoveredImage(b.dataset.tray); renderRecoveredTray(); };
+    });
+  }
+
+  // On open, on coming back to the tab, and on a slow timer while it is in
+  // front. A recovered garment picture is written to its row by the shared
+  // collector, so the library has to be re-read rather than re-rendered from
+  // what this page loaded before the write.
+  function startRecoverySweeps() {
+    startImageTaskSweeps({
+      onCollected: async (p) => {
+        const to = (p && p.filedTo) || {};
+        if (to.kind === "wardrobe") {
+          try { items = await loadItems(); render(); } catch (e) { console.warn("Wardrobe: could not reload after a recovery", e); }
+          status("A picture finished while you were away" + (to.name ? " — " + to.name : "") + ".", "ok");
+        } else if (to.kind === "gallery") {
+          fitStatus("A fitting-room picture finished while you were away — it is in the gallery.", "ok");
+        } else {
+          status("A picture finished while you were away. It is at the top of the wardrobe.", "ok");
+        }
+        renderRecoveredTray();
+      },
     });
   }
 
@@ -791,15 +854,12 @@
   };
 
   // ── Acquiring a picture ────────────────────────────────────────────────────
-  // Submit, then poll from here rather than holding the edge function open:
-  // it has a wall-clock limit, and a generation slower than its budget came
-  // back 504 while the image was produced and billed anyway. Same reasoning,
-  // and the same two-step protocol, as index.html.
-  const POLL_SCHEDULE_MS = [900, 900, 1200, 1500, 2000, 2000, 2000, 2500, 3000, 3000, 4000];
-  const MAX_POLLS = 120;
-  // Enough to ride out a runtime blip lasting a minute or so, not so many that
-  // a genuinely dead proxy is waited on forever.
-  const MAX_CONSECUTIVE_POLL_FAILURES = 8;
+  // Submit, then poll from site-config.js rather than holding the edge
+  // function open: it has a wall-clock limit, and a generation slower than its
+  // budget came back 504 while the image was produced and billed anyway. The
+  // poll schedule, the backing off Wiro asks for and the recovery of anything
+  // this page does not live long enough to collect are all shared with
+  // index.html — this page kept its own copy of the loop until the two drifted.
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -851,7 +911,7 @@
       (RETRY_WAIT_MS.length + 1) + " tries. Nothing was charged; try again shortly.");
   }
 
-  async function generateViaWiro({ prompt, model, aspectRatio, resolution, inputImage }) {
+  async function generateViaWiro({ prompt, model, aspectRatio, resolution, inputImage, track }) {
     const params = (CFG.models.imageParams || {})[model] || {};
     const body = {
       action: "submit",
@@ -871,61 +931,48 @@
     // its prompt refers to them in that order.
     if (inputImage) body.inputImage = inputImage;
 
+    const startedAt = Date.now();
     const res = await proxyPost(body);
     const { taskId } = await res.json();
     if (!taskId) throw new Error("Image proxy returned no task id");
 
-    // Polling is a read, so every failure to get an answer is transient by
-    // definition: the task is running on Wiro either way, and giving up throws
-    // away an image that is going to be generated and billed regardless. A
-    // single 503 from Supabase's runtime used to end the whole generation here
-    // — which is precisely the loss the submit-and-poll split exists to
-    // prevent, reintroduced one layer up.
+    // Recorded before the first poll. Wiro generates and bills whether or not
+    // this page is still here to collect the result, and a phone locking
+    // mid-generation freezes these polls or throws the page away entirely —
+    // so the id goes to storage, and a later visit to either page files the
+    // picture where `track` says it belongs.
+    recordPendingImage({
+      taskId,
+      outputFormat: body.outputFormat || null,
+      modelId: model,
+      startedAt,
+      label: (track && track.label) || "Recovered generation",
+      dest: (track && track.dest) || { kind: "tray" },
+    });
+
+    // The polling itself lives in site-config.js: it is the same conversation
+    // with the same proxy that index.html has, including the backing off Wiro
+    // asks for, and two copies of it drifted apart once already.
     //
-    // Only a 4xx is fatal: that is this client asking for something wrong, and
-    // asking again will not fix it.
-    let consecutiveFailures = 0;
-    for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
-      await sleep(POLL_SCHEDULE_MS[Math.min(attempt, POLL_SCHEDULE_MS.length - 1)]);
-      let statusRes;
-      try {
-        statusRes = await fetch(IMAGE_PROXY_URL, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "status", taskId, outputFormat: body.outputFormat }),
-        });
-      } catch {
-        consecutiveFailures++;
-        if (consecutiveFailures > MAX_CONSECUTIVE_POLL_FAILURES) {
-          throw new Error("Lost contact with the image proxy while waiting. Task " + taskId +
-            " may still finish — nothing to do but try again.");
-        }
-        continue;
-      }
-      if (statusRes.status === 202) { consecutiveFailures = 0; continue; }
-      if (statusRes.status >= 500 || statusRes.status === 429) {
-        consecutiveFailures++;
-        if (consecutiveFailures > MAX_CONSECUTIVE_POLL_FAILURES) {
-          throw new Error("The image proxy kept failing while waiting (" + statusRes.status +
-            "). Task " + taskId + " may still finish.");
-        }
-        // Backed off rather than hammered: if the runtime is degraded, asking
-        // faster is the opposite of helping.
-        await sleep(RETRY_WAIT_MS[Math.min(consecutiveFailures - 1, RETRY_WAIT_MS.length - 1)]);
-        continue;
-      }
-      if (!statusRes.ok) throw new Error("Image proxy: " + statusRes.status + " " + (await statusRes.text().catch(() => "")));
-      consecutiveFailures = 0;
-      const done = await statusRes.json();
-      if (done && done.imageUrl) return done.imageUrl;
+    // Every failure to get an answer is transient by definition: polling is a
+    // read, the task runs on Wiro either way, and giving up throws away an
+    // image that is generated and billed regardless. Only a 4xx is fatal.
+    let imageUrl;
+    claimImageTask(taskId);
+    try {
+      imageUrl = await pollImageTask({ taskId, outputFormat: body.outputFormat, modelId: model, startedAt });
+    } finally {
+      releaseImageTask(taskId);
     }
-    throw new Error("The generation did not finish in time");
+    // Left recorded on both failure paths, not dropped: losing contact is what
+    // a sleeping phone looks like, and running out of patience here is exactly
+    // the case a later visit should pick up.
+    if (!imageUrl) throw new Error("The image did not finish in time (task " + taskId +
+      "). It is still generating — it will be collected next time you open the app.");
+    dropPendingImage(taskId);
+    return imageUrl;
   }
 
-  // Dezgo reports a bad request as a JSON validation object naming the field it
-  // rejected. Read on a phone that is a wall of braces, and the useful part —
-  // WHICH field, and therefore which line of site-config.js is wrong — is
-  // buried in it. So the field names are pulled out and said plainly, with the
-  // raw body kept on the end for anything this does not recognise.
   function explainDezgoError(body, httpStatus, model) {
     let parsed = null;
     try { parsed = JSON.parse(String(body).replace(/^Dezgo error \d+:\s*/, "")); } catch {}
@@ -1632,6 +1679,10 @@
       const raw = await generateViaWiro({
         prompt, model: f.model, aspectRatio: f.aspectRatio,
         resolution: f.resolution, inputImage,
+        // It is a picture of her, so a recovery files it in her gallery —
+        // which is where this path puts it when the page does live long
+        // enough to collect it.
+        track: { dest: { kind: "gallery", characterId: c.id }, label: prompt },
       });
       const url = await persist(raw);
       lastFitting = { url, prompt, character: c };
@@ -1882,7 +1933,14 @@
             item.prompt = prompt;
             return gen.provider === "dezgo"
               ? persistDataUrl(await generateDezgo({ prompt, modelId: gen.id }))
-              : persist(await generateViaWiro({ prompt, model: gen.id, aspectRatio: item.aspectRatio }));
+              : persist(await generateViaWiro({
+                  prompt, model: gen.id, aspectRatio: item.aspectRatio,
+                  // The row is only written once the picture exists, so a
+                  // recovery finds the garment when the page survived long
+                  // enough to save it and falls back to the tray when it did
+                  // not. Either way the picture is not lost.
+                  track: { dest: { kind: "wardrobe", garmentId: item.id }, label: typed },
+                }));
           },
         });
         made += 1;
@@ -2090,6 +2148,9 @@
       aspectRatio: w.extractAspectRatio,
       resolution: w.extractResolution,
       inputImage: photoUrl,
+      // Nothing to file it under: the piece being isolated becomes a garment
+      // only after its picture exists. The tray holds it instead.
+      track: { label: known.name || "Isolated garment" },
     });
     return { url: await persist(raw), prompt };
   }
@@ -2456,6 +2517,12 @@
             prompt,
             model: modelId,
             aspectRatio: document.getElementById("fAspect").value,
+            // A garment already in the library gets its picture back on the
+            // row; one still being added has no row yet, so it goes to the
+            // tray and can be picked up from there.
+            track: (draft && !draftIsNew && draft.id)
+              ? { dest: { kind: "wardrobe", garmentId: draft.id }, label: draft.name || prompt }
+              : { label: (draft && draft.name) || prompt },
           }));
       acceptImage(stored, provider, prompt);
       status("Generated.", "ok");

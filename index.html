@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=68"></script>
+  <script src="site-config.js?v=69"></script>
   <script src="image-prompt.js?v=32"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -303,7 +303,9 @@
     // just the first one that broke. A stale cached copy missing any of them
     // fails at a call site with a TypeError naming a function, which points
     // at anything except the caching that actually caused it.
-    const REQUIRED_EXPORTS = ["aiComplete", "parseJsonReply", "garmentGender", "garmentFitsGender"];
+    const REQUIRED_EXPORTS = ["aiComplete", "parseJsonReply", "garmentGender", "garmentFitsGender",
+      "pendingImages", "recordPendingImage", "dropPendingImage", "pollImageTask",
+      "persistGeneratedImage", "startImageTaskSweeps", "recoveredImages"];
     if (!window.SiteConfig || REQUIRED_EXPORTS.some(k => typeof window.SiteConfig[k] !== "function")) {
       document.body.innerHTML =
         '<div style="padding:28px;font-family:system-ui,sans-serif;line-height:1.6;max-width:520px;margin:0 auto;color:#3a2b30">' +
@@ -1311,17 +1313,14 @@ function sanitizeReply(text) {
     .trim();
 }
 
-// A generation Wiro is already running, remembered across reloads.
-//
-// Wiro does the work on its own servers, but nothing collects the result
-// except this page: the proxy used to wait and return the image, and its
-// wall-clock limit meant any slow generation came back 504 while Wiro
-// finished and billed it anyway. Moving the wait here fixed that and
-// introduced this — close the tab and the task id went with it, so the image
-// was generated, paid for, and unreachable.
-//
-// Recording the id means a later visit can still collect it.
-const PENDING_IMAGES_KEY = "personachat_pending_images";
+// Generations that outlive this page live in site-config.js: wardrobe.html
+// starts them too, and a picture left running should be collectable from
+// whichever page is opened next, which only works if both read the same list.
+// These are the names the app already calls it by.
+const readPendingImages = window.SiteConfig.pendingImages;
+const addPendingImage = window.SiteConfig.recordPendingImage;
+const dropPendingImage = window.SiteConfig.dropPendingImage;
+const persistWiroImage = window.SiteConfig.persistGeneratedImage;
 
 // The last few generations, timed. This used to be a console.info, which on a
 // phone is written to somewhere nobody can read without plugging the handset
@@ -1330,149 +1329,10 @@ const PENDING_IMAGES_KEY = "personachat_pending_images";
 const IMAGE_TIMINGS_KEY = "personachat_image_timings";
 const readImageTimings = () => storage.get(IMAGE_TIMINGS_KEY, []);
 const recordImageTiming = (entry) => storage.set(IMAGE_TIMINGS_KEY, [entry, ...readImageTimings()].slice(0, 8));
-// A task Wiro has forgotten is not worth asking about forever, and a stale
-// entry means every later visit spends two polls learning nothing.
-const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-const readPendingImages = () => storage.get(PENDING_IMAGES_KEY, [])
-  .filter(p => p && p.taskId && (Date.now() - (p.startedAt || 0)) < PENDING_MAX_AGE_MS);
-const writePendingImages = (list) => storage.set(PENDING_IMAGES_KEY, list.slice(0, 20));
-const addPendingImage = (entry) => writePendingImages([entry, ...readPendingImages().filter(p => p.taskId !== entry.taskId)]);
-const dropPendingImage = (taskId) => writePendingImages(readPendingImages().filter(p => p.taskId !== taskId));
 
-// Tasks this page is already waiting on. The recovery sweep reads the same
-// list from storage, so without this it would poll a generation the screen is
-// still waiting for, collect it first, and file a second copy in the gallery
-// while the screen that asked for it also received one.
-const activePollTaskIds = new Set();
-
-// setTimeout, but a backgrounded tab that comes back does not have to wait out
-// the rest of a timer the browser froze. Returning to the app polls at once.
-function sleepUnlessVisible(ms) {
-  return new Promise(resolve => {
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", onVisible);
-      resolve();
-    };
-    const onVisible = () => { if (!document.hidden) finish(); };
-    const timer = setTimeout(finish, ms);
-    document.addEventListener("visibilitychange", onVisible);
-  });
-}
-
-// Poll quickly at first — a fast generation used to sit finished for a full
-// 2s before anyone asked. Then ease off so a slow one is not hammered.
-// Quick at the start, because a fast generation should not wait on a slow
-// schedule, then easing off: past a dozen polls this is a slow one, and a
-// check every two seconds for another minute is just traffic against a rate
-// limit we share with the generations themselves.
-const POLL_SCHEDULE_MS = [900, 900, 1200, 1500, 2000, 2000, 2000, 2000, 2500, 2500, 3000, 3000, 4000];
-// Where a poll goes when Wiro says it is rate limiting us, unless it sends a
-// Retry-After of its own. Backing off is the only useful response: polling
-// harder cannot make the image arrive sooner, and it is what caused this.
-const THROTTLE_BACKOFF_MS = [4000, 8000, 12000, 20000];
-const MAX_POLLS = 160;
-const MAX_TRANSIENT_POLL_FAILURES = 8;
-
-async function pollWiroTask({ taskId, outputFormat, modelId, startedAt, maxPolls = MAX_POLLS }) {
-  let throttled = 0;
-  let nextWaitMs = null;
-  // Enough to ride out a runtime blip lasting a minute or so, not so many that
-  // a genuinely dead proxy is waited on forever.
-  let transientFailures = 0;
-  for (let attempt = 0; attempt < maxPolls; attempt++) {
-    await sleepUnlessVisible(nextWaitMs ?? POLL_SCHEDULE_MS[Math.min(attempt, POLL_SCHEDULE_MS.length - 1)]);
-    nextWaitMs = null;
-    let statusRes;
-    try {
-      statusRes = await fetch(IMAGE_PROXY_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "status", taskId, outputFormat }),
-      });
-    } catch {
-      // Same event as a 5xx above, and now handled the same way.
-      transientFailures++;
-      if (transientFailures > MAX_TRANSIENT_POLL_FAILURES) {
-        throw new Error(`Wiro error: lost contact with the image proxy. Task ${taskId} may still finish.`);
-      }
-      continue;
-    }
-    if (statusRes.status === 202) {
-      // Still generating — but read the body, because it also says whether
-      // Wiro is rate limiting us. Throttled polls are not progress: they are
-      // this client competing with its own generations for the project's
-      // request budget, and the answer is to ask less often.
-      const pending = await statusRes.json().catch(() => null);
-      if (pending && pending.throttled) {
-        nextWaitMs = (pending.retryAfterSeconds > 0)
-          ? pending.retryAfterSeconds * 1000
-          : THROTTLE_BACKOFF_MS[Math.min(throttled, THROTTLE_BACKOFF_MS.length - 1)];
-        throttled++;
-      }
-      continue;
-    }
-    // A failure to get an answer is transient by definition: polling is a read,
-    // the task is running on Wiro either way, and giving up throws away an
-    // image that will be generated and billed regardless. This used to throw
-    // on any HTTP failure while treating a network error as transient — the
-    // same event, handled two opposite ways — so one blip from Supabase's edge
-    // runtime lost a whole generation. Only a 4xx is fatal: that is this
-    // client asking for something wrong, and asking again will not fix it.
-    if (statusRes.status >= 500 || statusRes.status === 429) {
-      transientFailures++;
-      if (transientFailures > MAX_TRANSIENT_POLL_FAILURES) {
-        throw new Error(`Wiro error: the image proxy kept failing (${statusRes.status}). Task ${taskId} may still finish.`);
-      }
-      nextWaitMs = THROTTLE_BACKOFF_MS[Math.min(transientFailures - 1, THROTTLE_BACKOFF_MS.length - 1)];
-      continue;
-    }
-    if (!statusRes.ok) {
-      const err = await statusRes.text().catch(() => "");
-      throw new Error(`Wiro error: ${statusRes.status} ${err}`);
-    }
-    transientFailures = 0;
-    const done = await statusRes.json();
-    // Attribute the wait: Wiro's queue and generation times against our own
-    // round trip. Without this "it's slow" is unattributable — the fix for a
-    // long queue is a different model, the fix for our own overhead is code.
-    const t = (done && done.timing) || {};
-    const total = (Date.now() - (startedAt || Date.now())) / 1000;
-    recordImageTiming({
-      at: Date.now(),
-      model: modelId,
-      total: Number(total.toFixed(1)),
-      queued: t.queuedSeconds ?? null,
-      generating: t.generatingSeconds ?? null,
-      postprocess: t.postprocessSeconds ?? null,
-      throttled,
-    });
-    return (done && done.imageUrl) || null;
-  }
-  return null;
-}
-
-// Copy to Supabase Storage for persistence — Wiro's CDN is not somewhere to
-// keep a gallery. The upload function fetches the URL itself, so the bytes
-// never touch the browser: they used to come down through the proxy, get
-// base64'd (a third larger, and slow on a phone) and be posted back up.
-async function persistWiroImage(imageUrl) {
-  try {
-    const uploadRes = await fetch(UPLOAD_IMAGE_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sourceUrl: imageUrl, token: ACCESS_TOKEN, filename: `img_${Date.now()}_${Math.random().toString(36).slice(2)}` }),
-    });
-    if (uploadRes.ok) {
-      const { url } = await uploadRes.json();
-      if (url) return url;
-    }
-  } catch {}
-  return imageUrl;
-}
+// The timings panel is this page's, not the wardrobe's, so the shared poller
+// reports them back rather than knowing about the store.
+const pollWiroTask = (args) => window.SiteConfig.pollImageTask({ ...args, onTiming: recordImageTiming });
 
 // Reads a picked file into a data URL, so the preview can go up before the
 // Storage upload and the vision calls have finished.
@@ -1577,14 +1437,27 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
   if (!taskId) throw new Error("Wiro error: no task id returned");
 
   // Recorded before the first poll, so a tab closed mid-generation still
-  // leaves a trail. `track` says whose gallery to put it in if this page never
-  // comes back to collect it.
-  if (track && track.characterId) {
-    addPendingImage({ taskId, outputFormat: body.outputFormat || null, modelId, startedAt, ...track });
-  }
+  // leaves a trail. `track` says where a picture this page never comes back
+  // for should be filed: a character's gallery where there is one, and
+  // otherwise the recovered tray, which is where a generation belonging to a
+  // character who does not exist yet has to wait.
+  //
+  // Every generation is recorded now. It used to be only the two that were
+  // obviously worth leaving, which meant everything else — a base image, a
+  // face being created, a garment — was still lost to a locked phone.
+  addPendingImage({
+    taskId,
+    outputFormat: body.outputFormat || null,
+    modelId,
+    startedAt,
+    label: (track && track.label) || "Recovered generation",
+    dest: (track && track.dest) || (track && track.characterId
+      ? { kind: "gallery", characterId: track.characterId }
+      : { kind: "tray" }),
+  });
 
   let imageUrl;
-  activePollTaskIds.add(taskId);
+  window.SiteConfig.claimImageTask(taskId);
   try {
     imageUrl = await pollWiroTask({ taskId, outputFormat: body.outputFormat, modelId, startedAt });
   } catch (e) {
@@ -1594,7 +1467,7 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
     // drops the entry itself if Wiro turns out not to know the task.
     throw e;
   } finally {
-    activePollTaskIds.delete(taskId);
+    window.SiteConfig.releaseImageTask(taskId);
   }
   if (!imageUrl) {
     // Left recorded on purpose: it did not finish inside this page's patience,
@@ -1605,54 +1478,6 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
   return persistWiroImage(imageUrl);
 }
 
-// Collect anything Wiro finished while the app was closed. Results go to the
-// character's gallery: the screen that asked for the image is long gone, and
-// the gallery is the one place a picture is useful without it.
-async function collectPendingImages({ onCollected } = {}) {
-  const pending = readPendingImages().filter(p => !activePollTaskIds.has(p.taskId));
-  if (!pending.length) return 0;
-  let collected = 0;
-  for (const p of pending) {
-    // Claimed for the duration, so a second sweep — a return to the tab while
-    // the first is still asking — cannot file the same picture twice.
-    if (activePollTaskIds.has(p.taskId)) continue;
-    activePollTaskIds.add(p.taskId);
-    try {
-      if (await collectOnePendingImage(p, onCollected)) collected += 1;
-    } finally {
-      activePollTaskIds.delete(p.taskId);
-    }
-  }
-  return collected;
-}
-
-// One recovered generation, or false if it is still running. Split out of the
-// sweep so the claim above can wrap the whole of it.
-async function collectOnePendingImage(p, onCollected) {
-  // A short patience here — this is a check for something already finished,
-  // not a wait for something still running.
-  let imageUrl = null;
-  try {
-    imageUrl = await pollWiroTask({ ...p, maxPolls: 2 });
-  } catch {
-    dropPendingImage(p.taskId); // Wiro no longer knows about it
-    return false;
-  }
-  if (!imageUrl) return false; // still going — leave it for next time
-  dropPendingImage(p.taskId);
-  try {
-    const url = await persistWiroImage(imageUrl);
-    const gallery = await dataApi.getGallery(p.characterId);
-    const next = [{ url, prompt: p.label || "Recovered generation", date: Date.now() }, ...gallery].slice(0, GALLERY_LIMIT);
-    await dataApi.saveGallery(p.characterId, next);
-    if (onCollected) onCollected({ ...p, url });
-    return true;
-  } catch (e) {
-    console.warn("Could not file a recovered image:", e);
-    return false;
-  }
-}
-
 // The name to put in the "a picture finished" notice, or a neutral stand-in
 // when the character has since been deleted.
 function characterNameById(characters, id) {
@@ -1660,54 +1485,39 @@ function characterNameById(characters, id) {
   return (c && c.name) || "your character";
 }
 
+// What to say about a picture that arrived while nobody was looking. Reads the
+// destination the sweep actually filed it to, not the one it was aiming for: a
+// garment deleted mid-generation ends up in the tray, and saying it went into
+// the wardrobe would send you looking somewhere it is not.
+function recoveredNotice(p, characters) {
+  const to = p.filedTo || {};
+  if (to.kind === "gallery") return `A picture finished while you were away — it's in ${characterNameById(characters, to.characterId)}'s gallery.`;
+  if (to.kind === "wardrobe") return `A garment picture finished while you were away${to.name ? ` — ${to.name}` : ""}. It's in the wardrobe.`;
+  return "A picture finished while you were away. It's below — nothing was waiting for it, so it's kept here.";
+}
+
 // Announced so whichever screen is open can show the picture rather than only
 // filing it: a recovered chat image belongs in that conversation.
 const IMAGE_RECOVERED_EVENT = "personachat:image-recovered";
-// While the app is open, ask again on this cadence. A generation started and
-// then left alone finishes on Wiro's servers, not here, so the only question
-// is how soon after it lands anyone looks.
-const PENDING_SWEEP_MS = 20000;
 
 // Collects finished generations on open, on returning to the tab, and on a
 // slow timer while it is in front. This is what makes "start an image, put the
 // phone down, come back" work: the phone freezes this page's timers and may
 // throw the page away entirely, and nothing else was ever going to collect the
-// task id that was left in storage.
+// task id left in storage.
 function usePendingImageSweep() {
   const [recovered, setRecovered] = useState([]);
-  const sweeping = useRef(false);
   useEffect(() => {
     let live = true;
-    const sweep = async () => {
-      // Hidden means nobody is looking and the browser may be freezing us
-      // mid-poll; the visibility handler below picks it up on the way back.
-      if (sweeping.current || document.hidden || !readPendingImages().length) return;
-      sweeping.current = true;
-      try {
-        await collectPendingImages({
-          onCollected: (p) => {
-            if (!live) return;
-            setRecovered(r => [p, ...r.filter(x => x.taskId !== p.taskId)].slice(0, 5));
-            window.dispatchEvent(new CustomEvent(IMAGE_RECOVERED_EVENT, { detail: p }));
-          },
-        });
-      } catch (e) {
-        console.warn("Could not check for finished images:", e);
-      } finally {
-        sweeping.current = false;
-      }
-    };
-    sweep();
-    const timer = setInterval(sweep, PENDING_SWEEP_MS);
-    const onVisible = () => { if (!document.hidden) sweep(); };
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", onVisible);
-    return () => {
-      live = false;
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", onVisible);
-    };
+    const stop = window.SiteConfig.startImageTaskSweeps({
+      galleryLimit: GALLERY_LIMIT,
+      onCollected: (p) => {
+        if (!live) return;
+        setRecovered(r => [p, ...r.filter(x => x.taskId !== p.taskId)].slice(0, 5));
+        window.dispatchEvent(new CustomEvent(IMAGE_RECOVERED_EVENT, { detail: p }));
+      },
+    });
+    return () => { live = false; stop(); };
   }, []);
   return [recovered, () => setRecovered([])];
 }
@@ -2110,7 +1920,7 @@ function subjectCharDesc(subject) {
 
 // The nude 3/4-length base. anchored: false because on a first generation there
 // is no reference image for the hold clauses to talk about.
-async function generateSubjectBaseImage({ subject, imageModel, extra }) {
+async function generateSubjectBaseImage({ subject, imageModel, extra, track }) {
   // A face the user has not chosen a shape for gets a different one each click,
   // so Regen offers a genuinely different face to pick from. Gated on the
   // structure alone: lipstick and a ponytail have no opinion about a jawline.
@@ -2125,6 +1935,7 @@ async function generateSubjectBaseImage({ subject, imageModel, extra }) {
     }),
     model: imageModel,
     seed: Math.floor(Math.random() * 2147483647),
+    track,
   });
 }
 
@@ -2137,12 +1948,13 @@ async function generateSubjectBaseImage({ subject, imageModel, extra }) {
 //
 // Anchored to the base image, like the avatar: the reference carries the
 // identity and the prompt carries only the expression.
-async function generateExpressionPhoto({ base, slot, imageModel, extra }) {
+async function generateExpressionPhoto({ base, slot, imageModel, extra, track }) {
   return generateImageWiro({
     prompt: buildExpressionPrompt({ expression: slot.hint || slot.label, extra }),
     model: imageModel,
     initImage: base,
     seed: Math.floor(Math.random() * 2147483647),
+    track,
   });
 }
 
@@ -2150,7 +1962,7 @@ async function generateExpressionPhoto({ base, slot, imageModel, extra }) {
 // person rather than a fresh one. An empty outfit is filled by asking the
 // language model what they would wear, and handed back through onOutfit so the
 // caller can write it into the visible box rather than deciding it invisibly.
-async function generateSubjectAvatar({ subject, base, imageModel, textModel, onOutfit }) {
+async function generateSubjectAvatar({ subject, base, imageModel, textModel, onOutfit, track }) {
   let avatarCfg = normaliseAvatar(subject.appearance && subject.appearance.avatar);
   if (!String(avatarCfg.outfit || "").trim()) {
     const outfit = await suggestAvatarOutfit({ character: subject, model: textModel });
@@ -2161,6 +1973,7 @@ async function generateSubjectAvatar({ subject, base, imageModel, textModel, onO
     model: imageModel,
     initImage: base,
     seed: Math.floor(Math.random() * 2147483647),
+    track,
   });
 }
 
@@ -2916,6 +2729,9 @@ function UserProfileEditor({ persona, settings, title, onSave, onClose }) {
     try {
       const base = await generateSubjectBaseImage({
         subject, imageModel: settings.imageModel, extra: imgPrompt.trim(),
+        // You are not a character and have no gallery, so a recovery keeps
+        // this in the tray on the character list rather than filing it.
+        track: { label: "Your base image" },
       });
       setVariants(v => [{ id: String(Date.now()), url: base, label: "Generated", date: Date.now() }, ...v]);
       setForm(f => ({
@@ -2935,6 +2751,7 @@ function UserProfileEditor({ persona, settings, title, onSave, onClose }) {
   const generateAvatarFor = async (base) => generateSubjectAvatar({
     subject, base, imageModel: settings.imageModel,
     textModel: settings.selectedModel, onOutfit: outfit => patchAvatar({ outfit }),
+    track: { label: "Your portrait" },
   });
 
   const handleGenerateAvatar = async () => {
@@ -2974,6 +2791,7 @@ function UserProfileEditor({ persona, settings, title, onSave, onClose }) {
         model: settings.imageModel,
         initImage: joinReferenceImages(hosted),
         seed: Math.floor(Math.random() * 2147483647),
+        track: { label: "Your base image, from your photos" },
       });
       describedFrom = base;
       // Every shape and colour field is set to "leave as it is". The photo is
@@ -5029,6 +4847,9 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
     age: "", maritalStatus: "", relationship: "", relationshipCustom: "",
     appearance: { ...DEFAULT_APPEARANCE },
   });
+  // Where a generation left running should be filed if this screen is gone by
+  // the time it finishes. See the note at the base-image call below.
+  const recoveryTrack = (label) => safeCharacter ? { characterId: form.id, label } : { label };
   const [vibe, setVibe] = useState("");
   const [vibeLoading, setVibeLoading] = useState(false);
   // What the closet stocker found, and what it could not — shown rather than
@@ -5200,6 +5021,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
         model: settings.imageModel,
         initImage: joinReferenceImages(hosted),
         seed: Math.floor(Math.random() * 2147483647),
+        track: recoveryTrack(`${form.name || "New character"} — base image from photos`),
       });
       setGeneratedImages(prev => [{ base, avatar: null }, ...prev]);
       describedFrom = base;
@@ -5282,6 +5104,10 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
       setImgStage("base");
       const base = await generateSubjectBaseImage({
         subject: form, imageModel: settings.imageModel, extra: imgPrompt.trim(),
+        // Only a character that already exists has a gallery to recover into.
+        // One still being created does not, and its id names nothing the app
+        // can browse, so the tray on the character list holds it instead.
+        track: recoveryTrack(`${form.name || "New character"} — base image`),
       });
 
       // The avatar is NOT generated here. Every click of Regen used to make two
@@ -5318,6 +5144,7 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
     const avatar = await generateSubjectAvatar({
       subject: form, base, imageModel: settings.imageModel,
       textModel: settings.selectedModel, onOutfit: outfit => patchAvatar({ outfit }),
+      track: recoveryTrack(`${form.name || "New character"} — avatar`),
     });
     setGeneratedImages(prev => prev.map(pair => (pair.base === base ? { ...pair, avatar } : pair)));
     return avatar;
@@ -8022,6 +7849,9 @@ function PhotoStudio({ characters, userCharacter, onBack }) {
         try {
           const url = await generateExpressionPhoto({
             base: sub.character.referenceImage, slot: plan.slot, imageModel: cfg.model,
+            // A face made for a shot is still a picture of her, so a recovery
+            // files it under her rather than in the tray.
+            track: sub.charId ? { characterId: sub.charId, label: plan.slot.label + " (for a studio shot)" } : undefined,
           });
           made = { ...made, [`${sub.charId}:${plan.slot.key}`]: url };
         } catch (e) {
@@ -8248,6 +8078,13 @@ function App() {
   // the one component never unmounted, and the images being waited on outlive
   // the screen that asked for them.
   const [recoveredImages, clearRecoveredImages] = usePendingImageSweep();
+  // Pictures that finished with nothing to belong to — a character abandoned
+  // half-created, a garment deleted while its photograph was being taken.
+  // Kept in storage rather than in this state, so closing the app does not
+  // throw away the one copy.
+  const [imageTray, setImageTray] = useState(() => window.SiteConfig.recoveredImages());
+  useEffect(() => { setImageTray(window.SiteConfig.recoveredImages()); }, [recoveredImages]);
+  const dismissTrayImage = (id) => { window.SiteConfig.dropRecoveredImage(id); setImageTray(window.SiteConfig.recoveredImages()); };
 
   useEffect(() => {
     dataApi.getCharacters()
@@ -8330,9 +8167,28 @@ function App() {
         {recoveredImages.length > 0 && (
           <div style={S.errorBar}>
             {recoveredImages.length === 1
-              ? `A picture finished while you were away — it's in ${characterNameById(characters, recoveredImages[0].characterId)}'s gallery.`
-              : `${recoveredImages.length} pictures finished while you were away — they're in the galleries.`}
+              ? recoveredNotice(recoveredImages[0], characters)
+              : `${recoveredImages.length} pictures finished while you were away — they've been filed.`}
             <button style={S.errorClose} onClick={clearRecoveredImages}>✕</button>
+          </div>
+        )}
+        {imageTray.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 13, color: "#8e8e93", marginBottom: 6 }}>
+              Finished while you were away, with nothing to file them under. Tap to open one, ✕ to let it go.
+            </div>
+            <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+              {imageTray.map(t => (
+                <div key={t.id} style={{ position: "relative", flex: "0 0 auto" }}>
+                  <a href={t.url} target="_blank" rel="noreferrer" title={t.label || ""}>
+                    <img src={t.url} alt={t.label || "Recovered picture"}
+                      style={{ width: 84, height: 84, objectFit: "cover", borderRadius: 8, display: "block" }} />
+                  </a>
+                  <button style={S.errorClose} onClick={() => dismissTrayImage(t.id)}
+                    aria-label="Discard this picture">✕</button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
         {!discreetMode && (
