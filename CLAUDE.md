@@ -147,3 +147,25 @@ slider's label can never say something different from what it tells the model.
 When you change how they assemble a prompt, diff the output against the
 previous implementation across randomised slider states rather than eyeballing
 it — that is how the last refactor was verified.
+
+## Finished work goes to main, every round
+
+The owner reads this app off `main`, on a phone, by refreshing it. A commit on
+a working branch is not a change they can see — it is a change nobody is
+running. This has already cost a whole debugging round: two intention fixes sat
+on `claude/character-intentions-bug-nb9brc` while the bug was reported as still
+happening, because the phone was still serving the code from before the fix,
+and the next round was spent hunting a hole in logic that had never once
+executed.
+
+So: when the work is done and the checks pass, push it to `main`. Not a branch
+to be merged later, not a PR to be reviewed — `main`. Standing instruction from
+the owner, given 2026-09-10.
+
+If a session's setup names a development branch, develop there by all means,
+but fast-forward `main` to it before saying the work is finished.
+
+**And before debugging a bug that is reported as "still happening": check that
+the last fix is actually on `main`.** `git log --oneline origin/main..HEAD`
+answering with anything at all means the thing being tested is not the thing
+that was written.
