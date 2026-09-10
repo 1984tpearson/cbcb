@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=59"></script>
-  <script src="image-prompt.js?v=29"></script>
+  <script src="site-config.js?v=65"></script>
+  <script src="image-prompt.js?v=31"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -299,7 +299,12 @@
     // SiteConfig missing whatever was added last, and since aiComplete lives
     // there now, the symptom would be every reply and every image failing with
     // a TypeError rather than anything that names the cause.
-    if (!window.SiteConfig || typeof window.SiteConfig.aiComplete !== "function") {
+    // Every export the app calls through window.SiteConfig at runtime, not
+    // just the first one that broke. A stale cached copy missing any of them
+    // fails at a call site with a TypeError naming a function, which points
+    // at anything except the caching that actually caused it.
+    const REQUIRED_EXPORTS = ["aiComplete", "parseJsonReply", "garmentGender", "garmentFitsGender"];
+    if (!window.SiteConfig || REQUIRED_EXPORTS.some(k => typeof window.SiteConfig[k] !== "function")) {
       document.body.innerHTML =
         '<div style="padding:28px;font-family:system-ui,sans-serif;line-height:1.6;max-width:520px;margin:0 auto;color:#3a2b30">' +
         '<h1 style="font-size:17px">Loading an old cached copy of site-config.js</h1>' +
@@ -393,7 +398,44 @@ const REACTIVE_MAX_DRIFT = CFG.reactiveMaxDrift;
 
 const SLIDER_DEFS = CFG.sliderDefs.map(def => ({ ...def, previewFn: v => personalitySliderPreview(def.key, v) }));
 
-const DEFAULT_USER_PERSONA = { name: "", gender: "", notes: "" };
+// The user, described the same way a character is. Everything past name,
+// gender and notes was added when the user got their own creator; appearance
+// is null rather than a copy of DEFAULT_APPEARANCE for the same reason face is
+// null on a character — an untouched profile must describe nobody, not "medium
+// skin, athletic, 50th-percentile height", so that every prompt built for a
+// user who has never opened the editor is byte-identical to what it was.
+const DEFAULT_USER_PERSONA = {
+  name: "", gender: "", customGender: "", age: "", notes: "",
+  appearance: null,
+  // Same two-image split as a character, and the same rule about which is
+  // which: referenceImage is the nude base and is never rendered, avatarImage
+  // is the clothed portrait and is never sent to the image model.
+  referenceImage: null, avatarImage: null,
+  // The photographs the base image was built from, kept so a re-shoot can use
+  // the same faces, and one per expression slot. Both are read only by the
+  // photo studio: it is the one screen that draws the user at all.
+  sourcePhotos: [], expressionPhotos: {},
+};
+
+function normaliseUserPersona(persona) {
+  return { ...DEFAULT_USER_PERSONA, ...(persona || {}) };
+}
+
+// Whether a profile says anything at all. The per-character override used to
+// test three fields by hand; it now has as many as a character does, and an
+// override switched on with only an appearance filled in is still an override.
+function hasUserPersona(persona) {
+  if (!persona) return false;
+  return !!(persona.name || persona.gender || persona.notes || persona.age
+    || persona.appearance || persona.referenceImage || persona.avatarImage
+    || Object.keys(persona.expressionPhotos || {}).length);
+}
+
+// The user's own portrait, with the same fallback characterAvatar gives a
+// character: profiles that predate the split have only a reference image.
+function userPersonaAvatar(persona) {
+  return (persona && (persona.avatarImage || persona.referenceImage)) || null;
+}
 
 // Kept as a list (rather than a bare constant) so the Settings dropdown and
 // per-model config pattern can grow to multiple Wiro models later without
@@ -513,10 +555,14 @@ const resolveWornGarments = async (character) => {
     const worn = closetGarments({ closet: ids }, library).filter(g => g.image);
     // Worn, then visible. A bra under a jumper stays on her and stays in what
     // the chat model is told; it is only its photograph that is held back,
-    // because sending it is an instruction to show it. The cap counts what is
-    // actually sent, so hidden underwear no longer uses up one of the five.
-    return visibleWornGarments(worn, character.wornState)
-      .slice(0, (CFG.wardrobe.chat && CFG.wardrobe.chat.maxWorn) || 5);
+    // because sending it is an instruction to show it — so hidden underwear
+    // costs nothing out of the budget.
+    //
+    // No cap here any more: the reference budget is spent at the point the
+    // list is built, where the base image and any expression photograph are
+    // also known, and garments are last in that list so they are what gives
+    // way rather than her own face.
+    return visibleWornGarments(worn, character.wornState);
   } catch (e) {
     console.warn("Wardrobe unavailable, generating without garments:", e.message);
     return [];
@@ -568,19 +614,71 @@ function buildAppearanceSystemNote(appearance) {
 }
 
 function resolveUserPersona(character, settings) {
-  return (character.userPersonaOverride && (character.userPersonaOverride.name || character.userPersonaOverride.gender || character.userPersonaOverride.notes))
-    ? character.userPersonaOverride
-    : (settings.userPersona || DEFAULT_USER_PERSONA);
+  return hasUserPersona(character.userPersonaOverride)
+    ? normaliseUserPersona(character.userPersonaOverride)
+    : normaliseUserPersona(settings.userPersona);
+}
+
+// Whose wardrobe a subject shops from. Same unwrapping as personaGenderWord —
+// "Custom" is a label, not an answer — and it is deliberately the only thing
+// the clothing filter reads off a person.
+function subjectGenderOf(subject) {
+  if (!subject) return "";
+  return subject.gender === "Custom" ? (subject.customGender || "") : (subject.gender || "");
+}
+
+// A gender of "Custom" is a label, not an answer — every prompt that reads one
+// wants the sentence the user typed instead.
+function personaGenderWord(persona) {
+  if (!persona) return "";
+  return persona.gender === "Custom" ? (persona.customGender || "") : (persona.gender || "");
 }
 
 function buildUserPersonaNote(persona) {
   if (!persona) return "";
   const parts = [];
   if (persona.name) parts.push(fillTemplate(CFG.prompts.userPersonaName, { name: persona.name }));
-  if (persona.gender) parts.push(fillTemplate(CFG.prompts.userPersonaGender, { gender: persona.gender }));
+  const gender = personaGenderWord(persona);
+  if (gender) parts.push(fillTemplate(CFG.prompts.userPersonaGender, { gender }));
+  if (persona.age) parts.push(fillTemplate(CFG.prompts.userPersonaAge, { age: persona.age }));
+  // Measurements off, exactly as the character editors ask for it: this is
+  // read aloud by a language model, and a chest measurement in the middle of
+  // "who you are talking to" reads as a dossier rather than as a person.
+  const look = persona.appearance
+    ? buildAppearancePrompt(persona.appearance, { measurements: false })
+    : "";
+  if (look) parts.push(fillTemplate(CFG.prompts.userPersonaAppearance, { appearance: look }));
   if (persona.notes) parts.push(persona.notes);
   if (parts.length === 0) return "";
   return fillTemplate(CFG.prompts.userPersonaNote, { details: parts.join("; ") });
+}
+
+// What the viewer's own body looks like, for the POV frames that actually draw
+// it. Deliberately much shorter than the written note above — the image model
+// is being told the colour of a forearm, not introduced to a person — so it is
+// colouring and build only, and it says nothing at all until the user has
+// built an appearance.
+function buildViewerDesc(persona) {
+  if (!persona || !persona.appearance) return "";
+  const a = persona.appearance;
+  const skin = a.skinTone === "Custom" ? a.skinToneCustom : a.skinTone;
+  const ethnicity = a.ethnicity === "Custom" ? a.ethnicityCustom : a.ethnicity;
+  // null build means "leave as it is" — the same unset the appearance editors
+  // use — so it says nothing rather than falling through to the middle tier.
+  const buildTier = a.build != null ? tierFor(CFG.appearance.buildTiers, a.build) : null;
+  // Only the leading clause of the tier phrase. The full phrase is written for
+  // a whole-body prompt ("slim and lean, light build"); here it is describing a
+  // forearm at the edge of the frame, and the rest is detail the shot has no
+  // room for.
+  const build = buildTier ? String(buildTier.phrase || "").split(",")[0].trim() : "";
+  // Gender is deliberately absent. The one frame where the viewer's sex can be
+  // drawn wrong already gets povViewerSex from viewerGender, and saying it here
+  // too put "the viewer is a man, the viewer's own body is male" into the same
+  // prompt. Everywhere else the shot is a forearm, which has no sex to get
+  // wrong and every reason not to invite a second figure into the frame.
+  return [ethnicity && ethnicity.toLowerCase(),
+    skin && `${String(skin).toLowerCase()} skin`, build && build.toLowerCase(),
+  ].filter(Boolean).join(", ");
 }
 
 // Short-phrase preview for each personality/behaviour/relationship slider.
@@ -1395,10 +1493,11 @@ async function persistUploadedPhoto(dataUrl) {
   return null;
 }
 
-// How many images may be handed to one generation. Wiro caps a request at 15
-// including references, and past a handful of photographs the extra ones stop
-// adding information about the face and start averaging it away.
-const MAX_REFERENCE_IMAGES = 6;
+// How many images may be handed to one generation, counting everything: her
+// base image, an expression photograph,every garment, every person in a group
+// shot. One budget rather than a cap per kind of picture — see the note in
+// site-config under image.maxReferenceImages.
+const MAX_REFERENCE_IMAGES = (CFG.image && CFG.image.maxReferenceImages) || 10;
 
 // The reference list for a generation: the anchor image first where there is
 // one, then the photographs, deduped and capped. Comma-joined because that is
@@ -1645,7 +1744,18 @@ const UNSET_APPEARANCE = {
   eyeColour: "", eyeColourCustom: "",
   skinTone: "", skinToneCustom: "",
   ethnicity: "", ethnicityCustom: "",
-  height: null, build: null, buildCustom: "",
+  // Height is deliberately absent, where it used to be nulled. Everything on
+  // this list is unset because the photograph accounts for it better than a
+  // slider can — but a photograph cropped at mid-thigh carries no scale at
+  // all, so unsetting height defers to nothing, it just deletes the fact. And
+  // height is the one appearance value still sent with every chat image, so a
+  // null here made a character whose height reached no prompt anywhere.
+  //
+  // Absent rather than 50: this object is spread over the form's current
+  // appearance, so leaving the key out keeps whatever height is already
+  // there — the default, or a number the user has already set — instead of
+  // flattening it back to the middle.
+  build: null, buildCustom: "",
   // The tattoo field too: the photograph is the only record of her ink.
   body: { tattoos: "Any", tattoosCustom: "" },
   chest: null, chestCustom: "",
@@ -1895,6 +2005,57 @@ function randomiseFaceAndBody(currentFace, currentBody, currentAvatar) {
 //
 // Returns "" on any failure: an avatar in a generic top is a worse picture,
 // not a broken one, so this must never be the thing that stops a generation.
+// ─── SHARED IMAGE GENERATION ──────────────────────────────────────────────────
+// One definition of what a base image and what an avatar are, so the character
+// generator, the appearance editor and the user's own profile cannot drift into
+// building them differently. A "subject" is anything with a gender, an age and
+// an appearance — a character, or the user.
+
+function subjectCharDesc(subject) {
+  const genderDesc = subjectGenderOf(subject);
+  const ageDesc = subject.age ? `${subject.age} year old` : "";
+  return [ageDesc, genderDesc, buildAppearancePrompt(subject.appearance, { measurements: false })]
+    .filter(Boolean).join(", ");
+}
+
+// The nude 3/4-length base. anchored: false because on a first generation there
+// is no reference image for the hold clauses to talk about.
+async function generateSubjectBaseImage({ subject, imageModel, extra }) {
+  // A face the user has not chosen a shape for gets a different one each click,
+  // so Regen offers a genuinely different face to pick from. Gated on the
+  // structure alone: lipstick and a ponytail have no opinion about a jawline.
+  const faceVariation = isFaceStructureUnset(subject.appearance && subject.appearance.face) ? pickFaceVariation() : "";
+  const body = normaliseBody(subject.appearance && subject.appearance.body);
+  return generateImageWiro({
+    prompt: buildBodyBasePrompt({
+      body,
+      charDesc: subjectCharDesc(subject),
+      anchored: false,
+      extra: [extra || "", faceVariation].filter(Boolean).join(", "),
+    }),
+    model: imageModel,
+    seed: Math.floor(Math.random() * 2147483647),
+  });
+}
+
+// The clothed portrait, anchored to the base image so it is a portrait of that
+// person rather than a fresh one. An empty outfit is filled by asking the
+// language model what they would wear, and handed back through onOutfit so the
+// caller can write it into the visible box rather than deciding it invisibly.
+async function generateSubjectAvatar({ subject, base, imageModel, textModel, onOutfit }) {
+  let avatarCfg = normaliseAvatar(subject.appearance && subject.appearance.avatar);
+  if (!String(avatarCfg.outfit || "").trim()) {
+    const outfit = await suggestAvatarOutfit({ character: subject, model: textModel });
+    if (outfit) { avatarCfg = { ...avatarCfg, outfit }; if (onOutfit) onOutfit(outfit); }
+  }
+  return generateImageWiro({
+    prompt: buildAvatarPrompt({ charDesc: subjectCharDesc(subject), avatar: avatarCfg }),
+    model: imageModel,
+    initImage: base,
+    seed: Math.floor(Math.random() * 2147483647),
+  });
+}
+
 async function suggestAvatarOutfit({ character, model }) {
   const cfg = (CFG.appearance.body || {});
   if (!cfg.avatarOutfitPrompt) return "";
@@ -1930,7 +2091,13 @@ async function suggestAvatarOutfit({ character, model }) {
 async function suggestCloset({ character, model }) {
   const cfg = (CFG.wardrobe.closet || {});
   if (!cfg.instruction) return { closet: [], missing: [] };
-  const library = (await loadWardrobeLibrary()).filter(g => g && g.id && g.image);
+  // Cut-matched before the model ever sees the list, not after: this is a
+  // one-shot request with no picker to correct it, so a bra offered to a man
+  // is a bra he ends up owning. Unisex and untagged garments still pass, and a
+  // character whose gender says nothing still sees everything.
+  const library = (await loadWardrobeLibrary())
+    .filter(g => g && g.id && g.image)
+    .filter(g => window.SiteConfig.garmentFitsGender(g, subjectGenderOf(character), CFG));
   if (!library.length) return { closet: [], missing: [] };
 
   const desc = [
@@ -2460,7 +2627,16 @@ function renderMessageContent(text, isUser, overrideStyle) {
 // its value for when it's switched back on, contributes nothing to the system
 // prompt, and is never drifted by the reactivity pass. onToggleOff is optional
 // so slider groups that don't support switching off (appearance) still work.
-function SliderRow({ def, value, onChange, off, onToggleOff }) {
+//
+// activateOnChange makes an off slider draggable rather than inert: the drag
+// itself turns it on. A disabled range input is the wrong affordance for a
+// value the user is trying to set — it looks like a slider, so it gets
+// dragged, and nothing happens, with the only way through being a 9px chip in
+// the corner. Dragging a slider is about as unambiguous a statement of intent
+// as the UI has. Opt-in, because for a personality slider "off" is a real
+// position that a stray drag should not silently leave.
+function SliderRow({ def, value, onChange, off, onToggleOff, activateOnChange }) {
+  const inert = off && !activateOnChange;
   return (
     <div style={{ marginBottom: 14, opacity: off ? 0.42 : 1 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
@@ -2477,7 +2653,7 @@ function SliderRow({ def, value, onChange, off, onToggleOff }) {
           )}
         </span>
       </div>
-      <input type="range" min={0} max={100} value={value} disabled={off} onChange={e => onChange(Number(e.target.value))} />
+      <input type="range" min={0} max={100} value={value} disabled={inert} onChange={e => onChange(Number(e.target.value))} />
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
         <span style={{ fontSize: 10, color: "#4a4840" }}>{def.left}</span>
         <span style={{ fontSize: 10, color: "#4a4840" }}>{def.right}</span>
@@ -2560,8 +2736,384 @@ function ImageTimings() {
   );
 }
 
+// ─── USER PROFILE EDITOR ──────────────────────────────────────────────────────
+// The user's own character creator. Same tabs, same fields and the same two
+// images as a character, because "who you are talking to" is answered by the
+// same kinds of facts as "who is talking to you" — and because a second set of
+// appearance fields written for the user is a second set to keep in step.
+//
+// Everything past the first tab is AppearanceTabFields, shared verbatim with
+// CharacterForm and AppearanceEditor, so a field added to the config appears
+// here without this file being touched.
+//
+// One profile is the default, edited from Settings, and a character can hold an
+// override of the same shape — see resolveUserPersona. Its tab list is defined
+// with the other two, further down: it is built from APPEARANCE_TABS, and a
+// const cannot be read above the line that declares it.
+
+function UserProfileEditor({ persona, settings, title, onSave, onClose }) {
+  const [form, setForm] = useState(() => normaliseUserPersona(persona));
+  const [tab, setTab] = useState("You");
+  const [error, setError] = useState("");
+  const [note, setNote] = useState("");
+  const [imgLoading, setImgLoading] = useState(false);
+  const [imgStage, setImgStage] = useState("");
+  const [imgPrompt, setImgPrompt] = useState("");
+  const [analysing, setAnalysing] = useState(false);
+  const [exprNote, setExprNote] = useState("");
+  const [suggestedAge, setSuggestedAge] = useState(null);
+  const [lightbox, setLightbox] = useState(null);
+  // Every base image this profile has had, newest first, so a regeneration you
+  // liked less is one tap back rather than gone. The same thing the appearance
+  // editor keeps for a character, and for the same reason: a base image costs
+  // money and a minute, and overwriting one silently is the expensive mistake.
+  const [variants, setVariants] = useState(() => (
+    persona && persona.referenceImage
+      ? [{ id: "current", url: persona.referenceImage, label: "Current", date: 0 }]
+      : []));
+  const fileRef = useRef();
+
+  // The appearance stays null until something is actually changed, so a profile
+  // nobody has opened describes nobody rather than describing the defaults.
+  // Every patch below is what turns it into an object.
+  const appearance = { ...DEFAULT_APPEARANCE, ...(form.appearance || {}) };
+  const patchAppearance = (patch) => setForm(f => ({
+    ...f, appearance: { ...DEFAULT_APPEARANCE, ...(f.appearance || {}), ...patch },
+  }));
+  const formFace = normaliseFace(form.appearance && form.appearance.face);
+  const setFormFace = (groupKey, fieldKey, value) => setForm(f => {
+    const face = normaliseFace(f.appearance && f.appearance.face);
+    return { ...f, appearance: { ...DEFAULT_APPEARANCE, ...(f.appearance || {}),
+      face: { ...face, [groupKey]: { ...face[groupKey], [fieldKey]: value } } } };
+  });
+  const formBody = normaliseBody(form.appearance && form.appearance.body);
+  const patchBody = (patch) => setForm(f => ({
+    ...f, appearance: { ...DEFAULT_APPEARANCE, ...(f.appearance || {}),
+      body: { ...normaliseBody(f.appearance && f.appearance.body), ...patch } },
+  }));
+  const formAvatar = normaliseAvatar(form.appearance && form.appearance.avatar);
+  const patchAvatar = (patch) => setForm(f => ({
+    ...f, appearance: { ...DEFAULT_APPEARANCE, ...(f.appearance || {}),
+      avatar: { ...normaliseAvatar(f.appearance && f.appearance.avatar), ...patch } },
+  }));
+  const expressions = form.expressionPhotos || {};
+  const setExpressions = (next) => setForm(f => ({ ...f, expressionPhotos: next }));
+
+  // The same subject shape the character generator hands the image helpers:
+  // a name, a gender, an age and an appearance. The user has all four.
+  const subject = { ...form, appearance, persona: form.notes };
+
+  const handleGenerateBase = async () => {
+    setImgLoading(true); setImgStage("base"); setError(""); setNote("");
+    try {
+      const base = await generateSubjectBaseImage({
+        subject, imageModel: settings.imageModel, extra: imgPrompt.trim(),
+      });
+      setVariants(v => [{ id: String(Date.now()), url: base, label: "Generated", date: Date.now() }, ...v]);
+      setForm(f => ({
+        ...f,
+        referenceImage: base,
+        // The old portrait belongs to the old base image. A clothed portrait of
+        // a different face is worse than none, and none is what makes Save
+        // generate one.
+        avatarImage: null,
+        appearance: { ...DEFAULT_APPEARANCE, ...(f.appearance || {}),
+          baseSnapshot: snapshotOf({ ...DEFAULT_APPEARANCE, ...(f.appearance || {}) }, normaliseBody(f.appearance && f.appearance.body)) },
+      }));
+    } catch (e) { setError(e.message); }
+    setImgStage(""); setImgLoading(false);
+  };
+
+  const generateAvatarFor = async (base) => generateSubjectAvatar({
+    subject, base, imageModel: settings.imageModel,
+    textModel: settings.selectedModel, onOutfit: outfit => patchAvatar({ outfit }),
+  });
+
+  const handleGenerateAvatar = async () => {
+    if (!form.referenceImage) { setError("Generate a base image first — the portrait is a portrait of it."); return; }
+    setImgLoading(true); setImgStage("avatar"); setError("");
+    try {
+      const avatar = await generateAvatarFor(form.referenceImage);
+      setForm(f => ({ ...f, avatarImage: avatar }));
+    } catch (e) { setError(e.message); }
+    setImgStage(""); setImgLoading(false);
+  };
+
+  // Photographs of the actual person, turned into a base image the same way the
+  // character generator does it. The expression slots it also fills are not
+  // done here: they exist so a chat scene can call for her surprised face, and
+  // nothing ever renders the user's.
+  const handleFileUpload = async (e) => {
+    const files = Array.from(e.target.files || []).slice(0, MAX_REFERENCE_IMAGES);
+    if (!files.length) return;
+    e.target.value = "";
+    let dataUrls;
+    try { dataUrls = await Promise.all(files.map(readFileAsDataUrl)); }
+    catch (err) { setError(err.message); return; }
+
+    setError(""); setNote(""); setAnalysing(true); setImgStage("base");
+    setForm(f => ({ ...f, referenceImage: dataUrls[0], avatarImage: null }));
+
+    // Wiro is handed a URL it can fetch, never the data URL — the data URL
+    // renders locally but anchors nothing.
+    const hostedUrls = await Promise.all(dataUrls.map(persistUploadedPhoto));
+    const hosted = hostedUrls.filter(Boolean);
+    let describedFrom = hosted[0] || dataUrls[0];
+    try {
+      if (!hosted.length) throw new Error("the image could not be uploaded for the generator to read");
+      const base = await generateImageWiro({
+        prompt: buildUploadBasePrompt({ extra: imgPrompt.trim() }),
+        model: settings.imageModel,
+        initImage: joinReferenceImages(hosted),
+        seed: Math.floor(Math.random() * 2147483647),
+      });
+      describedFrom = base;
+      // Every shape and colour field is set to "leave as it is". The photo is
+      // the only account of how you look, and a field left at its default is
+      // not neutral — it would put "medium skin, athletic" into every
+      // regeneration, arguing with the picture next to it.
+      setForm(f => {
+        const next = { ...DEFAULT_APPEARANCE, ...(f.appearance || {}), ...UNSET_APPEARANCE };
+        return { ...f, referenceImage: base, avatarImage: null,
+          // Kept so a later re-shoot can use the same faces rather than asking
+          // for them a second time.
+          sourcePhotos: hosted,
+          appearance: { ...next, baseSnapshot: snapshotOf(next, normaliseBody(next.body)) } };
+      });
+      setNote(`Base image generated from ${hosted.length > 1 ? `your ${hosted.length} photos` : "your photo"}. The appearance settings are not used for it — the photos describe you — but they still feed what characters read about you.`);
+      setVariants(v => [{ id: String(Date.now()), url: base, label: "From photos", date: Date.now() }, ...v]);
+    } catch (err) {
+      console.error("Base image from upload failed:", err);
+      setForm(f => ({ ...f, sourcePhotos: hosted }));
+      setNote(`Couldn't turn ${dataUrls.length > 1 ? "those photos" : "that photo"} into a base image (${err.message}) — it is being used as-is.`);
+    }
+    setImgStage("");
+
+    // Sort the same photographs into expression slots while they are here.
+    // Only the clear ones — most faces come back as none — and the result is
+    // shown rather than filed away silently, since a slot you cannot see is
+    // one you cannot disagree with.
+    if (hosted.length) {
+      try {
+        const { filled, labels } = await autoFillExpressionSlots({
+          dataUrls, hostedUrls, existing: form.expressionPhotos,
+        });
+        if (labels.length) {
+          setForm(f => ({ ...f, expressionPhotos: filled }));
+          setExprNote(`Recognised ${labels.join(", ")} — used when a photo-studio shot calls for that expression.`);
+        }
+      } catch (err) { console.error("Expression sort failed:", err); }
+    }
+
+    // Age is worth reading off the photo: it is not an appearance setting,
+    // nothing else can estimate it, and it is offered rather than applied.
+    try {
+      const { age } = await analyseAppearanceFromImage({ imageUrl: dataUrls[0], current: form.appearance });
+      setSuggestedAge(age && !form.age ? age : null);
+    } catch (err) { console.error("Age read failed:", err); }
+
+    // And a written description, because on this path the appearance settings
+    // describe nobody: they were never filled in, and nothing is going to fill
+    // them in now.
+    try {
+      const written = await describeAppearanceFromImage({ imageUrl: describedFrom });
+      setForm(f => ({ ...f, appearance: { ...DEFAULT_APPEARANCE, ...(f.appearance || {}), description: written } }));
+    } catch (err) { console.error("Description read failed:", err); }
+    setAnalysing(false);
+  };
+
+  // Saving with a base image but no portrait makes the portrait first: the base
+  // image is nude and never rendered, so a profile saved without one has
+  // nothing to show.
+  const handleSave = async () => {
+    if (form.referenceImage && !form.avatarImage) {
+      setImgLoading(true); setImgStage("avatar"); setError("");
+      try {
+        const avatar = await generateAvatarFor(form.referenceImage);
+        setImgLoading(false); setImgStage("");
+        onSave({ ...form, avatarImage: avatar });
+        onClose();
+        return;
+      } catch (e) {
+        // Saved anyway: a profile with no portrait is fixable from here, and
+        // losing everything typed in because an image call failed is not.
+        setError(`${e.message} — saved without a portrait.`);
+        setImgLoading(false); setImgStage("");
+      }
+    }
+    onSave(form);
+    onClose();
+  };
+
+  const busyLabel = imgStage === "avatar" ? "Portrait…" : imgStage === "base" ? "Base…" : "…";
+
+  return (
+    <div style={S.overlay}>
+      <div style={{ ...S.modal, maxWidth: 520 }}>
+        <div style={S.modalHeader}>
+          <span style={S.modalTitle}>{title || "Your Profile"}</span>
+          <button style={S.iconBtn} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalBody}>
+          <TabBar tabs={USER_TABS} active={tab} onChange={setTab} />
+
+          {tab === "You" && (
+            <div style={tabPanel}>
+              <p style={{ fontSize: 12, color: "var(--text4)", margin: "4px 0 8px" }}>
+                What characters know about you. Everything here is optional — a
+                blank field is one they are told nothing about.
+              </p>
+
+              <label style={S.label}>Your Name</label>
+              <input style={S.input} placeholder="e.g. Tim" value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+
+              <label style={S.label}>Your Gender</label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {GENDERS.map(g => (
+                  <button key={g} style={form.gender === g ? S.genderBtnOn : S.genderBtnOff}
+                    onClick={() => setForm(f => ({ ...f, gender: g }))}>{g}</button>
+                ))}
+              </div>
+              {form.gender === "Custom" && (
+                <input style={{ ...S.input, marginTop: 8 }} placeholder="Describe gender identity..."
+                  value={form.customGender || ""} onChange={e => setForm(f => ({ ...f, customGender: e.target.value }))} />
+              )}
+
+              <label style={{ ...S.label, marginTop: 8 }}>Your Age</label>
+              <input style={S.input} placeholder="e.g. 34" value={form.age}
+                onChange={e => setForm(f => ({ ...f, age: e.target.value }))} />
+
+              {/* Ethnicity sits here rather than on an appearance tab for the
+                  same reason it does on a character: it is read as who someone
+                  is, and it is the one appearance field that also reaches the
+                  written prompts. */}
+              <ColourField field={ETHNICITY_FIELD} appearance={appearance} onChange={patchAppearance} />
+
+              <label style={{ ...S.label, marginTop: 8 }}>Other Details</label>
+              <textarea style={{ ...S.input, height: 90, resize: "vertical" }}
+                placeholder="Anything else characters should know about you (optional)"
+                value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+            </div>
+          )}
+
+          {APPEARANCE_TABS.includes(tab) && (
+            <div style={tabPanel}>
+              <AppearanceTabFields tab={tab} hasCharacterTab
+                face={formFace} onFace={setFormFace}
+                appearance={appearance} onAppearance={patchAppearance}
+                body={formBody} onBody={patchBody} />
+            </div>
+          )}
+
+          {tab === "Images" && (
+            <div style={tabPanel}>
+              <p style={{ fontSize: 12, color: "var(--text4)", margin: "4px 0 8px" }}>
+                Two images, and they do different jobs. The base image is the
+                full-length one everything else is generated from and is never
+                shown. The portrait is what you see next to your own messages.
+              </p>
+
+              <label style={S.label}>Base Image</label>
+              {variants.length > 0 ? (
+                <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+                  {variants.map(v => (
+                    <button key={v.id} onClick={() => setForm(f => ({ ...f, referenceImage: v.url, avatarImage: null }))}
+                      title={v.label}
+                      style={{ border: form.referenceImage === v.url ? "3px solid var(--pink)" : "3px solid transparent",
+                        borderRadius: 8, padding: 0, background: "none", cursor: "pointer", flexShrink: 0 }}>
+                      <img src={v.url} alt={v.label} onClick={e => { e.stopPropagation(); setLightbox(v.url); }}
+                        style={{ width: 96, height: 128, objectFit: "cover", borderRadius: 6, display: "block", background: "var(--bg3)" }} />
+                      <span style={{ fontSize: 10, color: "var(--text3)", display: "block", padding: "3px 2px" }}>{v.label}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ fontSize: 12, color: "var(--text4)" }}>None yet — generate one, or build it from photos.</p>
+              )}
+
+              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                <button style={S.btnPrimary} onClick={handleGenerateBase} disabled={imgLoading || analysing}>
+                  {imgLoading && imgStage === "base" ? busyLabel : form.referenceImage ? "↺ Regenerate base" : "Generate base"}
+                </button>
+                <button style={S.btnSecondary} onClick={() => fileRef.current && fileRef.current.click()} disabled={imgLoading || analysing}>
+                  {(form.sourcePhotos || []).length ? "Replace photos" : "Use photos"}
+                </button>
+                <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleFileUpload} />
+              </div>
+
+              <label style={{ ...S.label, marginTop: 12 }}>Extra Image Notes</label>
+              <input style={S.input} placeholder="Anything to add to the image prompt (optional)"
+                value={imgPrompt} onChange={e => setImgPrompt(e.target.value)} />
+
+              {analysing && <p style={{ fontSize: 12, color: "var(--text4)" }}>Reading your photos…</p>}
+              {note && <p style={{ fontSize: 12, color: "var(--text4)" }}>{note}</p>}
+              {suggestedAge && (
+                <p style={{ fontSize: 12, color: "var(--text3)" }}>
+                  Those photos look about {suggestedAge}.{" "}
+                  <button style={{ ...S.msgActionBtn, color: "var(--pink)" }}
+                    onClick={() => { setForm(f => ({ ...f, age: String(suggestedAge) })); setSuggestedAge(null); }}>Use it</button>
+                </p>
+              )}
+
+              <div style={S.divider} />
+
+              <ExpressionSlots expressions={expressions} onChange={setExpressions}
+                disabled={imgLoading || analysing} note={exprNote}
+                warnNoPhotos={!(form.sourcePhotos || []).length}
+                subject="you" onError={setError} />
+
+              <div style={S.divider} />
+
+              <AvatarControls avatar={formAvatar} onPatch={patchAvatar}
+                avatarUrl={userPersonaAvatar(form)} subject={subject}
+                model={settings.selectedModel} onExpand={setLightbox}
+                onGenerate={handleGenerateAvatar}
+                busy={imgLoading ? imgStage : ""} label="Portrait" />
+
+              <p style={{ fontSize: 11, color: "var(--text4)", marginTop: 12 }}>
+                Chat images are shot from your point of view, so the base image is
+                not sent to the image model — what it uses there is your colouring
+                and build, in the frames where your own hands or body are in shot.
+                The base image and the expressions are for the photo studio, which
+                is the one place you are actually drawn.
+              </p>
+            </div>
+          )}
+
+          {error && <p style={{ color: "var(--pink)", fontSize: 12, marginTop: 8 }}>{error}</p>}
+        </div>
+        <div style={S.modalFooter}>
+          <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
+          <button style={S.btnPrimary} onClick={handleSave} disabled={imgLoading || analysing}>
+            {imgLoading ? busyLabel : "Save"}
+          </button>
+        </div>
+      </div>
+      {lightbox && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt="expanded" style={{ maxWidth: "100%", maxHeight: "90vh", borderRadius: 12, objectFit: "contain" }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SettingsPanel({ settings, onSave, onClose }) {
-  const [form, setForm] = useState(() => ({ ...settings, userPersona: { ...DEFAULT_USER_PERSONA, ...(settings.userPersona || {}) } }));
+  const [form, setForm] = useState(() => ({ ...settings, userPersona: normaliseUserPersona(settings.userPersona) }));
+  // The user's profile is a screen of its own rather than a third block of
+  // fields here: it has as many tabs as the character creator does, and
+  // Settings is already long enough to scroll past.
+  const [showProfile, setShowProfile] = useState(false);
+  const persona = form.userPersona;
+  const summary = [
+    persona.name,
+    personaGenderWord(persona),
+    persona.age,
+    persona.appearance ? "appearance set" : "",
+    persona.referenceImage ? "images set" : "",
+  ].filter(Boolean).join(" · ");
   return (
     <div style={S.overlay}>
       <div style={S.modal}>
@@ -2592,27 +3144,27 @@ function SettingsPanel({ settings, onSave, onClose }) {
           <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>About You</span>
           <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 4 }}>Used by characters so they know who they're talking to. Applies to all characters by default — individual characters can override this.</p>
 
-          <label style={S.label}>Your Name</label>
-          <input style={S.input} placeholder="e.g. Tim" value={form.userPersona.name}
-            onChange={e => setForm(f => ({ ...f, userPersona: { ...f.userPersona, name: e.target.value } }))} />
-
-          <label style={S.label}>Your Gender</label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {GENDERS.map(g => (
-              <button key={g} style={form.userPersona.gender === g ? S.genderBtnOn : S.genderBtnOff}
-                onClick={() => setForm(f => ({ ...f, userPersona: { ...f.userPersona, gender: g } }))}>{g}</button>
-            ))}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {userPersonaAvatar(persona) && (
+              <img src={userPersonaAvatar(persona)} alt="you"
+                style={{ width: 48, height: 48, borderRadius: "50%", objectFit: "cover", flexShrink: 0, background: "var(--bg3)" }} />
+            )}
+            <span style={{ fontSize: 12, color: "var(--text3)", flex: 1, minWidth: 0 }}>
+              {summary || "Nothing set yet."}
+            </span>
+            <button style={S.btnPrimary} onClick={() => setShowProfile(true)}>Edit</button>
           </div>
-
-          <label style={S.label}>Other Details</label>
-          <textarea style={{ ...S.input, height: 70, resize: "vertical" }} placeholder="Anything else characters should know about you (optional)"
-            value={form.userPersona.notes} onChange={e => setForm(f => ({ ...f, userPersona: { ...f.userPersona, notes: e.target.value } }))} />
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
           <button style={S.btnPrimary} onClick={() => { onSave(form); onClose(); }}>Save</button>
         </div>
       </div>
+      {showProfile && (
+        <UserProfileEditor persona={persona} settings={form} title="Your Profile"
+          onSave={p => setForm(f => ({ ...f, userPersona: p }))}
+          onClose={() => setShowProfile(false)} />
+      )}
     </div>
   );
 }
@@ -2625,12 +3177,18 @@ function SettingsPanel({ settings, onSave, onClose }) {
 // It exists so that nothing downstream ever has to search the whole library.
 // Matching what a character is wearing against two hundred garments is both
 // expensive and unreliable; matching it against the twenty they own is neither.
-function ClosetPicker({ selected, onChange, onClose }) {
+function ClosetPicker({ selected, onChange, onClose, subjectGender }) {
   const [library, setLibrary] = useState(null);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
   const [set, setSet] = useState("");
+  // On by default and switched off in one tap. The cut of a garment is a
+  // strong hint about who it is for and a poor rule about who may wear it, so
+  // it filters the shelf rather than locking it — and a garment already in
+  // the closet is never hidden, whichever way the switch is set, because a
+  // filter that hides a choice you have already made looks like data loss.
+  const [matchCut, setMatchCut] = useState(true);
 
   useEffect(() => {
     let live = true;
@@ -2646,7 +3204,13 @@ function ClosetPicker({ selected, onChange, onClose }) {
   const withImages = (library || []).filter(g => g && g.image);
   const sets = [...new Set(withImages.map(g => (g.set || "").trim()).filter(Boolean))].sort();
   const categories = [...new Set(withImages.map(g => g.category).filter(Boolean))];
+  const chosenIds = new Set(selected);
+  const cutHides = (g) => matchCut && !chosenIds.has(g.id)
+    && !window.SiteConfig.garmentFitsGender(g, subjectGender, CFG);
+  // Only worth offering the switch when it is actually holding something back.
+  const hiddenByCut = withImages.filter(cutHides).length;
   const shown = withImages.filter(g => {
+    if (cutHides(g)) return false;
     if (category && g.category !== category) return false;
     if (set && (g.set || "").trim() !== set) return false;
     if (!query.trim()) return true;
@@ -2654,7 +3218,7 @@ function ClosetPicker({ selected, onChange, onClose }) {
     return query.toLowerCase().split(/\s+/).every(word => hay.includes(word));
   });
 
-  const chosen = new Set(selected);
+  const chosen = chosenIds;
   const toggle = (id) => onChange(chosen.has(id) ? selected.filter(x => x !== id) : [...selected, id]);
 
   // Config order, so the headings appear in the same sequence every time
@@ -2702,6 +3266,14 @@ function ClosetPicker({ selected, onChange, onClose }) {
                   </select>
                 )}
               </div>
+              {(hiddenByCut > 0 || !matchCut) && (
+                <button style={{ ...S.msgActionBtn, marginTop: 6, color: "var(--pink)" }}
+                  onClick={() => setMatchCut(v => !v)}>
+                  {matchCut
+                    ? `Showing what fits — ${hiddenByCut} other${hiddenByCut === 1 ? "" : "s"} hidden. Show everything`
+                    : "Showing everything. Show only what fits"}
+                </button>
+              )}
               {/* Grouped under a heading per category rather than one long
                   grid. A wardrobe is not a flat list once it has more than a
                   screenful in it: "the boots" is found by looking under Shoes,
@@ -2822,7 +3394,7 @@ function ClosetStrip({ closet, worn, wornState, onRemove, onToggleWorn, maxWorn 
 }
 
 // ─── CHARACTER PERSONALITY PANEL (in-chat) ────────────────────────────────────
-function CharacterPersonalityPanel({ character, onSave, onClose, model }) {
+function CharacterPersonalityPanel({ character, onSave, onClose, model, settings }) {
   const [sliders, setSliders] = useState(character.sliders || DEFAULT_SLIDERS);
   const [disabledSliders, setDisabledSliders] = useState(character.disabledSliders || []);
   const [reactiveEnabled, setReactiveEnabled] = useState(character.reactiveEnabled !== false);
@@ -2860,7 +3432,11 @@ function CharacterPersonalityPanel({ character, onSave, onClose, model }) {
   const [memoryGenLoading, setMemoryGenLoading] = useState(false);
   const [memoryGenError, setMemoryGenError] = useState("");
   const [useUserPersonaOverride, setUseUserPersonaOverride] = useState(!!character.userPersonaOverride);
-  const [userPersonaOverride, setUserPersonaOverride] = useState(character.userPersonaOverride || { ...DEFAULT_USER_PERSONA });
+  const [userPersonaOverride, setUserPersonaOverride] = useState(() => normaliseUserPersona(character.userPersonaOverride));
+  // The override is the same shape as the global profile and is edited in the
+  // same screen — appearance, images and all. A character who is told you look
+  // different needs the same fields to say it with.
+  const [showOverrideEditor, setShowOverrideEditor] = useState(false);
 
   return (
     <div style={S.overlay}>
@@ -2931,7 +3507,9 @@ function CharacterPersonalityPanel({ character, onSave, onClose, model }) {
             The clothes {character.name} owns, picked from the wardrobe. Tap one to put it on: worn garments are outlined, their photographs are sent to the image model so it draws those exact clothes, and their names go into the box above so she knows what she has on.
           </p>
           <ClosetStrip closet={closet} worn={worn} wornState={character.wornState}
-            maxWorn={(CFG.wardrobe.chat && CFG.wardrobe.chat.maxWorn) || 5}
+            // Her base image is the one reference always spent, so what is
+            // left for clothes is the budget less it.
+            maxWorn={MAX_REFERENCE_IMAGES - 1}
             onRemove={id => { setCloset(c => c.filter(x => x !== id)); setWorn(w => w.filter(x => x !== id)); }}
             onToggleWorn={(ids, names) => { setWorn(ids); setCharOutfit(names.join(", ")); }} />
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
@@ -2965,7 +3543,7 @@ function CharacterPersonalityPanel({ character, onSave, onClose, model }) {
           </button>
           {closetNote && <p style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>{closetNote}</p>}
           {showClosetPicker && (
-            <ClosetPicker selected={closet} onChange={setCloset} onClose={() => setShowClosetPicker(false)} />
+            <ClosetPicker selected={closet} onChange={setCloset} subjectGender={subjectGenderOf({ gender, customGender })} onClose={() => setShowClosetPicker(false)} />
           )}
 
           <div style={S.divider} />
@@ -3189,19 +3767,18 @@ Return ONLY the JSON object, no other text.` }] });
           {useUserPersonaOverride && (
             <div style={{ marginTop: 8 }}>
               <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 6 }}>Overrides your global "About You" settings just for {character.name}.</p>
-              <label style={S.label}>Your Name</label>
-              <input style={S.input} placeholder="e.g. Tim" value={userPersonaOverride.name}
-                onChange={e => setUserPersonaOverride(p => ({ ...p, name: e.target.value }))} />
-              <label style={S.label}>Your Gender</label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {GENDERS.map(g => (
-                  <button key={g} style={userPersonaOverride.gender === g ? S.genderBtnOn : S.genderBtnOff}
-                    onClick={() => setUserPersonaOverride(p => ({ ...p, gender: g }))}>{g}</button>
-                ))}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {userPersonaAvatar(userPersonaOverride) && (
+                  <img src={userPersonaAvatar(userPersonaOverride)} alt="you"
+                    style={{ width: 48, height: 48, borderRadius: "50%", objectFit: "cover", flexShrink: 0, background: "var(--bg3)" }} />
+                )}
+                <span style={{ fontSize: 12, color: "var(--text3)", flex: 1, minWidth: 0 }}>
+                  {[userPersonaOverride.name, personaGenderWord(userPersonaOverride), userPersonaOverride.age,
+                    userPersonaOverride.appearance ? "appearance set" : "",
+                    userPersonaOverride.referenceImage ? "images set" : ""].filter(Boolean).join(" · ") || "Nothing set yet."}
+                </span>
+                <button style={S.btnPrimary} onClick={() => setShowOverrideEditor(true)}>Edit</button>
               </div>
-              <label style={S.label}>Other Details</label>
-              <textarea style={{ ...S.input, height: 60, resize: "vertical" }} placeholder="Anything else this character should know about you"
-                value={userPersonaOverride.notes} onChange={e => setUserPersonaOverride(p => ({ ...p, notes: e.target.value }))} />
             </div>
           )}
         </div>
@@ -3210,6 +3787,12 @@ Return ONLY the JSON object, no other text.` }] });
           <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, disabledSliders, reactiveEnabled, intentionsEnabled, intentions: intentions.filter(i => (i.goal || "").trim()).map(i => ({ ...i, steps: (i.steps || []).filter(st => (st.text || "").trim()) })), memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, closet, worn, staging: hasStaging(staging) ? staging : null, explicitDetail: explicitDetail.trim() || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
         </div>
       </div>
+      {showOverrideEditor && (
+        <UserProfileEditor persona={userPersonaOverride} settings={settings || {}}
+          title={`You, for ${character.name}`}
+          onSave={setUserPersonaOverride}
+          onClose={() => setShowOverrideEditor(false)} />
+      )}
     </div>
   );
 }
@@ -3372,6 +3955,12 @@ const APPEARANCE_TABS = ["Face", "Hair", "Body", "Tattoos"];
 // The generator is the same tabs plus the things that are not about how she
 // looks, and an Images tab that creates rather than replaces.
 const FORM_TABS = ["Character", ...APPEARANCE_TABS, "Images"];
+// The user's own editor is the same shape again, with the first tab about him
+// rather than her. Defined here rather than next to UserProfileEditor, which
+// is written above this point: these three are read while the file is being
+// evaluated, not when a component renders, so one that spreads APPEARANCE_TABS
+// from higher up the file crashes the whole app before it can mount.
+const USER_TABS = ["You", ...APPEARANCE_TABS, "Images"];
 
 function TabBar({ tabs, active, onChange }) {
   return (
@@ -3472,10 +4061,13 @@ function AppearanceTabFields({ tab, face, onFace, appearance, onAppearance, body
             every chat image, and it is sent in centimetres, which a band would
             round away. */}
         {/* The slider has no null position, so "leave as it is" is the OFF
-            toggle SliderRow already carries for the personality sliders. */}
+            toggle SliderRow already carries for the personality sliders.
+            Unlike those, an unset height slider still drags: onChange sets a
+            number, and a number is not null, so the drag turns it on by
+            itself. The chip stays for deliberately unsetting it again. */}
         <div style={{ marginTop: 12 }}>
           <SliderRow def={APPEARANCE_SLIDER_DEFS[0]} value={appearance.height ?? 50}
-            off={appearance.height == null}
+            off={appearance.height == null} activateOnChange
             onToggleOff={off => onAppearance({ height: off ? null : 50 })}
             onChange={v => onAppearance({ height: v })} />
         </div>
@@ -3677,6 +4269,165 @@ function CropBox({ dataUrl, label, onCancel, onConfirm }) {
 // lipstick does not quietly move her jaw. Results are kept as variants rather
 // than overwriting: a base image is the one part of a character that cannot be
 // rebuilt from its settings.
+// ─── SHARED IMAGE CONTROLS ────────────────────────────────────────────────────
+// The expression grid and the avatar controls, defined once. Both were written
+// inside AppearanceEditor and both are wanted by the user's own profile, and a
+// second copy of either is a second thing to keep in step — the same reason
+// AppearanceTabFields exists.
+
+// One photograph per expression slot. Owns the whole flow: the hidden file
+// input, the crop box, and the upload, because a caller that had to wire those
+// up itself would be most of this component again.
+//
+// subject is the word for whose face this is — "her" in the character editors,
+// "you" in the user's profile — so the copy reads correctly on both without
+// two versions of it.
+function ExpressionSlots({ expressions, onChange, disabled, note, warnNoPhotos, subject = "her", onError }) {
+  // { slot, dataUrl } while the crop box is open over a picked photograph.
+  const [cropping, setCropping] = useState(null);
+  const [busySlot, setBusySlot] = useState("");
+  const fileRef = useRef();
+  // Which slot the hidden file input is filling. A ref rather than state
+  // because the change event reads it, and a click that set state would not
+  // have re-rendered the input before the picker opened.
+  const slotRef = useRef(null);
+  const slots = ((CFG.image || {}).expressions || {}).slots || [];
+  const fail = (m) => { if (onError) onError(m); };
+
+  // Cropping is offered rather than assumed: the automatic path guesses where
+  // the face is; by hand, saying so is the point.
+  const pick = async (e) => {
+    const file = (e.target.files || [])[0];
+    const slot = slotRef.current;
+    e.target.value = "";
+    if (!file || !slot) return;
+    fail("");
+    try { setCropping({ slot, dataUrl: await readFileAsDataUrl(file) }); }
+    catch (err) { fail(err.message); }
+  };
+
+  // rect is null when they chose the whole photograph, and a crop that fails
+  // falls back to it too — a slot holding the uncropped picture is what this
+  // has always been, and is better than an empty one.
+  const finishCrop = async (rect) => {
+    const { slot, dataUrl } = cropping || {};
+    setCropping(null);
+    if (!slot || !dataUrl) return;
+    setBusySlot(slot); fail("");
+    try {
+      const maxPx = (((CFG.image || {}).expressions || {}).autoFill || {}).maxCropPx;
+      const cropped = rect ? await cropDataUrl(dataUrl, rect, maxPx) : null;
+      if (rect && !cropped) fail("That crop could not be made, so the whole photo was used.");
+      // No local data-URL preview, unlike the photo strip: this one is only
+      // ever useful to the image model, and a picture it cannot fetch would
+      // sit in the grid looking filled while doing nothing.
+      const url = await persistUploadedPhoto(cropped || dataUrl);
+      if (!url) throw new Error("that photo could not be uploaded");
+      onChange({ ...expressions, [slot]: { url, auto: false, cropped: !!cropped } });
+    } catch (err) { fail(err.message); }
+    setBusySlot("");
+  };
+
+  const off = disabled || !!busySlot;
+
+  return (
+    <>
+      <label style={{ ...S.label, marginTop: 0 }}>Expressions</label>
+      <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 6px" }}>
+        One photo of {subject} per expression. When a scene calls for one, that photo is sent with the base
+        image, so the smile in the picture is {subject === "you" ? "yours" : "hers"} rather than one the generator made up. An empty slot changes
+        nothing — the image is generated exactly as it is now.
+      </p>
+      {warnNoPhotos && (
+        <p style={{ fontSize: 11, color: "var(--blue)", margin: "0 0 6px" }}>
+          This was not built from photographs. A real face uploaded here will pull the base image towards that
+          person, not just borrow the expression.
+        </p>
+      )}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {slots.map(slot => (
+          <div key={slot.key} style={{ width: 72 }}>
+            <div onClick={() => { if (off) return; slotRef.current = slot.key; fileRef.current.click(); }}
+              title={slot.hint || slot.label}
+              style={{ width: 72, height: 72, borderRadius: 8, background: "var(--bg3)", cursor: off ? "default" : "pointer", position: "relative", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", border: expressions[slot.key] ? "2px solid var(--pink)" : "2px dashed var(--bg4, #6664)" }}>
+              {expressionUrl(expressions[slot.key])
+                ? <img src={expressionUrl(expressions[slot.key])} alt={slot.label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                : <span style={{ fontSize: 20, color: "var(--text3)" }}>{busySlot === slot.key ? "…" : "+"}</span>}
+              {expressionIsAuto(expressions[slot.key]) && (
+                <span title="Recognised from your photos — clear it if it is wrong"
+                  style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.55)", color: "#fff", fontSize: 9, textAlign: "center", letterSpacing: 0.4 }}>AUTO</span>
+              )}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+              <span style={{ fontSize: 11, color: "var(--text3)" }}>{slot.label}</span>
+              {expressionUrl(expressions[slot.key]) && (
+                <button onClick={() => { const next = { ...expressions }; delete next[slot.key]; onChange(next); }}
+                  title="Remove"
+                  style={{ border: "none", background: "none", color: "var(--text3)", fontSize: 11, cursor: "pointer", padding: 0 }}>✕</button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={pick} />
+      {note && <p style={{ fontSize: 11, color: "var(--text3)", margin: "6px 0 0" }}>{note}</p>}
+      {cropping && (
+        <CropBox dataUrl={cropping.dataUrl}
+          label={(slots.find(sl => sl.key === cropping.slot) || {}).label || cropping.slot}
+          onCancel={() => setCropping(null)} onConfirm={finishCrop} />
+      )}
+    </>
+  );
+}
+
+// The clothed portrait and the two things that describe the photograph rather
+// than the person: what they are wearing in it, and the light it was taken in.
+// Never reaches a base image — see the note on appearance.avatar.
+function AvatarControls({ avatar, onPatch, avatarUrl, subject, model, onExpand, onGenerate, busy, label = "Avatar" }) {
+  const [suggesting, setSuggesting] = useState(false);
+  return (
+    <>
+      <label style={{ ...S.label, marginTop: 0 }}>{label}</label>
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+        {avatarUrl
+          ? <img src={avatarUrl} alt="avatar" onClick={() => onExpand && onExpand(avatarUrl)}
+              style={{ width: 84, height: 84, borderRadius: 10, objectFit: "cover", background: "var(--bg3)", cursor: onExpand ? "zoom-in" : "default", flexShrink: 0 }} />
+          : <div style={{ width: 84, height: 84, borderRadius: 10, background: "var(--bg3)", flexShrink: 0 }} />}
+        <p style={{ fontSize: 11, color: "var(--text3)", margin: 0 }}>
+          What the app displays, and never sent to the image model. Regenerate it only when you want to — it
+          does not have to follow every base image.
+        </p>
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 8 }}>
+        <div style={{ flex: 1 }}>
+          <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>Outfit</span>
+          <input style={{ ...S.input, marginTop: 4 }} placeholder="Left blank, the AI picks something that suits"
+            value={avatar.outfit || ""} onChange={e => onPatch({ outfit: e.target.value })} />
+        </div>
+        <button style={S.btnSecondary} disabled={!!busy || suggesting}
+          onClick={async () => {
+            setSuggesting(true);
+            const outfit = await suggestAvatarOutfit({ character: subject, model });
+            if (outfit) onPatch({ outfit });
+            setSuggesting(false);
+          }}>{suggesting ? "…" : "Suggest"}</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginTop: 8 }}>
+        {(BODY_CFG.avatarFields || []).map(field => (
+          <FaceField key={field.key} field={field}
+            value={avatar[field.key]} unsetValue={BODY_CFG.noneValue}
+            customValue={avatar[field.key + "Custom"]}
+            onChange={v => onPatch({ [field.key]: v })}
+            onCustomChange={v => onPatch({ [field.key + "Custom"]: v })} />
+        ))}
+      </div>
+      <button style={{ ...S.btnSecondary, marginTop: 8 }} onClick={onGenerate} disabled={!!busy}>
+        {busy === "avatar" ? "Generating…" : avatarUrl ? "↺ Regenerate avatar" : "Generate avatar"}
+      </button>
+    </>
+  );
+}
+
 function AppearanceEditor({ character, settings, onSave, onClose }) {
   const [tab, setTab] = useState("Face");
   const [face, setFace] = useState(() => normaliseFace(character.appearance && character.appearance.face));
@@ -3726,13 +4477,6 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
   // site-config under image.expressions.
   const [expressions, setExpressions] = useState(() => ({ ...(character.expressionPhotos || {}) }));
   const [exprNote, setExprNote] = useState("");
-  const expressionRef = useRef();
-  // Which slot the hidden file input is currently filling. Held in a ref
-  // rather than state because the change event reads it, and a click that set
-  // state would not have re-rendered the input before the picker opened.
-  const expressionSlot = useRef(null);
-  // { slot, dataUrl } while the crop box is open over a picked photograph.
-  const [cropping, setCropping] = useState(null);
 
   const setFaceField = (groupKey, fieldKey, value) =>
     setFace(f => ({ ...f, [groupKey]: { ...f[groupKey], [fieldKey]: value } }));
@@ -3843,41 +4587,6 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
       setExprNote(labels.length
         ? `Filled from your photos: ${labels.join(", ")}. Check them below — clear any you disagree with.`
         : "No clear expressions in those photos, so nothing was filled in. Upload one per slot below if you want them.");
-    } catch (err) { setError(err.message); }
-    setBusy("");
-  };
-
-  // Picking a file opens the crop box rather than filling the slot. The
-  // automatic path guesses where the face is; by hand, saying so is the point.
-  const addExpression = async (e) => {
-    const file = (e.target.files || [])[0];
-    const slot = expressionSlot.current;
-    e.target.value = "";
-    if (!file || !slot) return;
-    setError("");
-    try { setCropping({ slot, dataUrl: await readFileAsDataUrl(file) }); }
-    catch (err) { setError(err.message); }
-  };
-
-  // rect is null when they chose the whole photograph, and a crop that fails
-  // falls back to it too — a slot holding the uncropped picture is what this
-  // has always been, and is better than an empty one.
-  const finishCrop = async (rect) => {
-    const { slot, dataUrl } = cropping || {};
-    setCropping(null);
-    if (!slot || !dataUrl) return;
-    setBusy(`expr:${slot}`); setError("");
-    try {
-      const maxPx = (((CFG.image || {}).expressions || {}).autoFill || {}).maxCropPx;
-      const cropped = rect ? await cropDataUrl(dataUrl, rect, maxPx) : null;
-      if (rect && !cropped) setError("That crop could not be made, so the whole photo was used.");
-      // No local data-URL preview here, unlike the photo strip: this one is
-      // only ever useful to the image model, and a picture it cannot fetch
-      // would sit in the grid looking filled while doing nothing.
-      const url = await persistUploadedPhoto(cropped || dataUrl);
-      if (!url) throw new Error("that photo could not be uploaded");
-      setExpressions(x => ({ ...x, [slot]: { url, auto: false, cropped: !!cropped } }));
-      setExprNote("");
     } catch (err) { setError(err.message); }
     setBusy("");
   };
@@ -4135,85 +4844,15 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
 
               <div style={S.divider} />
 
-              <label style={{ ...S.label, marginTop: 0 }}>Expressions</label>
-              <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 6px" }}>
-                One photo of her per expression. When a chat scene calls for one, that photo is sent with the base
-                image, so the smile in the picture is hers rather than one the generator made up. An empty slot changes
-                nothing — the image is generated exactly as it is now.
-              </p>
-              {!hostedPhotos.length && (
-                <p style={{ fontSize: 11, color: "var(--blue)", margin: "0 0 6px" }}>
-                  This character was not built from photographs. A real face uploaded here will pull her towards that
-                  person, not just borrow the expression.
-                </p>
-              )}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {(((CFG.image || {}).expressions || {}).slots || []).map(slot => (
-                  <div key={slot.key} style={{ width: 72 }}>
-                    <div onClick={() => { if (busy) return; expressionSlot.current = slot.key; expressionRef.current.click(); }}
-                      title={slot.hint || slot.label}
-                      style={{ width: 72, height: 72, borderRadius: 8, background: "var(--bg3)", cursor: busy ? "default" : "pointer", position: "relative", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", border: expressions[slot.key] ? "2px solid var(--pink)" : "2px dashed var(--bg4, #6664)" }}>
-                      {expressionUrl(expressions[slot.key])
-                        ? <img src={expressionUrl(expressions[slot.key])} alt={slot.label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                        : <span style={{ fontSize: 20, color: "var(--text3)" }}>{busy === `expr:${slot.key}` ? "…" : "+"}</span>}
-                      {expressionIsAuto(expressions[slot.key]) && (
-                        <span title="Recognised from your photos — clear it if it is wrong"
-                          style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.55)", color: "#fff", fontSize: 9, textAlign: "center", letterSpacing: 0.4 }}>AUTO</span>
-                      )}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
-                      <span style={{ fontSize: 11, color: "var(--text3)" }}>{slot.label}</span>
-                      {expressionUrl(expressions[slot.key]) && (
-                        <button onClick={() => setExpressions(x => { const next = { ...x }; delete next[slot.key]; return next; })}
-                          title="Remove"
-                          style={{ border: "none", background: "none", color: "var(--text3)", fontSize: 11, cursor: "pointer", padding: 0 }}>✕</button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <input ref={expressionRef} type="file" accept="image/*" style={{ display: "none" }} onChange={addExpression} />
-              {exprNote && <p style={{ fontSize: 11, color: "var(--text3)", margin: "6px 0 0" }}>{exprNote}</p>}
+              <ExpressionSlots expressions={expressions} onChange={setExpressions}
+                disabled={!!busy} note={exprNote} warnNoPhotos={!hostedPhotos.length}
+                subject="her" onError={setError} />
 
               <div style={S.divider} />
 
-              <label style={{ ...S.label, marginTop: 0 }}>Avatar</label>
-              <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                {avatarUrl
-                  ? <img src={avatarUrl} alt="avatar" onClick={() => setLightbox(avatarUrl)}
-                      style={{ width: 84, height: 84, borderRadius: 10, objectFit: "cover", background: "var(--bg3)", cursor: "zoom-in", flexShrink: 0 }} />
-                  : <div style={{ width: 84, height: 84, borderRadius: 10, background: "var(--bg3)", flexShrink: 0 }} />}
-                <p style={{ fontSize: 11, color: "var(--text3)", margin: 0 }}>
-                  What the app displays, and never sent to the image model. Regenerate it only when you want to — it
-                  does not have to follow every base image.
-                </p>
-              </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 8 }}>
-                <div style={{ flex: 1 }}>
-                  <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>Outfit</span>
-                  <input style={{ ...S.input, marginTop: 4 }} placeholder="Left blank, the AI picks something that suits her"
-                    value={avatar.outfit || ""} onChange={e => patchAvatar({ outfit: e.target.value })} />
-                </div>
-                <button style={S.btnSecondary} disabled={!!busy}
-                  onClick={async () => {
-                    setBusy("outfit");
-                    const outfit = await suggestAvatarOutfit({ character, model: settings.selectedModel });
-                    if (outfit) patchAvatar({ outfit });
-                    setBusy("");
-                  }}>{busy === "outfit" ? "…" : "Suggest"}</button>
-              </div>
-              <div style={grid}>
-                {(BODY_CFG.avatarFields || []).map(field => (
-                  <FaceField key={field.key} field={field}
-                    value={avatar[field.key]} unsetValue={BODY_CFG.noneValue}
-                    customValue={avatar[field.key + "Custom"]}
-                    onChange={v => patchAvatar({ [field.key]: v })}
-                    onCustomChange={v => patchAvatar({ [field.key + "Custom"]: v })} />
-                ))}
-              </div>
-              <button style={{ ...S.btnSecondary, marginTop: 8 }} onClick={generateAvatar} disabled={!!busy}>
-                {busy === "avatar" ? "Generating…" : avatarUrl ? "↺ Regenerate avatar" : "Generate avatar"}
-              </button>
+              <AvatarControls avatar={avatar} onPatch={patchAvatar} avatarUrl={avatarUrl}
+                subject={character} model={settings.selectedModel}
+                onExpand={setLightbox} onGenerate={generateAvatar} busy={busy} />
             </div>
           )}
 
@@ -4226,12 +4865,6 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
           </div>
         </div>
       </div>
-
-      {cropping && (
-        <CropBox dataUrl={cropping.dataUrl}
-          label={((((CFG.image || {}).expressions || {}).slots || []).find(sl => sl.key === cropping.slot) || {}).label || cropping.slot}
-          onCancel={() => setCropping(null)} onConfirm={finishCrop} />
-      )}
 
       {lightbox && (
         <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
@@ -4500,32 +5133,14 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const handleGenerateImage = async () => {
     setImgLoading(true); setError("");
     try {
-      const appearanceDesc = buildAppearancePrompt(form.appearance, { measurements: false });
-      const genderDesc = form.gender === "Custom" ? (form.customGender || "") : (form.gender || "");
-      const ageDesc = form.age ? `${form.age} year old` : "";
-      const charDesc = [ageDesc, genderDesc, appearanceDesc].filter(Boolean).join(", ");
-
-      // Each click of Regen should offer a genuinely different face to pick
-      // from. Chat images deliberately do not do this — they pass the chosen
-      // base image instead, and need the face to stay put.
-      //
-      // Gated on the structure alone, not the whole face. The pools describe
-      // face shape, cheekbones, nose, mouth, eyes and skin, so a chosen face
-      // shape is the only thing they compete with — lipstick and a ponytail
-      // have no opinion about a jawline.
-      const faceVariation = isFaceStructureUnset(form.appearance && form.appearance.face) ? pickFaceVariation() : "";
-      const extra = [imgPrompt.trim(), faceVariation].filter(Boolean).join(", ");
       const body = normaliseBody(form.appearance && form.appearance.body);
 
-      // Built by the same function the body editor uses, so there is one
-      // definition of what a base image is rather than this screen keeping a
-      // private one. anchored: false because on a first generation there is no
-      // reference image for the hold clauses to talk about.
+      // Built by the same function the body editor and the user's own profile
+      // use, so there is one definition of what a base image is rather than
+      // this screen keeping a private one.
       setImgStage("base");
-      const base = await generateImageWiro({
-        prompt: buildBodyBasePrompt({ body, charDesc, anchored: false, extra }),
-        model: settings.imageModel,
-        seed: Math.floor(Math.random() * 2147483647),
+      const base = await generateSubjectBaseImage({
+        subject: form, imageModel: settings.imageModel, extra: imgPrompt.trim(),
       });
 
       // The avatar is NOT generated here. Every click of Regen used to make two
@@ -4557,22 +5172,11 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   // that person rather than a fresh one. Returns the finished form so Save can
   // use it directly — setForm would not have landed by the time onSave ran.
   const generateAvatarFor = async (base) => {
-    const genderDesc = form.gender === "Custom" ? (form.customGender || "") : (form.gender || "");
-    const ageDesc = form.age ? `${form.age} year old` : "";
-    const charDesc = [ageDesc, genderDesc, buildAppearancePrompt(form.appearance, { measurements: false })].filter(Boolean).join(", ");
-
-    let avatarCfg = normaliseAvatar(form.appearance && form.appearance.avatar);
     // An empty outfit is filled by asking what she would wear, and written back
     // into the box so it is visible and editable rather than decided invisibly.
-    if (!String(avatarCfg.outfit || "").trim()) {
-      const outfit = await suggestAvatarOutfit({ character: form, model: settings.selectedModel });
-      if (outfit) { avatarCfg = { ...avatarCfg, outfit }; patchAvatar({ outfit }); }
-    }
-    const avatar = await generateImageWiro({
-      prompt: buildAvatarPrompt({ charDesc, avatar: avatarCfg }),
-      model: settings.imageModel,
-      initImage: base,
-      seed: Math.floor(Math.random() * 2147483647),
+    const avatar = await generateSubjectAvatar({
+      subject: form, base, imageModel: settings.imageModel,
+      textModel: settings.selectedModel, onOutfit: outfit => patchAvatar({ outfit }),
     });
     setGeneratedImages(prev => prev.map(pair => (pair.base === base ? { ...pair, avatar } : pair)));
     return avatar;
@@ -4963,7 +5567,7 @@ function CharacterCard({ character, onSelect, onEdit, onEditAppearance, onDelete
 }
 
 // ─── MESSAGE BUBBLE ───────────────────────────────────────────────────────────
-function MessageBubble({ msg, index, isLastAI, characterName, onDelete, onEdit, onRegenerate, regenLoading, onExpandImage, discreetMode }) {
+function MessageBubble({ msg, index, isLastAI, characterName, onDelete, onEdit, onRegenerate, regenLoading, onExpandImage, discreetMode, userAvatar }) {
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState(msg.content);
   const [showRegen, setShowRegen] = useState(false);
@@ -5013,8 +5617,13 @@ function MessageBubble({ msg, index, isLastAI, characterName, onDelete, onEdit, 
     ? isUser ? { ...S.userBubbleText, fontWeight: 400 } : { ...S.bubbleText, color: "#000", fontWeight: 400 }
     : isUser ? S.userBubbleText : S.bubbleText;
 
+  // Your own portrait beside your own messages, once you have one. Not in
+  // discreet mode: that view exists to look like an ordinary messaging app
+  // from across a room, and a face in it is the thing it is hiding.
+  const showUserAvatar = isUser && !discreetMode && !!userAvatar;
+
   return (
-    <div style={{ ...S.bubbleWrapper, justifyContent: isUser ? "flex-end" : "flex-start" }} className="msg-anim">
+    <div style={{ ...S.bubbleWrapper, justifyContent: isUser ? "flex-end" : "flex-start", alignItems: "flex-start", gap: showUserAvatar ? 8 : 0 }} className="msg-anim">
       <div style={{ maxWidth: "75%" }}>
         <div style={bubbleStyle}>
           {isAI && !discreetMode && <span style={S.bubbleName}>{characterName}</span>}
@@ -5055,6 +5664,10 @@ function MessageBubble({ msg, index, isLastAI, characterName, onDelete, onEdit, 
           </div>
         )}
       </div>
+      {showUserAvatar && (
+        <img src={userAvatar} alt="you"
+          style={{ width: 30, height: 30, borderRadius: "50%", objectFit: "cover", flexShrink: 0, marginTop: 2, background: "var(--bg3)" }} />
+      )}
     </div>
   );
 }
@@ -5932,6 +6545,8 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         keepSceneVerbatim: true,
         garmentRefs: worn.length > 0,
         viewerGender: resolveUserPersona(character, settings).gender,
+        // Only reaches the frames that draw the viewer — see buildPovModifiers.
+        viewerDesc: buildViewerDesc(resolveUserPersona(character, settings)),
       });
       const url = await generateImageWiro({
         prompt: fullPrompt,
@@ -5946,7 +6561,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         // one, sits with the base image rather than after the flat lays: both
         // are pictures of her, and the prompt's clause about clothing speaks
         // of "the reference images" without counting them.
-        initImage: [character.referenceImage, pickExpressionReference(character.expressionPhotos, customImgPrompt), ...worn.map(g => g.image)].filter(Boolean).join(","),
+        initImage: joinReferenceImages([character.referenceImage, pickExpressionReference(character.expressionPhotos, customImgPrompt), ...worn.map(g => g.image)]),
         // Chat images are the ones worth recovering: they are the ones you set
         // going and then put the phone down.
         track: { characterId: character.id, label: customImgPrompt },
@@ -6058,6 +6673,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         contact: extracted.touching,
         viewerBody: extracted.viewerBody,
         viewerGender: resolveUserPersona(character, settings).gender,
+        viewerDesc: buildViewerDesc(resolveUserPersona(character, settings)),
         garmentRefs: worn.length > 0,
         clothingState: extracted.clothingState,
       });
@@ -6067,7 +6683,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         // See the custom-prompt path above for why the expression photograph
         // goes here. Matched against the extracted scene, which is where the
         // expression is actually named.
-        initImage: [character.referenceImage, pickExpressionReference(character.expressionPhotos, extracted.scene), ...worn.map(g => g.image)].filter(Boolean).join(","),
+        initImage: joinReferenceImages([character.referenceImage, pickExpressionReference(character.expressionPhotos, extracted.scene), ...worn.map(g => g.image)]),
         track: { characterId: character.id, label: prompt },
       });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);
@@ -6278,7 +6894,8 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
           <MessageBubble key={i} msg={msg} index={i} isLastAI={i === lastAIIndex}
             characterName={character.name} onDelete={handleDeleteMessage}
             onEdit={handleEditMessage} onRegenerate={handleRegenerate} regenLoading={regenLoading}
-            onExpandImage={(url) => setLightboxImg(url)} discreetMode={discreetMode} />
+            onExpandImage={(url) => setLightboxImg(url)} discreetMode={discreetMode}
+            userAvatar={userPersonaAvatar(resolveUserPersona(character, settings))} />
         ))}
 
         {(loading || regenLoading) && (
@@ -6476,7 +7093,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       )}
 
       {showPersonality && (
-        <CharacterPersonalityPanel character={character} model={settings.selectedModel} onSave={handlePersonalitySave} onClose={() => setShowPersonality(false)} />
+        <CharacterPersonalityPanel character={character} model={settings.selectedModel} settings={settings} onSave={handlePersonalitySave} onClose={() => setShowPersonality(false)} />
       )}
 
       {/* Opened from the header avatar. commitCharacter both updates the chat's
@@ -6574,8 +7191,15 @@ function studioCharDesc(character) {
   try {
     const cfg = studioCfg();
     const a = character.appearance;
+    // The measurement and the tier phrase together. A centimetre figure is
+    // not something an image model can draw, which is why height was the one
+    // part of this description that never showed up in the photograph; the
+    // tier phrase is the same fact in words it can act on. The average tier is
+    // marked skipInPrompt and drops out, leaving just the number.
+    const tier = (a && a.height != null) ? tierFor(CFG.appearance.heightTiers, a.height) : null;
     const height = (a && a.height != null)
       ? ", " + fillTemplate(CFG.appearance.heightMeasurementTemplate, { cm: sliderToCm(a.height) })
+        + (tier && !tier.skipInPrompt ? ", " + tier.phrase : "")
       : "";
     const sex = studioSexWord(character);
     const age = character.age || "";
@@ -6585,6 +7209,50 @@ function studioCharDesc(character) {
     if (!sex) return age + " year old" + height;
     return fillTemplate(cfg.subjectDescTemplate, { age, sex, height });
   } catch { return ""; }
+}
+
+// Height, stated as a comparison between the people in the frame.
+//
+// Each subject line already says how tall that person is, and in a group shot
+// that does nothing: three absolute measurements are three numbers with
+// nothing to measure against, and the model falls back on its prior, which is
+// everybody the same height. The reference images do not settle it either —
+// they are separate crops, so there is no shared scale in them.
+//
+// Sorted tallest first, then consecutive pairs. Consecutive is the point: it
+// is the shortest set of statements that still orders everybody, and every
+// statement is between two adjacent people, which is where a difference is
+// hardest for the model to average away.
+function studioHeightNotes(subjects) {
+  const cfg = studioCfg();
+  const c = cfg.clauses;
+  const known = subjects
+    .map((s, i) => ({ name: studioSubjectName(s, i), a: s.character.appearance }))
+    .filter(x => x.a && x.a.height != null)
+    .map(x => ({ name: x.name, cm: sliderToCm(x.a.height) }));
+  // One person's height is not a comparison, and nobody's is not a shot.
+  if (known.length < 2) return "";
+  known.sort((x, y) => y.cm - x.cm);
+
+  const tiers = cfg.heightDifferenceTiers || [];
+  const tierForGap = (gap) => tiers.find(t => gap <= t.maxCm) || tiers[tiers.length - 1] || null;
+
+  const lines = [];
+  let anyDifferent = false;
+  for (let i = 0; i + 1 < known.length; i++) {
+    const taller = known[i], shorter = known[i + 1];
+    const gap = taller.cm - shorter.cm;
+    // The first tier is the "same height" one, so a pair that lands in it is
+    // still said out loud — it just does not make the shot a mixed-height one.
+    if (tiers.length && gap > tiers[0].maxCm) anyDifferent = true;
+    const tier = tierForGap(gap);
+    lines.push(fillTemplate(c.heightCompare, {
+      taller: taller.name, shorter: shorter.name,
+      phrase: (tier && tier.phrase) || "", by: (tier && tier.by) || "",
+    }));
+  }
+  if (!anyDifferent) return c.heightCompareAllSame || "";
+  return (c.heightCompareIntro || "") + lines.join("");
 }
 
 // The sexes actually present, asserted, for a shot the model would otherwise
@@ -6610,6 +7278,42 @@ function studioAnatomyGuard(subjects) {
     return names.length === 1 ? clause : clause.replace(" has ", " each have ");
   });
   return fillTemplate(cfg.anatomyGuard, { sexes: clauses.join(" ") });
+}
+
+// The user, shaped so the studio can treat them as one more subject.
+//
+// The studio is the one screen in the app that draws several people from
+// several reference images, which makes it the one place the user's own base
+// image has a job — everywhere else the camera is behind their eyes. Every
+// field the studio reads off a character, the profile already carries; only
+// the id had to be invented. The closet is empty and stays that way: clothes
+// in the studio are chosen per shot from the whole wardrobe, not from the
+// person, so the user reaches the same picker as anybody else.
+//
+// The global profile, never a character's userPersonaOverride: an override is
+// who you are to that one character in that one conversation, and a group
+// photograph is not in it.
+const USER_SUBJECT_ID = "__you__";
+
+function userStudioCharacter(persona) {
+  const p = normaliseUserPersona(persona);
+  if (!hasUserPersona(p)) return null;
+  return {
+    id: USER_SUBJECT_ID,
+    // The real name, blank included. studioSubjectName already turns a blank
+    // one into "the first person", which is what the prompt wants — "You
+    // wears a coat" is not a sentence, and it is the sentence the group
+    // garment clause would have built. tileLabel is for the picker only.
+    name: p.name,
+    tileLabel: p.name ? p.name + " (you)" : "You",
+    gender: p.gender, customGender: p.customGender, age: p.age,
+    appearance: p.appearance,
+    referenceImage: p.referenceImage, avatarImage: p.avatarImage,
+    // The studio is the one place these are read for the user — chat is shot
+    // from behind their eyes, so their face is never in it.
+    expressionPhotos: p.expressionPhotos || {},
+    closet: [],
+  };
 }
 
 // In a group shot a person needs a handle the model can attach clothes to, and
@@ -6693,6 +7397,7 @@ function buildStudioPrompt({ subjects, choices }) {
       ...shared,
       count: subjects.length,
       subjects: subjectLines,
+      heights: studioHeightNotes(subjects),
       garments,
       together: fill(c.together, studioChoiceText(cfg.interactions, choices.together)),
     });
@@ -6709,20 +7414,62 @@ function buildStudioPrompt({ subjects, choices }) {
   // has already been told the sex of — which is as wrong on a tame character
   // as an explicit one. Read AFTER the notes are folded in, since "having sex"
   // is typed there as often as it is chosen from a picker.
-  const guard = isIntimateScene([body, extra].join(" "), null, true)
-    ? studioAnatomyGuard(subjects)
+  //
+  // One test, two clauses now. The guard says whose anatomy is in the frame;
+  // the motion clause says the act is happening rather than about to — every
+  // pose and interaction in the pickers is a held position, so an act typed
+  // into the notes arrives in a sentence made entirely of stillness. Neither
+  // clause adds explicit content of its own to a shot that has none.
+  const intimate = isIntimateScene([body, extra].join(" "), null, true);
+  const guard = intimate ? studioAnatomyGuard(subjects) : "";
+  const motion = intimate ? (cfg.intimateMotion || "") : "";
+
+  // Only when a face photograph is actually in the list. A clause describing a
+  // reference that is not there is one the model can still act on, and what it
+  // does with it is invent a close-up.
+  const withExpressions = subjects
+    .map((sub, i) => (studioExpressionRef(sub, choices) ? studioSubjectName(sub, i) : null))
+    .filter(Boolean);
+  const expressionNote = withExpressions.length
+    ? fillTemplate(c.expressionRef, { names: withExpressions.join(" and ") })
     : "";
 
-  const text = [body, extra, guard, cfg.styleModifiers].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  const text = [body, extra, expressionNote, guard, motion, cfg.styleModifiers].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-// The people first, in the order the prompt names them, then everyone's
-// garments behind them — which is what "the remaining reference images are
-// garments" means and the order it has to be true in.
-function studioReferenceImages(subjects) {
+function studioExpressionRef(subject, choices) {
+  const photos = subject.character.expressionPhotos || {};
+  // Chosen outright, when they picked a face for this shot.
+  if (subject.expression) return expressionUrl(photos[subject.expression]) || null;
+  // Otherwise read from the pose and the mood, which is the only text a studio
+  // shot has. It rarely says anything — only "caught laughing" does — which is
+  // exactly why the picker above exists rather than this being the whole
+  // mechanism. Chat reads the scene instead; the matching is shared.
+  const c = studioCfg();
+  const words = [
+    studioChoiceText(c.poses, subject.pose),
+    studioChoiceText(c.moods, (choices || {}).mood),
+  ].filter(Boolean).join(" ");
+  return pickExpressionReference(photos, words);
+}
+
+// Which expression slots this person actually has a photograph in — the only
+// ones worth offering, since an empty slot has nothing to send.
+function filledExpressionSlots(character) {
+  const photos = (character && character.expressionPhotos) || {};
+  return (((CFG.image || {}).expressions || {}).slots || []).filter(sl => expressionUrl(photos[sl.key]));
+}
+
+// People first, then their faces, then the clothes — the order the prompt
+// refers to them in. The expression photographs sit between the two because
+// no clause counts positions any more: garments are named as the flat lays and
+// faces as close photographs, so a picture can be inserted here without
+// renumbering anything.
+function studioReferenceImages(subjects, choices) {
   return [
     ...subjects.map(s => s.character.referenceImage),
+    ...subjects.map(s => studioExpressionRef(s, choices)),
     ...subjects.flatMap(s => s.garments.map(g => g.image)),
   ].filter(Boolean);
 }
@@ -6762,6 +7509,7 @@ function StudioSubjectCard({ subject, index, count, library, onChange, onRemove,
   const [capNote, setCapNote] = useState("");
   const c = subject.character;
   const garments = library ? closetGarments({ closet: subject.closet }, library).filter(g => g.image) : [];
+  const expressionChoices = filledExpressionSlots(c);
 
   // Grouped by category, the same as the picker. A row of eleven thumbnails is
   // a row you count rather than read; under headings it says what they are
@@ -6775,15 +7523,12 @@ function StudioSubjectCard({ subject, index, count, library, onChange, onRemove,
   })();
 
   const choose = (ids) => {
-    if (ids.length > cfg.maxGarments) {
-      // A cap rather than silently dropping the extra: every garment is another
-      // reference image the model has to stay faithful to while also composing
-      // a person, and past a handful it stops managing either.
-      setCapNote("That is as many as one person can wear at once (" + cfg.maxGarments + ").");
-      return;
-    }
+    // No per-person garment cap: one photograph spends one budget, and whether
+    // it goes on a fifth garment for her or a third person is the
+    // photographer's business. Only the budget itself refuses, and only when
+    // this is adding rather than taking off.
     if (ids.length > subject.closet.length && budgetLeft <= 0) {
-      setCapNote("That is the most reference images one photograph can hold (" + cfg.maxReferenceImages + ").");
+      setCapNote("That is the most reference images one photograph can hold (" + MAX_REFERENCE_IMAGES + ").");
       return;
     }
     setCapNote("");
@@ -6819,7 +7564,8 @@ function StudioSubjectCard({ subject, index, count, library, onChange, onRemove,
       <span style={S.label}>Wearing</span>
       <p style={{ fontSize: 12, color: "var(--text3)", margin: "6px 0 8px" }}>
         {garments.length
-          ? garments.length + " of " + cfg.maxGarments + " chosen."
+          ? garments.length + (garments.length === 1 ? " garment" : " garments") + " chosen"
+            + (budgetLeft > 0 ? ", " + budgetLeft + " left in the shot's budget." : " — the shot's budget is spent.")
           : "Nothing chosen — dressed as they are in their base image."}
       </p>
       {library === null && <p style={{ fontSize: 12, color: "var(--text3)" }}>Loading the wardrobe…</p>}
@@ -6845,21 +7591,50 @@ function StudioSubjectCard({ subject, index, count, library, onChange, onRemove,
           onChange={v => onChange({ ...subject, pose: v })} />
       </div>
 
+      {/* Only the slots this person has a photograph in. Offered as a plain
+          chip row rather than a StudioChoiceRow because there is no useful
+          Custom here — an expression you have no photograph of is one there is
+          nothing to send for. */}
+      {expressionChoices.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <span style={S.label}>Expression</span>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+            {expressionChoices.map(sl => {
+              const on = subject.expression === sl.key;
+              return (
+                <button key={sl.key} title={sl.hint || sl.label}
+                  onClick={() => onChange({ ...subject, expression: on ? "" : sl.key })}
+                  style={on ? S.genderBtnOn : S.genderBtnOff}>{sl.label}</button>
+              );
+            })}
+          </div>
+          <p style={{ fontSize: 11, color: "var(--text4)", marginTop: 4 }}>
+            Sends that photo with the base image, so the face is theirs rather
+            than one the generator made up. It spends one of the shot's
+            reference images, the same as a garment or another person.
+          </p>
+        </div>
+      )}
+
       {showPicker && (
-        <ClosetPicker selected={subject.closet} onChange={choose} onClose={() => setShowPicker(false)} />
+        <ClosetPicker selected={subject.closet} onChange={choose} subjectGender={subjectGenderOf(c)} onClose={() => setShowPicker(false)} />
       )}
     </div>
   );
 }
 
-function PhotoStudio({ characters, onBack }) {
+function PhotoStudio({ characters, userCharacter, onBack }) {
+  // The user is offered last and never chosen for you: the default subject is
+  // still picked from the characters alone, so opening the studio puts the
+  // same person in the frame it always did.
+  const castables = userCharacter ? [...characters, userCharacter] : characters;
   const cfg = studioCfg();
   const [library, setLibrary] = useState(null);
   // Ordered, and the order is load-bearing: it is the order the reference
   // images go in and the order the prompt names people in.
   const [subjects, setSubjects] = useState(() => {
     const first = characters.find(c => c.referenceImage) || characters[0];
-    return first ? [{ charId: first.id, closet: [], pose: { id: (cfg.defaults || {}).pose || "" } }] : [];
+    return first ? [{ charId: first.id, closet: [], expression: "", pose: { id: (cfg.defaults || {}).pose || "" } }] : [];
   });
   const [choices, setChoices] = useState(() => {
     const d = cfg.defaults || {};
@@ -6887,27 +7662,30 @@ function PhotoStudio({ characters, onBack }) {
   // wardrobe. A character deleted while the studio is open drops out rather
   // than becoming a row with nothing in it.
   const resolved = subjects
-    .map(s => ({ ...s, character: characters.find(c => c.id === s.charId) }))
+    .map(s => ({ ...s, character: castables.find(c => c.id === s.charId) }))
     .filter(s => s.character)
     .map(s => ({ ...s, garments: library ? closetGarments({ closet: s.closet }, library).filter(g => g.image) : [] }));
 
   const inShot = new Set(resolved.map(s => s.charId));
-  const refCount = resolved.length + resolved.reduce((n, s) => n + s.garments.length, 0);
-  const budgetLeft = cfg.maxReferenceImages - refCount;
+  // Counted from the list that is actually sent rather than from a formula
+  // beside it: expression photographs spend the budget too, and a second
+  // expression of the same count is a second thing to keep in step.
+  const refCount = studioReferenceImages(resolved, choices).length;
+  const budgetLeft = MAX_REFERENCE_IMAGES - refCount;
   const missingBase = resolved.filter(s => !s.character.referenceImage);
   const prompt = resolved.length ? buildStudioPrompt({ subjects: resolved, choices }) : "";
 
   const addSubject = (id) => {
-    if (subjects.length >= cfg.maxCharacters) {
-      setStatus("That is as many people as one photograph can hold (" + cfg.maxCharacters + ").");
-      return;
-    }
+    // A headcount used to stop at three, on the grounds that past that the
+    // model averages the faces together. It still does — but that is a
+    // judgement about the photograph, not a limit of the request, and it is
+    // the photographer's to make. The budget is the only refusal left.
     if (budgetLeft <= 0) {
-      setStatus("That is the most reference images one photograph can hold (" + cfg.maxReferenceImages + ").");
+      setStatus("That is the most reference images one photograph can hold (" + MAX_REFERENCE_IMAGES + ").");
       return;
     }
     setStatus("");
-    setSubjects(prev => [...prev, { charId: id, closet: [], pose: { id: (cfg.defaults || {}).pose || "" } }]);
+    setSubjects(prev => [...prev, { charId: id, closet: [], expression: "", pose: { id: (cfg.defaults || {}).pose || "" } }]);
   };
 
   const updateSubject = (i, next) => setSubjects(prev => prev.map((s, j) => j === i ? next : s));
@@ -6934,7 +7712,7 @@ function PhotoStudio({ characters, onBack }) {
         aspectRatio: aspect,
         // Wiro takes a comma-joined list here — people first, garments after,
         // which is the order the prompt refers to them in.
-        initImage: studioReferenceImages(resolved).join(","),
+        initImage: studioReferenceImages(resolved, choices).join(","),
         // Worth recovering: a studio shot is one you set going and then put the
         // phone down on. Only one gallery can be named for a recovery, so it is
         // the first person in the shot — the one the prompt is built around.
@@ -6972,18 +7750,18 @@ function PhotoStudio({ characters, onBack }) {
 
         <div style={S.studioCard}>
           <h3 style={S.studioHeading}>Who</h3>
-          {characters.length === 0 && <p style={{ fontSize: 13, color: "var(--text3)" }}>No characters yet.</p>}
+          {castables.length === 0 && <p style={{ fontSize: 13, color: "var(--text3)" }}>No characters yet.</p>}
           <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 8px" }}>
-            {"Tap to add or remove. Up to " + cfg.maxCharacters + " people in one shot" +
+            {"Tap to add or remove. People, faces and garments share one budget of " + MAX_REFERENCE_IMAGES + " reference images" +
               (resolved.length ? " — " + resolved.length + " in it now." : ".")}
           </p>
           <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
-            {characters.map(c => {
+            {castables.map(c => {
               const on = inShot.has(c.id);
               // Characters without a base image are marked rather than left
               // out: one missing from the row looks like one gone missing.
               return (
-                <button key={c.id} title={c.name || ""}
+                <button key={c.id} title={c.tileLabel || c.name || ""}
                   // A plain toggle in both directions, including down to
                   // nobody. Anything cleverer — tap-to-swap while one person is
                   // in the shot, tap-to-add once there are two — means the same
@@ -6996,7 +7774,7 @@ function PhotoStudio({ characters, onBack }) {
                     ? <img src={characterAvatar(c)} alt="" style={{ width: "100%", aspectRatio: "3/4", objectFit: "cover", display: "block" }} />
                     : <div style={{ ...S.gridTileFallback, aspectRatio: "3/4" }}>{(c.name || "?").slice(0, 1).toUpperCase()}</div>}
                   <div style={{ fontSize: 11, fontWeight: 700, padding: "5px 4px", color: on ? "var(--pink)" : "var(--text2)" }}>
-                    {c.name || "Unnamed"}
+                    {c.tileLabel || c.name || "Unnamed"}
                   </div>
                 </button>
               );
@@ -7007,7 +7785,7 @@ function PhotoStudio({ characters, onBack }) {
               never sent, and the photograph comes back missing it with no
               clue why. */}
           <p style={{ fontSize: 11, color: budgetLeft <= 0 ? "#c04060" : "var(--text4)", fontWeight: 700, marginTop: 8 }}>
-            {refCount} of {cfg.maxReferenceImages} reference images used
+            {refCount} of {MAX_REFERENCE_IMAGES} reference images used
             {" — "}{resolved.length} {resolved.length === 1 ? "person" : "people"}
             {", "}{refCount - resolved.length} garment{refCount - resolved.length === 1 ? "" : "s"}.
           </p>
@@ -7166,7 +7944,7 @@ function App() {
     setActiveChar(char);
   };
 
-  if (showStudio) return <PhotoStudio characters={orderedCharacters} onBack={() => setShowStudio(false)} />;
+  if (showStudio) return <PhotoStudio characters={orderedCharacters} userCharacter={userStudioCharacter(settings.userPersona)} onBack={() => setShowStudio(false)} />;
 
   if (activeChar) return <ChatWindow character={activeChar} settings={settings} onBack={() => setActiveChar(null)} onUpdateCharacter={updateCharacter} discreetMode={discreetMode} onToggleDiscreet={toggleDiscreet} theme={theme} onToggleTheme={toggleTheme} />;
 

@@ -1143,6 +1143,13 @@
       alsoTrueHeader: "Also true of you:",
       userPersonaName: "their name is {name}",
       userPersonaGender: "their gender is {gender}",
+      userPersonaAge: "they are {age}",
+      // The user's appearance, once they have built one. Kept to the same
+      // comma-separated shape the character appearance settings produce, and
+      // introduced as something the character can see rather than as a fact
+      // they were told — a character reciting the viewer's measurements back
+      // at them reads as a dossier, not as somebody in the room.
+      userPersonaAppearance: "they look like this: {appearance}",
     },
 
     // ── Wardrobe (wardrobe.html) ─────────────────────────────────────────────
@@ -1166,6 +1173,26 @@
       aspectRatio: "1:1",
       aspectRatios: ["1:1", "4:5", "3:4", "9:16", "16:9"],
       categories: ["Top", "Bottom", "Dress", "Outerwear", "Underwear", "Sleepwear", "Swimwear", "Shoes", "Accessory", "Full outfit"],
+
+      // Who a garment is cut for. Three values rather than two because most of
+      // a real wardrobe is the third one — jeans, t-shirts, trainers, coats —
+      // and forcing those onto a side would be wrong about half of them.
+      //
+      // A cut, not an identity: this is the shelf a shop would put it on, and
+      // it deliberately does not reuse CFG.options.genders, which is about who
+      // a person is. Who wears it is a separate question, and the answer is
+      // whoever wants to — the filter it drives is a default, not a rule.
+      genders: ["Women's", "Men's", "Unisex"],
+      // What an untagged garment counts as. Unisex, so a library that predates
+      // the field keeps being offered to everybody exactly as it was.
+      defaultGender: "Unisex",
+      // Shown on the browse filter, and the escape hatch the pickers offer.
+      genderAllLabel: "Any cut",
+      // Which rail a person of a given gender is shown by default. Only the
+      // two the wardrobe actually has rails for are listed: anything else —
+      // Custom, Non-binary, blank — is absent on purpose and falls through to
+      // being shown everything, because there is no third rail to show them.
+      genderBySubject: { "Female": "Women's", "Male": "Men's" },
 
       // Which generator the page reaches for first. Dezgo is the default
       // because a flat lay needs no reference image, which is the one thing
@@ -1238,7 +1265,7 @@
       // model is asked for what the garment IS, not what the photo shows: a
       // dress half hidden behind an arm still has a hem and a neckline, and
       // guessing them is the job. {categories} is substituted.
-      extractInstruction: "Look at this photograph and list every distinct item of clothing or footwear worn in it.\n\nReturn ONLY a JSON object, no markdown and no commentary, of the form {\"outfit\": \"...\", \"garments\": [ ... ]}.\n\n\"outfit\" is a short name for what these clothes are as an outfit, 2-4 words \u2014 what someone would call this way of dressing, like \"navy business suit\" or \"summer running kit\". The garments in one photograph are worn together, so they are a set, and this names it.\n\nEach element of \"garments\" is an object:\n{\n  \"name\": a short specific name, 2-5 words,\n  \"category\": exactly one of [{categories}],\n  \"description\": 15 to 30 words describing the garment ALONE — colour, fabric, cut, length, neckline, sleeves, fastenings, pattern,\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion. Only ever tags that will fit many garments \u2014 never the cut, the fastening, the fit or the sleeve length, because a tag describing one garment can never group anything\n}\n\nDescribe each garment as it would look laid out flat on its own, not as it appears on the body. Where the photograph hides part of it, infer the most likely form rather than omitting it. Ignore jewellery, bags, glasses and anything that is not worn clothing or footwear. If no clothing is visible, return an empty garments list.",
+      extractInstruction: "Look at this photograph and list every distinct item of clothing or footwear worn in it.\n\nReturn ONLY a JSON object, no markdown and no commentary, of the form {\"outfit\": \"...\", \"garments\": [ ... ]}.\n\n\"outfit\" is a short name for what these clothes are as an outfit, 2-4 words \u2014 what someone would call this way of dressing, like \"navy business suit\" or \"summer running kit\". The garments in one photograph are worn together, so they are a set, and this names it.\n\nEach element of \"garments\" is an object:\n{\n  \"name\": a short specific name, 2-5 words,\n  \"category\": exactly one of [{categories}],\n  \"gender\": exactly one of [{genders}] — the cut, not who may wear it. \"Unisex\" whenever the garment is not clearly cut for one, which is true of most plain tops, trousers, coats and trainers,\n  \"description\": 15 to 30 words describing the garment ALONE — colour, fabric, cut, length, neckline, sleeves, fastenings, pattern,\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion. Only ever tags that will fit many garments \u2014 never the cut, the fastening, the fit or the sleeve length, because a tag describing one garment can never group anything\n}\n\nDescribe each garment as it would look laid out flat on its own, not as it appears on the body. Where the photograph hides part of it, infer the most likely form rather than omitting it. Ignore jewellery, bags, glasses and anything that is not worn clothing or footwear. If no clothing is visible, return an empty garments list.",
 
       // ── Splitting a set ────────────────────────────────────────────────────
       // Some garments arrive as one photograph of two things: a pyjama set, a
@@ -1263,7 +1290,7 @@
       // Not extractInstruction, which asks what is being WORN in a photograph
       // — nobody is wearing a flat lay, and asked that question of one the
       // model hedges. {categories} is substituted.
-      splitInstruction: "This photograph shows clothing. It may be a flat lay, a product shot, or a person wearing the clothes, and it may be one garment or a set made up of more than one separate garment — a pyjama set is a top and bottoms, a bikini is a top and briefs, a suit is a jacket and trousers.\n\nList the separately wearable garments in it.\n\nReturn ONLY a JSON array, no markdown and no commentary. Each element is an object:\n{\n  \"name\": a short specific name for that piece alone, 2-5 words,\n  \"category\": exactly one of [{categories}],\n  \"description\": 15 to 30 words describing THAT PIECE alone — colour, fabric, cut, length, neckline, sleeves, fastenings, pattern,\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion\n}\n\nA piece counts as separate only if it can be worn without the other — the top half and bottom half of a two-piece do; a hood on a coat, a belt sewn to a dress and a lining do not. Name each piece for what it is on its own: \"pink striped pyjama top\", not \"pyjama set top\".\n\nIgnore anyone wearing the clothes, and ignore the background, jewellery and bags. If there is only one garment, return an array of one — that is a normal answer, not a failure.",
+      splitInstruction: "This photograph shows clothing. It may be a flat lay, a product shot, or a person wearing the clothes, and it may be one garment or a set made up of more than one separate garment — a pyjama set is a top and bottoms, a bikini is a top and briefs, a suit is a jacket and trousers.\n\nList the separately wearable garments in it.\n\nReturn ONLY a JSON array, no markdown and no commentary. Each element is an object:\n{\n  \"name\": a short specific name for that piece alone, 2-5 words,\n  \"category\": exactly one of [{categories}],\n  \"gender\": exactly one of [{genders}] — the cut, not who may wear it. \"Unisex\" whenever the garment is not clearly cut for one, which is true of most plain tops, trousers, coats and trainers,\n  \"description\": 15 to 30 words describing THAT PIECE alone — colour, fabric, cut, length, neckline, sleeves, fastenings, pattern,\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion\n}\n\nA piece counts as separate only if it can be worn without the other — the top half and bottom half of a two-piece do; a hood on a coat, a belt sewn to a dress and a lining do not. Name each piece for what it is on its own: \"pink striped pyjama top\", not \"pyjama set top\".\n\nIgnore anyone wearing the clothes, and ignore the background, jewellery and bags. If there is only one garment, return an array of one — that is a normal answer, not a failure.",
 
       // Read back off the finished picture, so that naming and filing a garment
       // is not a form to fill in. {categories} is substituted with the list
@@ -1273,7 +1300,7 @@
       // It reads the IMAGE, not the description, on purpose: a generated flat
       // lay often differs from what was asked for, and what is actually in the
       // picture is what a later scene will be copying.
-      analyseInstruction: "Look at this photograph of a single item of clothing, laid out flat. Return ONLY valid JSON with these exact fields, no markdown and no commentary:\n{\n  \"name\": a short specific name for the garment, 2-5 words, no brand names,\n  \"category\": exactly one of [{categories}],\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion. Only ever tags that will fit many garments \u2014 never the cut, the fastening, the fit or the sleeve length, because a tag describing one garment can never group anything,\n  \"description\": one or two sentences describing cut, fabric, colour, length, neckline, sleeves, fastenings and pattern, as a clothing catalogue would\n}\nDescribe only the garment. Say nothing about the background, the lighting or the photograph itself. If the picture shows more than one item, describe the largest.",
+      analyseInstruction: "Look at this photograph of a single item of clothing, laid out flat. Return ONLY valid JSON with these exact fields, no markdown and no commentary:\n{\n  \"name\": a short specific name for the garment, 2-5 words, no brand names,\n  \"category\": exactly one of [{categories}],\n  \"gender\": exactly one of [{genders}] — the cut, not who may wear it. \"Unisex\" whenever the garment is not clearly cut for one, which is true of most plain tops, trousers, coats and trainers,\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion. Only ever tags that will fit many garments \u2014 never the cut, the fastening, the fit or the sleeve length, because a tag describing one garment can never group anything,\n  \"description\": one or two sentences describing cut, fabric, colour, length, neckline, sleeves, fastenings and pattern, as a clothing catalogue would\n}\nDescribe only the garment. Say nothing about the background, the lighting or the photograph itself. If the picture shows more than one item, describe the largest.",
 
       // Dezgo models, cheapest-capable first. Each entry says which endpoint it
       // belongs to and the parameters that endpoint takes, because they differ:
@@ -1303,10 +1330,8 @@
         // Full length, so the whole outfit is in frame.
         aspectRatio: "9:16",
         resolution: "1k",
-        // Wiro caps inputImage at 15 including references, and coherence falls
-        // off long before that: each garment is another thing the model has to
-        // keep faithful while also composing a person.
-        maxGarments: 5,
+        // No cap of its own: the fitting room spends image.maxReferenceImages
+        // like everything else, less the one reference the person herself is.
         // The recent row holds a whole batch on purpose: generating eight and
         // then trying them on is the reason the row exists, and a row that
         // shows five of the eight just made sends you hunting for the rest.
@@ -1417,7 +1442,9 @@
         // Her photograph takes one of Wiro's 15 input slots, and coherence
         // falls off long before the other fourteen are used. Same number the
         // fitting room settled on.
-        maxWorn: 5,
+        // No cap of its own either — see image.maxReferenceImages. What a chat
+        // image can hold is the budget less her base image, and less the
+        // expression photograph on the shots that call for one.
         // The only clothing wording in a chat image prompt when garments are
         // worn. It replaces "wearing {charOutfit}" entirely.
         // The last clause about her before the style, and deliberately the
@@ -1426,7 +1453,14 @@
         // they win: the act stops happening and she stands there modelling.
         // So this says outright that the clothes may be hidden and that the
         // action outranks them.
-        refClause: "wearing the clothes in the reference images, which may be partly hidden, pushed aside or out of frame — what she is doing matters more than showing them, and the pose must never be changed to make them visible",
+        // "the flat lay photographs", not "the reference images": the
+        // reference list is no longer only her and her clothes. An expression
+        // photograph is a real picture of a dressed person, and under the old
+        // wording the jumper she happened to have on in it was one of "the
+        // clothes in the reference images" — so it got put on her, mixed in
+        // with the garments actually being tracked. Naming the flat lays is
+        // what tells the two kinds of picture apart.
+        refClause: "wearing the clothes shown in the flat lay garment photographs — those garments only, never anything worn by a person in another reference image — which may be partly hidden, pushed aside or out of frame — what she is doing matters more than showing them, and the pose must never be changed to make them visible",
         // The base image is nude, which is the whole point of it: tattoos
         // hidden under clothes in the reference are tattoos the model never
         // learns about. The cost is that it sees a tattooed torso and a
@@ -1529,20 +1563,17 @@
       // which is what dressing a specific person in specific clothes is.
       model: "seedream-v5-pro-uncensored",
       resolution: "1k",
-      // Per person, not per shot. Wiro caps inputImage at 15 including the
-      // references, and coherence goes long before that.
-      maxGarments: 5,
-      // How many people can be in one photograph. Every extra person is a face
-      // the model has to keep faithful while also composing a scene, and past
-      // three it starts averaging them into each other — which is the one
-      // failure that makes a group shot worthless, because the whole point is
-      // that these particular people are in it.
-      maxCharacters: 3,
-      // The hard ceiling on reference images for the whole shot, people and
-      // garments together. Deliberately shown in the UI rather than enforced
-      // silently: a garment dropped without saying so is one the model was
-      // never told about, and the photograph comes back wrong with no clue why.
-      maxReferenceImages: 8,
+      // Neither a per-person garment cap nor a headcount: one shot spends
+      // image.maxReferenceImages, and a person and a garment cost the same one
+      // reference. Still shown in the UI rather than enforced silently — a
+      // garment dropped without saying so is one the model was never told
+      // about, and the photograph comes back wrong with no clue why.
+      //
+      // What is lost with maxCharacters is a warning: past three or four faces
+      // the model does start averaging them into each other, and a group shot
+      // whose whole point is that these particular people are in it is the
+      // thing that spoils. That is now yours to judge, which is the trade you
+      // asked for.
       // Full length by default — the studio exists to photograph an outfit on
       // a person, and a portrait crop throws away half of one.
       aspectRatio: "3:4",
@@ -1574,13 +1605,23 @@
       // in words against their name. Less precise about fabric than the solo
       // path, and the only version that reliably puts the right coat on the
       // right person.
-      groupPromptTemplate: "{framing} photograph of {count} people together.{subjects} {garments}{together}{setting}{lighting}{camera}{mood}",
-      // first, second, third… as far as maxCharacters can reach.
-      ordinals: ["first", "second", "third", "fourth", "fifth", "sixth"],
+      groupPromptTemplate: "{framing} photograph of {count} people together.{subjects}{heights} {garments}{together}{setting}{lighting}{camera}{mood}",
+      // first, second, third… as far as the reference budget can reach. It
+      // stopped at six when three people was the limit; with the headcount
+      // gone it has to reach the whole budget, because two people both called
+      // "the next person" is two people the clothes cannot be told apart on.
+      ordinals: ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"],
       // Each clause and how it is worded once something is chosen for it. The
       // wording lives with the field so a new option never needs a code change.
       clauses: {
-        garmentsWorn: "They are wearing {v}. The reference images after the first are those garments, photographed flat — dress the person in exactly those garments, matching their colour, cut, fabric and detailing precisely.",
+        // "the flat lay photographs", not "the reference images after the
+        // first": the list is no longer only the person and their clothes. An
+        // expression photograph is a real picture of a dressed person, and a
+        // clause that names garments by POSITION would call that photograph a
+        // garment and put whatever they had on in it onto them. Naming the
+        // kind of picture instead is what tells the two apart — the same fix
+        // the chat refClause needed for the same reason.
+        garmentsWorn: "They are wearing {v}. The flat lay photographs among the reference images are those garments — dress the person in exactly those garments, matching their colour, cut, fabric and detailing precisely.",
         // Nothing chosen is not nothing said: left silent, the model dresses
         // them however it likes and the same settings give a different outfit
         // every time.
@@ -1592,7 +1633,7 @@
         // pose belongs to a person and not to the photograph.
         subject: " The {ordinal} reference image is {name}{charDesc}{pose}.",
         subjectPose: ", {v}",
-        garmentsGroupWorn: "The remaining reference images are garments, photographed flat: {v}. Dress each person in the garments listed against their name, matching colour, cut, fabric and detailing precisely.",
+        garmentsGroupWorn: "The flat lay photographs among the reference images are garments: {v}. Dress each person in the garments listed against their name, matching colour, cut, fabric and detailing precisely.",
         // Said out loud rather than left silent, for the same reason as the
         // solo case: told nothing, the model dresses them however it likes.
         garmentsGroupNone: "Everyone is dressed as they are in their own reference image.",
@@ -1606,6 +1647,30 @@
         // Silent on anyone left nude, since it speaks only about covered skin.
         skinUnderClothes: " Tattoos, marks and skin markings sit on the skin underneath the clothing — none are drawn on top of, or showing through, any garment.",
         together: " Together they are {v}.",
+        // Says what a face photograph is FOR, and — as with the garment
+        // clauses above — what it is not. Without the second half the model
+        // reads a picture of a dressed person as an instruction about clothes,
+        // which is exactly how a jumper from an expression photo ended up on
+        // her in chat.
+        expressionRef: " One reference image is a close photograph of {names} — copy the expression from it and nothing else, not the clothing, framing or background.",
+        // ── Height, said as a comparison ──────────────────────────────────
+        // Each subject line already carries that person's own height, and in
+        // a group shot that is not enough: three independent measurements are
+        // three numbers with nothing to measure against, and the model draws
+        // its prior, which is three people of the same height. The reference
+        // images cannot settle it either — they are separate crops, so they
+        // carry no shared scale.
+        //
+        // So the difference is stated as a difference. Consecutive pairs down
+        // the sorted order, which is the shortest set of statements that pins
+        // every person against every other, and each one phrased as something
+        // that can actually be drawn: a head taller, half a head, eye to eye.
+        heightCompareIntro: " The people in this photograph are not the same height, and the difference must be clearly visible where they stand together:",
+        heightCompare: " {taller} is {phrase} {shorter}{by}.",
+        // Every subject in the same tier. Worth saying rather than leaving
+        // silent, for the same reason as the garments: told nothing, the model
+        // decides, and a deliberate match reads as an accident.
+        heightCompareAllSame: " Everyone in this photograph is the same height as everyone else.",
         setting: " The setting is {v}.",
         lighting: " Lit by {v}.",
         camera: " Shot on {v}.",
@@ -1634,6 +1699,27 @@
       },
       // {age}, {sex} and {height} are substituted; each drops out when empty.
       subjectDescTemplate: "a {age} year old {sex}{height}",
+      // How a gap in centimetres between two people is said out loud. Matched
+      // on the difference, smallest maxCm first, and the last tier is the
+      // catch-all. The wording is deliberately anatomical rather than metric —
+      // "a full head taller" is a thing the model can compose, "17 cm taller"
+      // is not, and the whole failure being fixed here is that it was only
+      // ever given the second kind.
+      //
+      // The first tier's phrase reads as an equality rather than a comparison,
+      // so it fits the same sentence as the rest: "Ben is the same height as
+      // Cara." Below it the two people are close enough that asserting a
+      // difference would cost more than it buys.
+      // `by` trails the other person's name rather than sitting inside the
+      // comparison, so the sentence stays a sentence: "Cara is clearly taller
+      // than Ben, by about half a head" and not "taller than, by half a head
+      // Ben". It is optional and drops out where there is nothing to add.
+      heightDifferenceTiers: [
+        { maxCm: 4,   phrase: "the same height as", by: "" },
+        { maxCm: 9,   phrase: "a little taller than", by: "" },
+        { maxCm: 20,  phrase: "clearly taller than", by: ", by about half a head" },
+        { maxCm: 999, phrase: "much taller than", by: ", by a full head or more" },
+      ],
       // Appended only when the shot reads as explicit. Deliberately not gated
       // on any character's NSFW toggle: this adds no explicit content of its
       // own, it only stops the model drawing anatomy that belongs to nobody in
@@ -1643,6 +1729,18 @@
       // word like correct, and the whole failure is that it filled a gap with
       // its own assumption. Only the sexes actually present are asserted.
       anatomyGuard: " Every body in this photograph belongs to one of the people described above — there is nobody else in the frame and no other body parts. {sexes}",
+      // The studio builds its prompt from pickers rather than from a scene, so
+      // it never had the chat path's problem of a *described* act being drawn
+      // as an approach to one. It has the same problem for a different reason:
+      // every pose and interaction in the lists is a held position, and typing
+      // "having sex" into the notes box adds an act to a sentence otherwise
+      // made entirely of stillness. The result is the same photograph of two
+      // people arranged next to each other.
+      //
+      // Hung off the same isIntimateScene test as the anatomy guard, which
+      // already reads the notes as well as the pickers — so it lands exactly
+      // where an explicit shot has been asked for, whichever way it was asked.
+      intimateMotion: " The act is under way and at the height of it, not beginning: their bodies are joined where the act joins them, caught mid-motion, with weight and pressure showing where they meet.",
       // One clause per distinct sex present, joined. {who} is a name or a list
       // of names, {sex} the word above.
       anatomySexClause: "{who} has the body and genitals of a {sex}, and no anatomy of any other sex.",
@@ -1895,9 +1993,14 @@
       // of every other shot: a clause the model cannot use is a clause it can
       // still render literally.
       povViewerSex: "the viewer is {viewer}",
+      // The viewer's own colouring and build, and ONLY in the frames where
+      // their body is actually drawn. Everywhere else the viewer is a camera,
+      // and a clause describing a body the shot does not contain is one the
+      // model can render anyway — as a second person in the frame.
+      povViewerDesc: "the viewer's own body is {desc}",
 
       // What the POV clause says about the viewer's own body in an explicit
-      // shot: that it may be there, and nothing more.
+      // shot — where it is, and that it is joined to her rather than near her.
       //
       // The specific version — the extractor naming the part and the frame
       // edge, "the viewer's penis entering from the bottom of the frame" —
@@ -1912,7 +2015,29 @@
       // asserted that a body WAS there without saying which part, so the
       // model had to invent something to satisfy it. Permission is not a
       // requirement: there is nothing here to satisfy, so nothing to invent.
-      povBodyPermissive: "the viewer's own body may enter the frame where the action calls for it",
+      // povBodyPermissive — "the viewer's own body may enter the frame where
+      // the action calls for it" — used to sit here, and the two clauses
+      // below replace it. Permission was the right answer to the stray-limb
+      // problem and the wrong one to this: it was the strongest thing an
+      // explicit shot ever said about the two bodies, and a model given only
+      // permission to put them together resolves that the safe way — adjacent,
+      // not joined. Every explicit shot came out a half-second before anything
+      // happened.
+      //
+      // This asserts the contact without naming a part — "the point the scene
+      // describes" points back at the act rather than restating it, so it does
+      // not reintroduce the second account of one anatomy that the permissive
+      // clause was cut back to avoid. There is nothing here to invent, only
+      // something already named to be believed.
+      povIntimateContact: "their bodies joined at the point the scene describes, in full contact and not merely close",
+      // The other half of the same failure, and the reason it read as a
+      // photograph of a pose. Nothing on the chat path ever said the shot was
+      // a moment in a movement — the studio path has "caught mid-movement" as
+      // a pose, chat had no equivalent at all — so a prompt of static
+      // descriptions got a static image. Weight and pressure are the visible
+      // evidence of motion in a still frame; asking for them is what stops the
+      // two bodies being drawn resting against each other.
+      povIntimateMotion: "caught mid-motion at the height of the act, weight and pressure showing where they meet, flesh giving where it is pressed",
 
       // There was a povEyeLevel table here that turned the tracked userPose
       // into "seen from the eye level of someone standing". It is gone, and
@@ -2013,6 +2138,23 @@
           maxCropPx: 768,
         },
       },
+
+      // The one ceiling on reference images, for every screen that sends any:
+      // a chat image, the fitting room, the photo studio, a base image built
+      // from uploaded photographs. It used to be four separate caps — five
+      // garments here, three people there — which meant a shot could be
+      // refused a garment while well under what the model would have taken,
+      // and the numbers had to be kept in step by hand.
+      //
+      // Now it is one budget spent by whatever the photograph actually holds:
+      // five people and two photos of one of them leaves three garments.
+      //
+      // Ten because that is the documented reference cap for Seedream. The 15
+      // these comments used to cite is a different number — inputs plus
+      // outputs — and some platforms report references working up to 14 under
+      // it. We ask for one image out, so there is room to try; this is the
+      // figure that is actually written down.
+      maxReferenceImages: 10,
 
       proportionGuard: "two arms and two hands per person, no extra limbs, anatomically coherent",
       // Instruction sent to the extractor model that turns the recent
@@ -2290,6 +2432,38 @@
     return tiers.find(t => v <= t.max) || tiers[tiers.length - 1];
   }
 
+  // What cut a garment is, for a library where most garments predate the
+  // field. An unset one is whatever wardrobe.defaultGender says, which is
+  // Unisex — so an untagged library keeps being offered to everybody exactly
+  // as it was before the field existed.
+  function garmentGender(garment, cfg) {
+    const w = ((cfg || DEFAULTS).wardrobe) || {};
+    const list = w.genders || [];
+    const g = garment && garment.gender;
+    return list.includes(g) ? g : (w.defaultGender || list[0] || "");
+  }
+
+  // Whether a garment should be offered to someone of this gender.
+  //
+  // Unisex always passes, and so does an unknown or unset subject gender: the
+  // question this answers is "is there a reason NOT to offer this", and with
+  // nothing known about who is wearing it there is no reason. A filter that
+  // fails closed on missing data hides the whole wardrobe from a character
+  // whose gender was never filled in, which is worse than showing too much.
+  //
+  // The mapping is deliberately blunt. Anything that is not plainly the men's
+  // or the women's rail — a custom gender, non-binary, blank — sees
+  // everything, because there is no third rail for it to see instead.
+  function garmentFitsGender(garment, subjectGender, cfg) {
+    const conf = cfg || DEFAULTS;
+    const w = conf.wardrobe || {};
+    const cut = garmentGender(garment, conf);
+    if (cut === (w.defaultGender || "Unisex")) return true;
+    const want = (w.genderBySubject || {})[String(subjectGender || "").trim()];
+    if (!want) return true;
+    return cut === want;
+  }
+
   function fillTemplate(template, values) {
     return String(template == null ? "" : template)
       .replace(/\{(\w+)\}/g, (match, key) => (key in values ? String(values[key]) : match));
@@ -2313,5 +2487,7 @@
     saveOverrides,
     tierFor,
     fillTemplate,
+    garmentGender,
+    garmentFitsGender,
   };
 })(window);

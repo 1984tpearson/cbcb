@@ -60,6 +60,23 @@ sed -i 's|site-config.js?v=25|site-config.js?v=26|' index.html settings.html war
 Both pages now refuse to boot with a plain message when a required export is
 missing, rather than failing at the first call site.
 
+## Top-level consts in index.html run in file order
+
+The app source is one long script Babel compiles at runtime, so every top-level
+`const` in it is evaluated when the file is read, not when a component renders.
+One written above the line declaring what it reads is a ReferenceError before
+anything mounts — a black page, with the reason only in a console nobody has
+open on a phone. `USER_TABS = ["You", ...APPEARANCE_TABS]` did exactly this.
+
+Compiling the file does not catch it; only running the top level does.
+
+```
+npm i @babel/core @babel/preset-react   # once
+node check-app-boot.js                  # skips cleanly if they are absent
+```
+
+Run it after editing index.html, alongside `node check-interpolations.js`.
+
 ## Two images per character, and they must never swap
 
 - `referenceImage` — nude, 3/4 length. The **only** image passed to the image

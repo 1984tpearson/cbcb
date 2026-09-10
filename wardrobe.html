@@ -4,8 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Wardrobe</title>
-<script src="site-config.js?v=59"></script>
-<script src="image-prompt.js?v=29"></script>
+<script src="site-config.js?v=65"></script>
+<script src="image-prompt.js?v=31"></script>
 <style>
   :root {
     --pink: #d4547a; --pink-bg: #fdf1f4; --pink-border: #f0c4d1;
@@ -309,6 +309,7 @@
   <div class="filters">
     <input type="search" id="search" placeholder="Search name, description, tag…" oninput="render()" />
     <select id="catFilter" onchange="render()"></select>
+    <select id="genderFilter" onchange="render()"></select>
     <select id="setFilter" onchange="render()"></select>
     <details class="tagbox" id="tagBox">
       <summary id="tagSummary"></summary>
@@ -384,9 +385,10 @@
           <input type="text" id="fName" placeholder="Black silk slip dress" oninput="refreshPromptView()" /></label>
         <div class="row2">
           <label class="field"><span>Category</span><select id="fCategory"></select></label>
-          <label class="field"><span>Tags (comma separated)</span>
-            <input type="text" id="fTags" placeholder="evening, summer" /></label>
+          <label class="field"><span>Cut</span><select id="fGender"></select></label>
         </div>
+        <label class="field"><span>Tags (comma separated)</span>
+          <input type="text" id="fTags" placeholder="evening, summer" /></label>
         <label class="field"><span>Set — worn together as an outfit</span>
           <input type="text" id="fSet" list="setList" placeholder="e.g. navy work suit" />
           <datalist id="setList"></datalist></label>
@@ -434,7 +436,7 @@
   // first symptom is a TypeError naming a function nobody has heard of —
   // unreadable on a phone, and indistinguishable from a broken deploy. So it
   // is checked once, up front, and named for what it is.
-  const REQUIRED_EXPORTS = ["aiComplete", "parseJsonReply", "call", "WARDROBE_ROW_ID", "IMAGE_PROXY_URL"];
+  const REQUIRED_EXPORTS = ["aiComplete", "parseJsonReply", "call", "WARDROBE_ROW_ID", "IMAGE_PROXY_URL", "garmentGender", "garmentFitsGender"];
   const missing = REQUIRED_EXPORTS.filter(k => !window.SiteConfig || window.SiteConfig[k] === undefined);
   if (missing.length) {
     document.body.innerHTML =
@@ -452,6 +454,12 @@
   } = window.SiteConfig;
 
   let CFG = clone(DEFAULTS);
+  // Wrapped rather than destructured so they read the CONFIG THAT LOADED, not
+  // the built-in defaults: CFG is reassigned once loadConfig returns, and a
+  // bound copy taken now would answer from the defaults for the rest of the
+  // session — silently right today, and silently wrong the moment the cut
+  // list is edited in settings.
+  const garmentGender = (g) => window.SiteConfig.garmentGender(g, CFG);
   // The whole library, newest first. Held in memory and written back whole:
   // it is one document in one row, and a garment list is not big enough for
   // partial writes to be worth the complexity.
@@ -530,6 +538,13 @@
   }
 
   function wardrobeCfg() { return CFG.wardrobe || DEFAULTS.wardrobe; }
+  // How many garments the fitting room can put on at once: the one reference
+  // budget every screen spends, less the one the person herself costs. See the
+  // note in site-config under image.maxReferenceImages.
+  function fittingBudget() {
+    const img = CFG.image || DEFAULTS.image || {};
+    return Math.max(1, (img.maxReferenceImages || 10) - 1);
+  }
 
   function fillStaticSelects() {
     const w = wardrobeCfg();
@@ -538,6 +553,11 @@
       w.categories.map(c => '<option value="' + esc(c) + '">' + esc(c) + "</option>").join("");
     document.getElementById("fCategory").innerHTML =
       w.categories.map(c => '<option value="' + esc(c) + '">' + esc(c) + "</option>").join("");
+    const gen = document.getElementById("genderFilter");
+    gen.innerHTML = '<option value="">' + esc(w.genderAllLabel) + "</option>" +
+      w.genders.map(g => '<option value="' + esc(g) + '">' + esc(g) + "</option>").join("");
+    document.getElementById("fGender").innerHTML =
+      w.genders.map(g => '<option value="' + esc(g) + '">' + esc(g) + "</option>").join("");
     document.getElementById("fAspect").innerHTML =
       w.aspectRatios.map(a => '<option value="' + esc(a) + '">' + esc(a) + "</option>").join("");
     document.getElementById("fProvider").innerHTML =
@@ -594,13 +614,18 @@
   function visibleItems() {
     const q = document.getElementById("search").value.trim().toLowerCase();
     const cat = document.getElementById("catFilter").value;
+    const gender = document.getElementById("genderFilter").value;
     const set = document.getElementById("setFilter").value;
     return items.filter(it => {
       if (cat && it.category !== cat) return false;
+      // Exact here, not the "matching plus unisex" rule the pickers use: this
+      // is the browse filter, and someone who asks to see the men's rail is
+      // asking what is on it, not what a man could wear.
+      if (gender && garmentGender(it) !== gender) return false;
       if (set && (it.set || "") !== set) return false;
       if (activeTag && !(it.tags || []).includes(activeTag)) return false;
       if (!q) return true;
-      const hay = [it.name, it.description, it.category, it.set, (it.tags || []).join(" ")].join(" ").toLowerCase();
+      const hay = [it.name, it.description, it.category, garmentGender(it), it.set, (it.tags || []).join(" ")].join(" ").toLowerCase();
       return hay.includes(q);
     });
   }
@@ -676,7 +701,7 @@
       ? clone(item)
       : {
           id: "g_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-          name: "", category: w.categories[0], description: "", tags: [],
+          name: "", category: w.categories[0], gender: w.defaultGender, description: "", tags: [],
           image: "", variants: [], prompt: "", source: "",
           provider: w.provider, model: (w.provider === "dezgo" ? w.dezgoModels[0].id : CFG.models.image[0].id),
           aspectRatio: w.aspectRatio,
@@ -686,6 +711,7 @@
     document.getElementById("editorTitle").textContent = draftIsNew ? "Add garment" : "Edit garment";
     document.getElementById("fName").value = draft.name || "";
     document.getElementById("fCategory").value = draft.category || w.categories[0];
+    document.getElementById("fGender").value = garmentGender(draft);
     document.getElementById("fTags").value = (draft.tags || []).join(", ");
     document.getElementById("fSet").value = draft.set || "";
     document.getElementById("fDescription").value = draft.description || "";
@@ -984,6 +1010,7 @@
     const w = wardrobeCfg();
     const instruction = fillTemplate(w.analyseInstruction, {
       categories: w.categories.map(c => JSON.stringify(c)).join(", "),
+      genders: w.genders.map(g => JSON.stringify(g)).join(", "),
     });
     const raw = (await aiComplete({
       model: CFG.models.vision,
@@ -1024,6 +1051,10 @@
     if (w.categories.includes(reading.category) && catEl.value === w.categories[0]) {
       catEl.value = reading.category; filled.push("category");
     }
+    const genEl = document.getElementById("fGender");
+    if (w.genders.includes(reading.gender) && genEl.value === w.defaultGender) {
+      genEl.value = reading.gender; filled.push("cut");
+    }
     const tagEl = document.getElementById("fTags");
     if (!tagEl.value.trim() && Array.isArray(reading.tags)) {
       const tags = reading.tags
@@ -1049,6 +1080,7 @@
         if (typeof reading.name === "string") document.getElementById("fName").value = reading.name.trim();
         if (typeof reading.description === "string") document.getElementById("fDescription").value = reading.description.trim();
         if (wardrobeCfg().categories.includes(reading.category)) document.getElementById("fCategory").value = reading.category;
+        if (wardrobeCfg().genders.includes(reading.gender)) document.getElementById("fGender").value = reading.gender;
         if (Array.isArray(reading.tags)) {
           document.getElementById("fTags").value = reading.tags
             .filter(t => typeof t === "string" && t.trim())
@@ -1423,7 +1455,7 @@
   function renderGarmentPicker() {
     const withImages = items.filter(i => i.image);
     const box = document.getElementById("fitGarments");
-    const max = wardrobeCfg().fitting.maxGarments;
+    const max = fittingBudget();
 
     // Config order, so the blocks appear in the same sequence every time
     // rather than shuffling as the wardrobe fills up. Only categories that
@@ -1530,7 +1562,7 @@
       withImages.forEach(i => chosenGarments.delete(i.id));
       fitStatus("", "");
     } else {
-      const max = wardrobeCfg().fitting.maxGarments;
+      const max = fittingBudget();
       let added = 0, skipped = 0;
       for (const it of withImages) {
         if (chosenGarments.has(it.id)) continue;
@@ -1551,7 +1583,7 @@
   window.toggleGarment = function (id) {
     if (chosenGarments.has(id)) chosenGarments.delete(id);
     else {
-      const max = wardrobeCfg().fitting.maxGarments;
+      const max = fittingBudget();
       if (chosenGarments.size >= max) {
         // A cap rather than silently dropping the extra: every garment is
         // another reference image the model has to stay faithful to while also
@@ -1745,7 +1777,7 @@
     const gen = currentGenerator();
     return {
       id: "g_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-      name: "", category: w.categories[0], description: typed || "", tags: [], set: "",
+      name: "", category: w.categories[0], gender: w.defaultGender, description: typed || "", tags: [], set: "",
       image: "", variants: [], prompt: "", source: "",
       provider: gen.provider,
       model: gen.id,
@@ -1770,6 +1802,10 @@
       next.description = reading.description.trim();
     }
     if (reading.category && w.categories.includes(reading.category)) next.category = reading.category;
+    // Same rule as the category: only a value actually on the list. An
+    // invented cut would sit in the filter dropdown as a permanent one-off,
+    // and would match nobody.
+    if (reading.gender && w.genders.includes(reading.gender)) next.gender = reading.gender;
     if (Array.isArray(reading.tags)) {
       next.tags = reading.tags.filter(t => typeof t === "string" && t.trim())
         .map(t => t.trim().toLowerCase()).slice(0, 6);
@@ -1965,6 +2001,7 @@
         content: [
           { type: "text", text: fillTemplate(w.extractInstruction, {
             categories: w.categories.map(c => JSON.stringify(c)).join(", "),
+            genders: w.genders.map(g => JSON.stringify(g)).join(", "),
           }) },
           { type: "image_url", image_url: { url: imageUrl } },
         ],
@@ -1989,6 +2026,7 @@
         known: {
           name: typeof g.name === "string" ? g.name.trim() : "",
           category: w.categories.includes(g.category) ? g.category : null,
+          gender: w.genders.includes(g.gender) ? g.gender : null,
           description: g.description.trim(),
           tags: Array.isArray(g.tags) ? g.tags : [],
           // Everything out of one photograph belongs to the same set: those
@@ -2012,6 +2050,7 @@
         content: [
           { type: "text", text: fillTemplate(w.splitInstruction, {
             categories: w.categories.map(c => JSON.stringify(c)).join(", "),
+            genders: w.genders.map(g => JSON.stringify(g)).join(", "),
           }) },
           { type: "image_url", image_url: { url: imageUrl } },
         ],
@@ -2027,6 +2066,7 @@
         known: {
           name: typeof g.name === "string" ? g.name.trim() : "",
           category: w.categories.includes(g.category) ? g.category : null,
+          gender: w.genders.includes(g.gender) ? g.gender : null,
           description: g.description.trim(),
           tags: Array.isArray(g.tags) ? g.tags : [],
         },
@@ -2480,6 +2520,7 @@
     if (!name) { status("Give it a name first.", "err"); return; }
     draft.name = name;
     draft.category = document.getElementById("fCategory").value;
+    draft.gender = document.getElementById("fGender").value;
     draft.description = document.getElementById("fDescription").value.trim();
     draft.tags = document.getElementById("fTags").value.split(",").map(t => t.trim()).filter(Boolean);
     draft.set = document.getElementById("fSet").value.trim();

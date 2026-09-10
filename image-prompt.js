@@ -115,7 +115,10 @@ window.ImagePrompt = {
     // contact branch returns before the intimate one, so this is the only
     // framing an explicit shot ever gets.
     const POV_INTIMATE_FRAMING = CFG.image.povIntimateFraming;
-    const POV_BODY_PERMISSIVE = CFG.image.povBodyPermissive;
+    // Asserted rather than permitted, and asked for as a moment in a motion.
+    // See CFG.image.povIntimateContact for why permission was not enough.
+    const POV_INTIMATE_CONTACT = CFG.image.povIntimateContact;
+    const POV_INTIMATE_MOTION = CFG.image.povIntimateMotion;
 
     function isIntimateScene(sceneText, staging, nsfw) {
       const userPose = (staging && staging.userPose) || "";
@@ -195,9 +198,14 @@ window.ImagePrompt = {
       return words[String(gender || "").trim()] || "";
     }
 
-    function buildPovModifiers(sceneText, staging, nsfw, userOutfit, contact, viewerBody, viewerGender) {
+    function buildPovModifiers(sceneText, staging, nsfw, userOutfit, contact, viewerBody, viewerGender, viewerDesc) {
       const scene = sceneText || "";
       const parts = [POV_BASE];
+      // Said once, and only where the viewer's body is in the frame at all.
+      // Every branch below that draws the viewer calls this; the branches that
+      // keep the viewer a camera deliberately do not, because a description of
+      // a body the shot does not contain is an invitation to draw one.
+      const selfDesc = () => (viewerDesc ? fillTemplate(CFG.image.povViewerDesc, { desc: viewerDesc }) : "");
       if (contact && viewerBody) {
         // viewerBody already says whose the limb is and where it enters, so
         // "the foreground hand and arm belong to the viewer, one pair only"
@@ -215,15 +223,16 @@ window.ImagePrompt = {
         // of one thing, and the specifics were what it bent the image to
         // satisfy. So there it is told only that the body may be there.
         if (isIntimateScene(scene, staging, nsfw)) {
-          parts.push(POV_BODY_PERMISSIVE, POV_INTIMATE_FRAMING);
+          parts.push(POV_INTIMATE_CONTACT, POV_INTIMATE_FRAMING, POV_INTIMATE_MOTION);
           // Only here. This is the shot where the viewer's body may be drawn
           // at all, so it is the only one where drawing it the wrong sex is
           // possible — and every clause added elsewhere is one the model can
           // render literally for no reason.
           const viewerPhrase = viewerSexPhrase(viewerGender);
           if (viewerPhrase) parts.push(fillTemplate(CFG.image.povViewerSex, { viewer: viewerPhrase }));
+          parts.push(selfDesc());
         } else {
-          parts.push(viewerBody);
+          parts.push(viewerBody, selfDesc());
         }
         // What the viewer is wearing is decided by the tracked outfit, never
         // by the scene text: "naked" in a scene prompt is almost always
@@ -246,10 +255,18 @@ window.ImagePrompt = {
           `${POV_INTIMATE_MODIFIER}, bare chest and hips`,
           `${POV_INTIMATE_MODIFIER}, still dressed`,
         ));
+        // The other intimate branch — contact, but the extractor named no part
+        // of the viewer. The shot is just as explicit and was just as static,
+        // so it gets the motion clause too. Not the contact clause: with no
+        // viewerBody there is no "point the scene describes" to point back at.
+        parts.push(POV_INTIMATE_MOTION, selfDesc());
       } else {
-        parts.push(POV_ARMS_OWNED_MODIFIER);
+        // Arms only. The colouring still applies — a pair of forearms is the
+        // one part of the viewer this shot does draw — but nothing else about
+        // the body is in frame, so only the colouring is offered.
+        parts.push(POV_ARMS_OWNED_MODIFIER, selfDesc());
       }
-      return parts.join(", ");
+      return parts.filter(Boolean).join(", ");
     }
 
     // The prompt is assembled from sources that each describe the scene in their
@@ -441,16 +458,28 @@ window.ImagePrompt = {
     //   age    — a face reads approximately, and drifts
     //   gender — likewise, and it is one word
     //   height — nothing in a picture cropped at mid-thigh distinguishes 152cm
-    //            from 178cm; absolute scale has no visual referent at all
+    //            from 178cm; absolute scale has no visual referent at all.
+    //            Which is also why the number alone was not enough: it has no
+    //            referent for the model either. It travels with its tier phrase.
     function buildChatCharDesc(character) {
       if (!character) return "";
       const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
       const ageDesc = character.age ? `${character.age} year old` : "";
       const a = character.appearance;
+      // The measurement AND the tier phrase. On its own "168 cm tall" is a
+      // number with no visual referent — the model cannot draw a centimetre,
+      // and a figure it cannot draw is one it ignores, which is why height was
+      // the one thing here that never arrived. The words it can draw are
+      // "short and small-framed" and "tall, above average height", so both go:
+      // the number for anything that reads it as data, the phrase for the
+      // model. The average tier carries skipInPrompt and drops out, which is
+      // right — saying "average height" spends prompt on the default.
+      const heightTier = (a && a.height != null) ? tierFor(CFG.appearance.heightTiers, a.height) : null;
       const heightDesc = (a && a.height != null)
         ? fillTemplate(CFG.appearance.heightMeasurementTemplate, { cm: sliderToCm(a.height) })
         : "";
-      return [ageDesc, genderDesc, heightDesc].filter(Boolean).join(", ");
+      const heightPhrase = heightTier && !heightTier.skipInPrompt ? heightTier.phrase : "";
+      return [ageDesc, genderDesc, heightDesc, heightPhrase].filter(Boolean).join(", ");
     }
 
     // ── Body base image & avatar ────────────────────────────────────────────
@@ -787,8 +816,20 @@ window.ImagePrompt = {
       // On an explicit scene the extractor would reliably return pose and mood and
       // drop the act itself, so it is told to report what is happening. Gated on
       // the character's NSFW toggle like every other explicit path in the app.
+      //
+      // Naming the act was not enough on its own. "Kneeling between the
+      // viewer's thighs, mouth against the viewer's cock, looking up" obeys
+      // every instruction above and still describes the moment BEFORE the act:
+      // two parts placed beside each other. The image model has nothing to draw
+      // but what it is told, so it drew exactly that, every time — which is why
+      // these shots all came out poised on the edge of starting.
+      //
+      // So the note now asks for the stage as a physical fact, and rules out
+      // the prepositions that place without joining. "Against" is the whole bug
+      // in one word: it is true of a mouth an inch away and true of one halfway
+      // down, and the model resolves that ambiguity the tamest way it can.
       const actNote = character.nsfw
-        ? " State plainly what the two of them are physically doing to each other, including sexual acts where that is what is happening — do not soften it into mood, atmosphere or euphemism, and do not substitute a pose for the act. In an intimate scene viewerBody must name the viewer's own anatomy that is actually involved, and the frame edge it enters from."
+        ? " State plainly what the two of them are physically doing to each other, including sexual acts where that is what is happening — do not soften it into mood, atmosphere or euphemism, and do not substitute a pose for the act. Say what STAGE the act has reached, as a physical fact: how deep, how far in, how much of it is taken, whose weight is on whom, which surfaces are pressed together. \"Against\", \"at\", \"near\", \"close to\" and \"poised\" only place two parts beside one another — where the text says they are joined, write them joined. Describe the act at the height of it and in motion, never at the moment before it begins. In an intimate scene viewerBody must name the viewer's own anatomy that is actually involved, and the frame edge it enters from."
         : "";
       // When she is wearing garments out of the wardrobe, their photographs go
       // to the image model and the prompt says nothing about them. What the
@@ -935,7 +976,7 @@ window.ImagePrompt = {
     function assembleImagePrompt({
       scenePrompt, charDesc, charOutfit, userOutfit, staging, nsfw,
       explicitDetail, messages, characterName, styleModifiers,
-      contact: contactOverride, name, keepSceneVerbatim, viewerBody, viewerGender, subjectNoun,
+      contact: contactOverride, name, keepSceneVerbatim, viewerBody, viewerGender, viewerDesc, subjectNoun,
       garmentRefs, clothingState,
     }) {
       const contact = contactOverride !== undefined
@@ -949,7 +990,7 @@ window.ImagePrompt = {
         ? scenePrompt
         : stripViewerLimbs(scenePrompt);
       const parts = {
-        pov: buildPovModifiers(scene, staging, nsfw, userOutfit, contact, viewerBody, viewerGender),
+        pov: buildPovModifiers(scene, staging, nsfw, userOutfit, contact, viewerBody, viewerGender, viewerDesc),
         name: name || "",
         charDesc: charDesc || "",
         // Two ways to say what she has on, and only ever one of them.
