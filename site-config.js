@@ -1613,6 +1613,61 @@
       ordinals: ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"],
       // Each clause and how it is worded once something is chosen for it. The
       // wording lives with the field so a new option never needs a code change.
+      // ── What the crop can physically contain ─────────────────────────────
+      // Words were not enough, and the reason is structural: a flat lay in the
+      // reference list IS an instruction to show that garment, and no sentence
+      // outcompetes the presence of the picture itself. Asked for a tight
+      // close-up with a boot photograph attached, the model kept the crop —
+      // the framing rule held — and solved the boot by folding the leg up
+      // beside the head. It had no other move left.
+      //
+      // So the boot stops being sent. The garment is still named as worn, so
+      // she is dressed correctly; there is simply no photograph of it in the
+      // call for the model to find room for.
+      //
+      // Deliberately conservative. A garment is only held back where it is
+      // plainly outside the crop, never where it might legitimately catch the
+      // frame edge — a waistband in a waist-up shot stays, because guessing
+      // wrong here costs a garment that should have been visible, and that is
+      // the worse error of the two.
+      framingRegions: {
+        // Torso, not just head. A tight close-up is a face, but a collar and
+        // shoulders come with it — the shot that started this had the flannel
+        // shirt plainly in it — and holding a top back from a frame that does
+        // show it is precisely the over-reach this map is meant to avoid.
+        closeup: ["head", "torso"],
+        portrait: ["head", "torso"],
+        waist: ["head", "torso", "legs"],
+        "three-quarter": ["head", "torso", "legs"],
+        full: ["head", "torso", "legs", "feet"],
+        low: ["head", "torso", "legs", "feet"],
+        high: ["head", "torso", "legs", "feet"],
+        wide: ["head", "torso", "legs", "feet"],
+      },
+      // Where a garment sits on the body, for framing purposes only. Close to
+      // wardrobe.layers.categoryRegions but not the same map and not shared
+      // with it: that one answers "does this cover that", which is why Shoes
+      // is empty there — shoes cover nothing. Here shoes are the whole point,
+      // so they have a region of their own.
+      //
+      // Accessory is left out on purpose: it is a hat or a bag or a belt, and
+      // there is no way to know which from the category, so it is never held
+      // back.
+      categoryFrameRegions: {
+        Top: ["torso"],
+        Outerwear: ["torso"],
+        Underwear: ["torso", "legs"],
+        Bottom: ["legs"],
+        Dress: ["torso", "legs"],
+        Sleepwear: ["torso", "legs"],
+        Swimwear: ["torso", "legs"],
+        "Full outfit": ["torso", "legs"],
+        Shoes: ["feet"],
+      },
+      // Named in the prompt but not photographed, so the model is told they
+      // are on her rather than left to infer it from silence. {v} is the list.
+      outOfFrameClause: " Also worn but outside this framing: {v} — on the body, out of shot, and nothing is moved, posed or reframed to bring them into view.",
+
       clauses: {
         // "the flat lay photographs", not "the reference images after the
         // first": the list is no longer only the person and their clothes. An
