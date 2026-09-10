@@ -1622,6 +1622,18 @@
       // word like correct, and the whole failure is that it filled a gap with
       // its own assumption. Only the sexes actually present are asserted.
       anatomyGuard: " Every body in this photograph belongs to one of the people described above — there is nobody else in the frame and no other body parts. {sexes}",
+      // The studio builds its prompt from pickers rather than from a scene, so
+      // it never had the chat path's problem of a *described* act being drawn
+      // as an approach to one. It has the same problem for a different reason:
+      // every pose and interaction in the lists is a held position, and typing
+      // "having sex" into the notes box adds an act to a sentence otherwise
+      // made entirely of stillness. The result is the same photograph of two
+      // people arranged next to each other.
+      //
+      // Hung off the same isIntimateScene test as the anatomy guard, which
+      // already reads the notes as well as the pickers — so it lands exactly
+      // where an explicit shot has been asked for, whichever way it was asked.
+      intimateMotion: " The act is under way and at the height of it, not beginning: their bodies are joined where the act joins them, caught mid-motion, with weight and pressure showing where they meet.",
       // One clause per distinct sex present, joined. {who} is a name or a list
       // of names, {sex} the word above.
       anatomySexClause: "{who} has the body and genitals of a {sex}, and no anatomy of any other sex.",
@@ -1876,7 +1888,7 @@
       povViewerSex: "the viewer is {viewer}",
 
       // What the POV clause says about the viewer's own body in an explicit
-      // shot: that it may be there, and nothing more.
+      // shot — where it is, and that it is joined to her rather than near her.
       //
       // The specific version — the extractor naming the part and the frame
       // edge, "the viewer's penis entering from the bottom of the frame" —
@@ -1891,7 +1903,29 @@
       // asserted that a body WAS there without saying which part, so the
       // model had to invent something to satisfy it. Permission is not a
       // requirement: there is nothing here to satisfy, so nothing to invent.
-      povBodyPermissive: "the viewer's own body may enter the frame where the action calls for it",
+      // povBodyPermissive — "the viewer's own body may enter the frame where
+      // the action calls for it" — used to sit here, and the two clauses
+      // below replace it. Permission was the right answer to the stray-limb
+      // problem and the wrong one to this: it was the strongest thing an
+      // explicit shot ever said about the two bodies, and a model given only
+      // permission to put them together resolves that the safe way — adjacent,
+      // not joined. Every explicit shot came out a half-second before anything
+      // happened.
+      //
+      // This asserts the contact without naming a part — "the point the scene
+      // describes" points back at the act rather than restating it, so it does
+      // not reintroduce the second account of one anatomy that the permissive
+      // clause was cut back to avoid. There is nothing here to invent, only
+      // something already named to be believed.
+      povIntimateContact: "their bodies joined at the point the scene describes, in full contact and not merely close",
+      // The other half of the same failure, and the reason it read as a
+      // photograph of a pose. Nothing on the chat path ever said the shot was
+      // a moment in a movement — the studio path has "caught mid-movement" as
+      // a pose, chat had no equivalent at all — so a prompt of static
+      // descriptions got a static image. Weight and pressure are the visible
+      // evidence of motion in a still frame; asking for them is what stops the
+      // two bodies being drawn resting against each other.
+      povIntimateMotion: "caught mid-motion at the height of the act, weight and pressure showing where they meet, flesh giving where it is pressed",
 
       // There was a povEyeLevel table here that turned the tracked userPose
       // into "seen from the eye level of someone standing". It is gone, and

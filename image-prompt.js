@@ -115,7 +115,10 @@ window.ImagePrompt = {
     // contact branch returns before the intimate one, so this is the only
     // framing an explicit shot ever gets.
     const POV_INTIMATE_FRAMING = CFG.image.povIntimateFraming;
-    const POV_BODY_PERMISSIVE = CFG.image.povBodyPermissive;
+    // Asserted rather than permitted, and asked for as a moment in a motion.
+    // See CFG.image.povIntimateContact for why permission was not enough.
+    const POV_INTIMATE_CONTACT = CFG.image.povIntimateContact;
+    const POV_INTIMATE_MOTION = CFG.image.povIntimateMotion;
 
     function isIntimateScene(sceneText, staging, nsfw) {
       const userPose = (staging && staging.userPose) || "";
@@ -215,7 +218,7 @@ window.ImagePrompt = {
         // of one thing, and the specifics were what it bent the image to
         // satisfy. So there it is told only that the body may be there.
         if (isIntimateScene(scene, staging, nsfw)) {
-          parts.push(POV_BODY_PERMISSIVE, POV_INTIMATE_FRAMING);
+          parts.push(POV_INTIMATE_CONTACT, POV_INTIMATE_FRAMING, POV_INTIMATE_MOTION);
           // Only here. This is the shot where the viewer's body may be drawn
           // at all, so it is the only one where drawing it the wrong sex is
           // possible — and every clause added elsewhere is one the model can
@@ -246,6 +249,11 @@ window.ImagePrompt = {
           `${POV_INTIMATE_MODIFIER}, bare chest and hips`,
           `${POV_INTIMATE_MODIFIER}, still dressed`,
         ));
+        // The other intimate branch — contact, but the extractor named no part
+        // of the viewer. The shot is just as explicit and was just as static,
+        // so it gets the motion clause too. Not the contact clause: with no
+        // viewerBody there is no "point the scene describes" to point back at.
+        parts.push(POV_INTIMATE_MOTION);
       } else {
         parts.push(POV_ARMS_OWNED_MODIFIER);
       }
@@ -787,8 +795,20 @@ window.ImagePrompt = {
       // On an explicit scene the extractor would reliably return pose and mood and
       // drop the act itself, so it is told to report what is happening. Gated on
       // the character's NSFW toggle like every other explicit path in the app.
+      //
+      // Naming the act was not enough on its own. "Kneeling between the
+      // viewer's thighs, mouth against the viewer's cock, looking up" obeys
+      // every instruction above and still describes the moment BEFORE the act:
+      // two parts placed beside each other. The image model has nothing to draw
+      // but what it is told, so it drew exactly that, every time — which is why
+      // these shots all came out poised on the edge of starting.
+      //
+      // So the note now asks for the stage as a physical fact, and rules out
+      // the prepositions that place without joining. "Against" is the whole bug
+      // in one word: it is true of a mouth an inch away and true of one halfway
+      // down, and the model resolves that ambiguity the tamest way it can.
       const actNote = character.nsfw
-        ? " State plainly what the two of them are physically doing to each other, including sexual acts where that is what is happening — do not soften it into mood, atmosphere or euphemism, and do not substitute a pose for the act. In an intimate scene viewerBody must name the viewer's own anatomy that is actually involved, and the frame edge it enters from."
+        ? " State plainly what the two of them are physically doing to each other, including sexual acts where that is what is happening — do not soften it into mood, atmosphere or euphemism, and do not substitute a pose for the act. Say what STAGE the act has reached, as a physical fact: how deep, how far in, how much of it is taken, whose weight is on whom, which surfaces are pressed together. \"Against\", \"at\", \"near\", \"close to\" and \"poised\" only place two parts beside one another — where the text says they are joined, write them joined. Describe the act at the height of it and in motion, never at the moment before it begins. In an intimate scene viewerBody must name the viewer's own anatomy that is actually involved, and the frame edge it enters from."
         : "";
       // When she is wearing garments out of the wardrobe, their photographs go
       // to the image model and the prompt says nothing about them. What the

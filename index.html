@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=58"></script>
-  <script src="image-prompt.js?v=28"></script>
+  <script src="site-config.js?v=59"></script>
+  <script src="image-prompt.js?v=29"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -6706,11 +6706,17 @@ function buildStudioPrompt({ subjects, choices }) {
   // has already been told the sex of — which is as wrong on a tame character
   // as an explicit one. Read AFTER the notes are folded in, since "having sex"
   // is typed there as often as it is chosen from a picker.
-  const guard = isIntimateScene([body, extra].join(" "), null, true)
-    ? studioAnatomyGuard(subjects)
-    : "";
+  //
+  // One test, two clauses now. The guard says whose anatomy is in the frame;
+  // the motion clause says the act is happening rather than about to — every
+  // pose and interaction in the pickers is a held position, so an act typed
+  // into the notes arrives in a sentence made entirely of stillness. Neither
+  // clause adds explicit content of its own to a shot that has none.
+  const intimate = isIntimateScene([body, extra].join(" "), null, true);
+  const guard = intimate ? studioAnatomyGuard(subjects) : "";
+  const motion = intimate ? (cfg.intimateMotion || "") : "";
 
-  const text = [body, extra, guard, cfg.styleModifiers].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  const text = [body, extra, guard, motion, cfg.styleModifiers].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
