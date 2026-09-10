@@ -639,6 +639,20 @@ window.ImagePrompt = {
       ].filter(Boolean).join(", ");
     }
 
+    // One expression slot, made rather than uploaded. Anchored to the base
+    // image, so this says what the face is DOING and nothing about who it
+    // belongs to — the reference already carries that, and repeating it is
+    // what turns an edit into a fresh generation.
+    function buildExpressionPrompt({ expression, extra }) {
+      const cfg = ((CFG.image || {}).expressions || {}).generate;
+      if (!cfg) return "";
+      return [
+        cfg.preamble,
+        expression ? fillTemplate(cfg.expressionTemplate, { expression }) : "",
+        cfg.framing, cfg.lighting, extra, cfg.suffix,
+      ].filter(Boolean).join(", ");
+    }
+
     // The change request sent to the image model when regenerating a base image
     // from the face editor. The reference image carries the identity, so this
     // says what the face should now look like rather than re-describing the
@@ -1059,7 +1073,7 @@ window.ImagePrompt = {
       HEIGHT_CM_MIN, HEIGHT_CM_MAX, sliderToCm, cmToSlider,
       appearancePhrasePreview, buildAppearancePrompt, appearanceWords, stripBodyMarks, pickFaceVariation,
       buildFacePrompt, buildFaceEditPrompt, faceFieldPhrase, isFaceUnset, isFaceStructureUnset,
-      buildBodyBasePrompt, buildUploadBasePrompt, buildAvatarPrompt, buildChatCharDesc, appearanceDiffKeys,
+      buildBodyBasePrompt, buildUploadBasePrompt, buildAvatarPrompt, buildExpressionPrompt, buildChatCharDesc, appearanceDiffKeys,
       pickExpressionReference,
       isUserUndressed, povSelfBody, isIntimateScene,
       garmentLayer, garmentRegions, isGarmentCovered, visibleWornGarments,
