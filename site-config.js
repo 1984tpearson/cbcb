@@ -1559,7 +1559,7 @@
       // in words against their name. Less precise about fabric than the solo
       // path, and the only version that reliably puts the right coat on the
       // right person.
-      groupPromptTemplate: "{framing} photograph of {count} people together.{subjects} {garments}{together}{setting}{lighting}{camera}{mood}",
+      groupPromptTemplate: "{framing} photograph of {count} people together.{subjects}{heights} {garments}{together}{setting}{lighting}{camera}{mood}",
       // first, second, third… as far as maxCharacters can reach.
       ordinals: ["first", "second", "third", "fourth", "fifth", "sixth"],
       // Each clause and how it is worded once something is chosen for it. The
@@ -1585,6 +1585,24 @@
         // quietly become the model's invention.
         garmentsGroupRest: " Everyone not listed is dressed as they are in their own reference image.",
         together: " Together they are {v}.",
+        // ── Height, said as a comparison ──────────────────────────────────
+        // Each subject line already carries that person's own height, and in
+        // a group shot that is not enough: three independent measurements are
+        // three numbers with nothing to measure against, and the model draws
+        // its prior, which is three people of the same height. The reference
+        // images cannot settle it either — they are separate crops, so they
+        // carry no shared scale.
+        //
+        // So the difference is stated as a difference. Consecutive pairs down
+        // the sorted order, which is the shortest set of statements that pins
+        // every person against every other, and each one phrased as something
+        // that can actually be drawn: a head taller, half a head, eye to eye.
+        heightCompareIntro: " The people in this photograph are not the same height, and the difference must be clearly visible where they stand together:",
+        heightCompare: " {taller} is {phrase} {shorter}{by}.",
+        // Every subject in the same tier. Worth saying rather than leaving
+        // silent, for the same reason as the garments: told nothing, the model
+        // decides, and a deliberate match reads as an accident.
+        heightCompareAllSame: " Everyone in this photograph is the same height as everyone else.",
         setting: " The setting is {v}.",
         lighting: " Lit by {v}.",
         camera: " Shot on {v}.",
@@ -1613,6 +1631,27 @@
       },
       // {age}, {sex} and {height} are substituted; each drops out when empty.
       subjectDescTemplate: "a {age} year old {sex}{height}",
+      // How a gap in centimetres between two people is said out loud. Matched
+      // on the difference, smallest maxCm first, and the last tier is the
+      // catch-all. The wording is deliberately anatomical rather than metric —
+      // "a full head taller" is a thing the model can compose, "17 cm taller"
+      // is not, and the whole failure being fixed here is that it was only
+      // ever given the second kind.
+      //
+      // The first tier's phrase reads as an equality rather than a comparison,
+      // so it fits the same sentence as the rest: "Ben is the same height as
+      // Cara." Below it the two people are close enough that asserting a
+      // difference would cost more than it buys.
+      // `by` trails the other person's name rather than sitting inside the
+      // comparison, so the sentence stays a sentence: "Cara is clearly taller
+      // than Ben, by about half a head" and not "taller than, by half a head
+      // Ben". It is optional and drops out where there is nothing to add.
+      heightDifferenceTiers: [
+        { maxCm: 4,   phrase: "the same height as", by: "" },
+        { maxCm: 9,   phrase: "a little taller than", by: "" },
+        { maxCm: 20,  phrase: "clearly taller than", by: ", by about half a head" },
+        { maxCm: 999, phrase: "much taller than", by: ", by a full head or more" },
+      ],
       // Appended only when the shot reads as explicit. Deliberately not gated
       // on any character's NSFW toggle: this adds no explicit content of its
       // own, it only stops the model drawing anatomy that belongs to nobody in

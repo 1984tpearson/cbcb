@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=59"></script>
+  <script src="site-config.js?v=60"></script>
   <script src="image-prompt.js?v=29"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -6574,8 +6574,15 @@ function studioCharDesc(character) {
   try {
     const cfg = studioCfg();
     const a = character.appearance;
+    // The measurement and the tier phrase together. A centimetre figure is
+    // not something an image model can draw, which is why height was the one
+    // part of this description that never showed up in the photograph; the
+    // tier phrase is the same fact in words it can act on. The average tier is
+    // marked skipInPrompt and drops out, leaving just the number.
+    const tier = (a && a.height != null) ? tierFor(CFG.appearance.heightTiers, a.height) : null;
     const height = (a && a.height != null)
       ? ", " + fillTemplate(CFG.appearance.heightMeasurementTemplate, { cm: sliderToCm(a.height) })
+        + (tier && !tier.skipInPrompt ? ", " + tier.phrase : "")
       : "";
     const sex = studioSexWord(character);
     const age = character.age || "";
@@ -6585,6 +6592,50 @@ function studioCharDesc(character) {
     if (!sex) return age + " year old" + height;
     return fillTemplate(cfg.subjectDescTemplate, { age, sex, height });
   } catch { return ""; }
+}
+
+// Height, stated as a comparison between the people in the frame.
+//
+// Each subject line already says how tall that person is, and in a group shot
+// that does nothing: three absolute measurements are three numbers with
+// nothing to measure against, and the model falls back on its prior, which is
+// everybody the same height. The reference images do not settle it either —
+// they are separate crops, so there is no shared scale in them.
+//
+// Sorted tallest first, then consecutive pairs. Consecutive is the point: it
+// is the shortest set of statements that still orders everybody, and every
+// statement is between two adjacent people, which is where a difference is
+// hardest for the model to average away.
+function studioHeightNotes(subjects) {
+  const cfg = studioCfg();
+  const c = cfg.clauses;
+  const known = subjects
+    .map((s, i) => ({ name: studioSubjectName(s, i), a: s.character.appearance }))
+    .filter(x => x.a && x.a.height != null)
+    .map(x => ({ name: x.name, cm: sliderToCm(x.a.height) }));
+  // One person's height is not a comparison, and nobody's is not a shot.
+  if (known.length < 2) return "";
+  known.sort((x, y) => y.cm - x.cm);
+
+  const tiers = cfg.heightDifferenceTiers || [];
+  const tierForGap = (gap) => tiers.find(t => gap <= t.maxCm) || tiers[tiers.length - 1] || null;
+
+  const lines = [];
+  let anyDifferent = false;
+  for (let i = 0; i + 1 < known.length; i++) {
+    const taller = known[i], shorter = known[i + 1];
+    const gap = taller.cm - shorter.cm;
+    // The first tier is the "same height" one, so a pair that lands in it is
+    // still said out loud — it just does not make the shot a mixed-height one.
+    if (tiers.length && gap > tiers[0].maxCm) anyDifferent = true;
+    const tier = tierForGap(gap);
+    lines.push(fillTemplate(c.heightCompare, {
+      taller: taller.name, shorter: shorter.name,
+      phrase: (tier && tier.phrase) || "", by: (tier && tier.by) || "",
+    }));
+  }
+  if (!anyDifferent) return c.heightCompareAllSame || "";
+  return (c.heightCompareIntro || "") + lines.join("");
 }
 
 // The sexes actually present, asserted, for a shot the model would otherwise
@@ -6690,6 +6741,7 @@ function buildStudioPrompt({ subjects, choices }) {
       ...shared,
       count: subjects.length,
       subjects: subjectLines,
+      heights: studioHeightNotes(subjects),
       garments,
       together: fill(c.together, studioChoiceText(cfg.interactions, choices.together)),
     });

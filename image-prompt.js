@@ -449,16 +449,28 @@ window.ImagePrompt = {
     //   age    — a face reads approximately, and drifts
     //   gender — likewise, and it is one word
     //   height — nothing in a picture cropped at mid-thigh distinguishes 152cm
-    //            from 178cm; absolute scale has no visual referent at all
+    //            from 178cm; absolute scale has no visual referent at all.
+    //            Which is also why the number alone was not enough: it has no
+    //            referent for the model either. It travels with its tier phrase.
     function buildChatCharDesc(character) {
       if (!character) return "";
       const genderDesc = character.gender === "Custom" ? (character.customGender || "") : (character.gender || "");
       const ageDesc = character.age ? `${character.age} year old` : "";
       const a = character.appearance;
+      // The measurement AND the tier phrase. On its own "168 cm tall" is a
+      // number with no visual referent — the model cannot draw a centimetre,
+      // and a figure it cannot draw is one it ignores, which is why height was
+      // the one thing here that never arrived. The words it can draw are
+      // "short and small-framed" and "tall, above average height", so both go:
+      // the number for anything that reads it as data, the phrase for the
+      // model. The average tier carries skipInPrompt and drops out, which is
+      // right — saying "average height" spends prompt on the default.
+      const heightTier = (a && a.height != null) ? tierFor(CFG.appearance.heightTiers, a.height) : null;
       const heightDesc = (a && a.height != null)
         ? fillTemplate(CFG.appearance.heightMeasurementTemplate, { cm: sliderToCm(a.height) })
         : "";
-      return [ageDesc, genderDesc, heightDesc].filter(Boolean).join(", ");
+      const heightPhrase = heightTier && !heightTier.skipInPrompt ? heightTier.phrase : "";
+      return [ageDesc, genderDesc, heightDesc, heightPhrase].filter(Boolean).join(", ");
     }
 
     // ── Body base image & avatar ────────────────────────────────────────────
