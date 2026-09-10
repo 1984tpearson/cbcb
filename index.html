@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=69"></script>
+  <script src="site-config.js?v=70"></script>
   <script src="image-prompt.js?v=32"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -733,6 +733,28 @@ const intentionSteps = (intention) =>
 // never there) and the goal itself is what is being worked on.
 const activeStep = (intention) => intentionSteps(intention).find(s => !s.done) || null;
 
+// Turns whatever a model answered with into a ladder. Shared by the two places
+// that create intentions — the scenario setup and the generator — because a
+// scenario-seeded goal used to arrive with no steps at all and was judged
+// against the goal itself from the first turn, which is the opposite of working
+// up to something.
+//
+// A model that answers with bare strings instead of objects is accepted rather
+// than dropped, and the ladder is left in the order given: the rungs are meant
+// to escalate, and reordering them by nerve would put a bold character's
+// hardest step first.
+function normaliseIntentionSteps(raw, cfg) {
+  return (Array.isArray(raw) ? raw : [])
+    .map(st => (typeof st === "string" ? { text: st } : st))
+    .filter(st => st && typeof st.text === "string" && st.text.trim())
+    .slice(0, (cfg && cfg.maxSteps) ?? 6)
+    .map(st => ({
+      text: st.text.trim().slice(0, 120),
+      nerve: Math.max(0, Math.min(100, Math.round(Number(st.nerve)) || ((cfg && cfg.defaultStepNerve) ?? 15))),
+      done: false,
+    }));
+}
+
 // The climb that currently applies: the active step's, or the goal's own once
 // there is no step left. Everything downstream — the stage wording, the gate,
 // the do-it-now directive — reads this rather than the goal's threshold, so a
@@ -942,6 +964,39 @@ function intentionJudgeList(intentions) {
   }).join("\n");
 }
 
+// A verdict that ENDS something has to be able to point at the words. The judge
+// is asked for a verbatim quote beside every such verdict — a step going moot, a
+// step or a goal being done — and a quote that is not actually in what the judge
+// was shown is not evidence, so the verdict is dropped.
+//
+// This is the part the prompt could not do on its own. Every version of
+// advancePrompt has said to judge what happened rather than where things are
+// heading, and a charged scene still walked a character up a ladder she never
+// climbed: undressing and a sex act both ticked off in a conversation where
+// nobody had taken off a shoe. The one-step-per-turn cap did not save it either
+// — it limits the rate a ladder collapses, not the total, and a scene that reads
+// as inevitable supplies as many turns as it needs. Prose asking for evidence is
+// advice; prose asking for a quote the code then looks up is a check.
+function normaliseQuote(s) {
+  return String(s || "").toLowerCase()
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/\u2026/g, "...")
+    .replace(/[*_"'`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Fragments, so a judge quoting across a cut — "she leans in ... and kisses him"
+// — is held to both halves rather than to neither. A fragment under 8 characters
+// is not evidence of anything, and a quote made only of those does not count.
+function quoteIsIn(quote, haystack) {
+  const hay = normaliseQuote(haystack);
+  if (!hay) return false;
+  const parts = normaliseQuote(quote).split("...").map(x => x.trim()).filter(x => x.length >= 8);
+  return parts.length > 0 && parts.every(x => hay.includes(x));
+}
+
 // Applies the judge's verdicts. Pure, and separate from the call that produced
 // them, because the phase rules here are the whole feature: which climb a delta
 // lands on, when a step is ticked off without being done, and what may end an
@@ -949,7 +1004,13 @@ function intentionJudgeList(intentions) {
 // only what happened, and this decides what that completes.
 // `all` is the newest list (the panel may have edited it mid-flight); `judged`
 // is the list the judge was shown, so verdicts are matched back by id.
-function applyIntentionVerdicts(all, judged, updates, cfg) {
+function applyIntentionVerdicts(all, judged, updates, cfg, evidence) {
+  // What may be quoted from. `done` and `goalDone` claim something HAPPENED, so
+  // only the conversation counts; `moot` may also rest on the situation, which
+  // is the whole reason it exists — a step can be satisfied by where things
+  // already stand, long before the excerpt begins.
+  const said = (evidence && evidence.recent) || "";
+  const standing = ((evidence && evidence.scene) || "") + "\n" + said;
   const maxDelta = cfg.maxDeltaPerTurn || 20;
   const out = [...all];
   let changed = false;
@@ -963,7 +1024,7 @@ function applyIntentionVerdicts(all, judged, updates, cfg) {
     const status = ["active", "abandoned"].includes(u.status) ? u.status : (current.status || "active");
     const progress = Math.max(0, Math.min(100, (Number(current.progress) || 0) + delta));
     const step = activeStep(current);
-    const done = u.done === true;
+    const done = u.done === true && quoteIsIn(u.doneBecause, said);
 
     // Steps the situation has settled — done by someone else, or made pointless
     // by what has happened. They are ticked off without her doing them, which
@@ -977,7 +1038,7 @@ function applyIntentionVerdicts(all, judged, updates, cfg) {
     // is genuinely moot the next turn can say so again — a real one survives
     // being asked twice, an over-read one usually does not.
     const stepList = intentionSteps(current);
-    const mootIdx = (Array.isArray(u.moot) ? u.moot : [])
+    const mootIdx = (quoteIsIn(u.mootBecause, standing) ? (Array.isArray(u.moot) ? u.moot : []) : [])
       .map(Number).filter(n => Number.isInteger(n) && n >= 0 && n < stepList.length);
     const currentIdx = step ? stepList.indexOf(step) : -1;
     const pick = (step && (done || mootIdx.includes(currentIdx)))
@@ -1001,7 +1062,7 @@ function applyIntentionVerdicts(all, judged, updates, cfg) {
     // it. So the steps have to be settled first, one turn at a time, by the
     // rule above. Being fed the cake still works: whatever settled the steps
     // settles them, and the goal lands on the turn after.
-    if (u.goalDone === true && !activeStep(next)) {
+    if (u.goalDone === true && quoteIsIn(u.goalBecause, said) && !activeStep(next)) {
       out[idx] = { ...next, status: "achieved" };
       changed = true;
       continue;
@@ -5849,9 +5910,9 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       // from the opening and one formed six turns later are steered alike.
       const intentionTone = currentChar.nsfw ? (intentCfg.nsfwNote || "") : (intentCfg.sfwNote || "");
       const intentionAsk = wantIntentions
-        ? `\n- intentions: up to ${intentCfg.maxActive} things ${currentChar.name} privately wants out of THIS situation and would work toward without saying so. Concrete and achievable in a conversation, not moods. Each needs a goal (second person, under 15 words) and nerve 0-100 for how much courage it takes her. An empty array is fine if the scenario sets nothing up.${intentionTone ? ` ${intentionTone}` : ""}`
+        ? `\n- intentions: up to ${intentCfg.maxActive} things ${currentChar.name} privately wants out of THIS situation and would work toward without saying so. Concrete and achievable in a conversation, not moods. Each needs a goal (second person, under 15 words), nerve 0-100 for how much courage it takes her, and steps: an ordered ladder of ${Math.min(3, intentCfg.maxSteps ?? 6)}-${intentCfg.maxSteps ?? 6} concrete things that have to happen on the way there, each a short second-person phrase with its own nerve 0-100, easiest first. Every step must be something an onlooker could see happen — not a feeling, a mood, or "build trust". An empty array is fine if the scenario sets nothing up.${intentionTone ? ` ${intentionTone}` : ""}`
         : "";
-      const intentionField = wantIntentions ? `, "intentions": [{"goal": "...", "nerve": 40}]` : "";
+      const intentionField = wantIntentions ? `, "intentions": [{"goal": "...", "nerve": 40, "steps": [{"text": "...", "nerve": 10}]}]` : "";
       // Her own clothes, offered by number so the scenario can dress her out
       // of them rather than inventing an outfit beside a closet full of
       // photographed garments. Same numbering the tracker uses.
@@ -5961,6 +6022,7 @@ No other text.` }]
               id: `int_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
               goal: it.goal.trim(),
               nerve: Math.max(0, Math.min(100, Number(it.nerve) || 40)),
+              steps: normaliseIntentionSteps(it.steps, intentCfg),
               progress: 0,
               status: "active",
               source: "scenario",
@@ -6357,7 +6419,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         const updates = parseJsonReply(raw);
         if (Array.isArray(updates)) {
           commitIfCurrent(epoch, prev => {
-            const all = applyIntentionVerdicts(prev.intentions || [], existing, updates, cfg);
+            const all = applyIntentionVerdicts(prev.intentions || [], existing, updates, cfg, { scene, recent });
             return all ? { ...prev, intentions: all } : prev;
           });
         }
@@ -6395,7 +6457,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
           recent,
           existing: live.map(i => i.goal).join("; ") || "none",
           max: room,
-          maxSteps: cfg.maxSteps ?? 4,
+          maxSteps: cfg.maxSteps ?? 6,
         }) }] });
       const parsed = parseJsonReply(raw);
       if (!Array.isArray(parsed) || parsed.length === 0) return;
@@ -6409,18 +6471,10 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
           progress: 0,
           status: "active",
           source: "auto",
-          // Steps are optional and usually absent — most goals need no
-          // groundwork, and the prompt says so. A model that answers with bare
-          // strings instead of objects is accepted rather than dropped.
-          steps: (Array.isArray(p.steps) ? p.steps : [])
-            .map(st => (typeof st === "string" ? { text: st } : st))
-            .filter(st => st && typeof st.text === "string" && st.text.trim())
-            .slice(0, cfg.maxSteps ?? 4)
-            .map(st => ({
-              text: st.text.trim().slice(0, 120),
-              nerve: Math.max(0, Math.min(100, Math.round(Number(st.nerve)) || (cfg.defaultStepNerve ?? 15))),
-              done: false,
-            })),
+          // A ladder, not a single leap: the prompt asks for one, and a goal
+          // that arrives without steps is judged against the goal itself from
+          // the first turn.
+          steps: normaliseIntentionSteps(p.steps, cfg),
         }));
       if (fresh.length === 0) return;
       commitIfCurrent(epoch, prev => {
