@@ -7377,7 +7377,7 @@ const studioGarmentText = (garments, sep) =>
 // Clauses whose value is empty drop out whole, so an unset lighting leaves no
 // trace rather than "Lit by ." — the one failure mode of a template with holes
 // in it, and the model renders an empty clause as literally as a full one.
-function buildStudioPrompt({ subjects, choices }) {
+function buildStudioPrompt({ subjects, choices, madeExpressions }) {
   const cfg = studioCfg();
   const c = cfg.clauses;
   const fill = (tpl, v) => (v ? tpl.replace("{v}", v) : "");
@@ -7475,8 +7475,16 @@ function buildStudioPrompt({ subjects, choices }) {
   // Only when a face photograph is actually in the list. A clause describing a
   // reference that is not there is one the model can still act on, and what it
   // does with it is invent a close-up.
+  // Gated on the picture existing, not on one having been asked for. A chosen
+  // expression whose photograph has not been made yet — or whose generation
+  // failed — would otherwise put this clause in front of a reference list that
+  // does not contain it, and what the model does with that is invent a
+  // close-up.
   const withExpressions = subjects
-    .map((sub, i) => (studioExpressionRef(sub, choices) ? studioSubjectName(sub, i) : null))
+    .map((sub, i) => {
+      const plan = studioExpressionPlan(sub, choices, madeExpressions);
+      return plan && plan.url ? studioSubjectName(sub, i) : null;
+    })
     .filter(Boolean);
   const expressionNote = withExpressions.length
     ? fillTemplate(c.expressionRef, { names: withExpressions.join(" and ") })
@@ -7493,6 +7501,35 @@ function buildStudioPrompt({ subjects, choices }) {
 
   const text = [body, framingRule, extra, expressionNote, guard, motion, cfg.styleModifiers].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+// What face this subject's shot calls for, and whether the picture exists yet.
+//
+// Returns null when the shot wants no particular expression, otherwise
+// { slot, url } — url null meaning "chosen, but nobody has a photograph of it",
+// which is the case the generator fills in at shot time. Kept as a plan rather
+// than a URL because the reference budget has to count a face that is about to
+// be made, not only one already sitting in a slot.
+function studioExpressionPlan(subject, choices, made) {
+  const character = subject.character || {};
+  const photos = character.expressionPhotos || {};
+  const slots = ((CFG.image || {}).expressions || {}).slots || [];
+  const cached = (key) => (made || {})[`${subject.charId}:${key}`] || null;
+
+  if (subject.expression) {
+    const slot = slots.find(sl => sl.key === subject.expression);
+    if (!slot) return null;
+    return { slot, url: expressionUrl(photos[slot.key]) || cached(slot.key) || null };
+  }
+  // Nothing chosen: fall back to reading the pose and the mood, which is the
+  // only text a studio shot has. It rarely says anything — "caught laughing"
+  // is the one option that does — which is why the picker exists rather than
+  // this being the whole mechanism. Only ever matches a slot already filled:
+  // an expression nobody asked for is not worth generating.
+  const url = studioExpressionRef(subject, choices);
+  if (!url) return null;
+  const slot = slots.find(sl => expressionUrl(photos[sl.key]) === url) || null;
+  return slot ? { slot, url } : null;
 }
 
 function studioExpressionRef(subject, choices) {
@@ -7523,12 +7560,20 @@ function filledExpressionSlots(character) {
 // no clause counts positions any more: garments are named as the flat lays and
 // faces as close photographs, so a picture can be inserted here without
 // renumbering anything.
-function studioReferenceImages(subjects, choices) {
+function studioReferenceImages(subjects, choices, made) {
   return [
     ...subjects.map(s => s.character.referenceImage),
-    ...subjects.map(s => studioExpressionRef(s, choices)),
+    ...subjects.map(s => { const p = studioExpressionPlan(s, choices, made); return p && p.url; }),
     ...subjects.flatMap(s => s.garments.map(g => g.image)),
   ].filter(Boolean);
+}
+
+// The same list, but counting a chosen expression whose picture does not exist
+// yet. The budget has to refuse a garment that would not fit once the face is
+// made, not discover it afterwards.
+function studioPlannedRefCount(subjects, choices, made) {
+  return studioReferenceImages(subjects, choices, made).length
+    + subjects.filter(s => { const p = studioExpressionPlan(s, choices, made); return p && !p.url; }).length;
 }
 
 // One row of chips plus a Custom chip that opens a text box. "None" is a real
@@ -7566,7 +7611,13 @@ function StudioSubjectCard({ subject, index, count, library, onChange, onRemove,
   const [capNote, setCapNote] = useState("");
   const c = subject.character;
   const garments = library ? closetGarments({ closet: subject.closet }, library).filter(g => g.image) : [];
-  const expressionChoices = filledExpressionSlots(c);
+  // Every slot, not only the ones with a photograph in them. An empty one is
+  // made from the base image when the shot is taken — see takeExpressionPhotos
+  // — so hiding it was hiding the only route a generated face ever had to an
+  // expression.
+  const allSlots = ((CFG.image || {}).expressions || {}).slots || [];
+  const readySlots = new Set(filledExpressionSlots(c).map(sl => sl.key));
+  const expressionChoices = c.referenceImage ? allSlots : filledExpressionSlots(c);
 
   // Grouped by category, the same as the picker. A row of eleven thumbnails is
   // a row you count rather than read; under headings it says what they are
@@ -7658,17 +7709,23 @@ function StudioSubjectCard({ subject, index, count, library, onChange, onRemove,
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
             {expressionChoices.map(sl => {
               const on = subject.expression === sl.key;
+              const ready = readySlots.has(sl.key);
               return (
-                <button key={sl.key} title={sl.hint || sl.label}
+                <button key={sl.key}
+                  title={(sl.hint || sl.label) + (ready ? "" : " — no photo for this one, so it is made from the base image when you take the shot")}
                   onClick={() => onChange({ ...subject, expression: on ? "" : sl.key })}
-                  style={on ? S.genderBtnOn : S.genderBtnOff}>{sl.label}</button>
+                  style={on ? S.genderBtnOn : S.genderBtnOff}>
+                  {sl.label}{ready ? "" : " ✦"}
+                </button>
               );
             })}
           </div>
           <p style={{ fontSize: 11, color: "var(--text4)", marginTop: 4 }}>
             Sends that photo with the base image, so the face is theirs rather
             than one the generator made up. It spends one of the shot's
-            reference images, the same as a garment or another person.
+            reference images, the same as a garment or another person. A ✦ one
+            has no photo yet and is made from the base image when you take the
+            shot, then kept for the rest of the session.
           </p>
         </div>
       )}
@@ -7707,6 +7764,12 @@ function PhotoStudio({ characters, userCharacter, onBack }) {
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [shots, setShots] = useState([]);
+  // Expression photographs made for this session, keyed charId:slot. Not saved
+  // back onto the character or the profile: the studio has no write path to
+  // either, and one made to take a photograph should not quietly become part
+  // of who they are. Kept for the session so a second shot of the same face
+  // does not pay for it twice.
+  const [madeExpressions, setMadeExpressions] = useState({});
 
   useEffect(() => {
     let live = true;
@@ -7732,10 +7795,10 @@ function PhotoStudio({ characters, userCharacter, onBack }) {
   // Counted from the list that is actually sent rather than from a formula
   // beside it: expression photographs spend the budget too, and a second
   // expression of the same count is a second thing to keep in step.
-  const refCount = studioReferenceImages(resolved, choices).length;
+  const refCount = studioPlannedRefCount(resolved, choices, madeExpressions);
   const budgetLeft = MAX_REFERENCE_IMAGES - refCount;
   const missingBase = resolved.filter(s => !s.character.referenceImage);
-  const prompt = resolved.length ? buildStudioPrompt({ subjects: resolved, choices }) : "";
+  const prompt = resolved.length ? buildStudioPrompt({ subjects: resolved, choices, madeExpressions }) : "";
 
   const addSubject = (id) => {
     // A headcount used to stop at three, on the grounds that past that the
@@ -7763,18 +7826,58 @@ function PhotoStudio({ characters, userCharacter, onBack }) {
       return;
     }
     setBusy(true); setError("");
+
+    // Any face the shot calls for that nobody has a photograph of gets made
+    // now, from that person's base image. This is what lets an expression be
+    // asked for at all on a generated face — before it, only an uploaded photo
+    // could fill a slot, so the picker had nothing to offer.
+    //
+    // Made ones go into the session cache rather than onto the character: the
+    // studio has no write path to a character or to the user's profile, and a
+    // face made to take one photograph should not quietly become part of who
+    // they are.
+    let made = madeExpressions;
+    const toMake = resolved
+      .map(sub => ({ sub, plan: studioExpressionPlan(sub, choices, made) }))
+      .filter(x => x.plan && !x.plan.url && x.sub.character.referenceImage);
+    if (toMake.length) {
+      setStatus(toMake.length > 1
+        ? "Making " + toMake.length + " expressions first…"
+        : "Making the " + toMake[0].plan.slot.label.toLowerCase() + " first…");
+      for (const { sub, plan } of toMake) {
+        try {
+          const url = await generateExpressionPhoto({
+            base: sub.character.referenceImage, slot: plan.slot, imageModel: cfg.model,
+          });
+          made = { ...made, [`${sub.charId}:${plan.slot.key}`]: url };
+        } catch (e) {
+          // Not fatal: the shot is still worth taking without it, and saying
+          // so beats refusing a photograph over a face it can do without.
+          console.warn("Expression generation failed:", e.message);
+          setError("Couldn't make the " + plan.slot.label.toLowerCase() + " for " +
+            (sub.character.name || "one of them") + " (" + e.message + ") — taking the shot without it.");
+        }
+      }
+      setMadeExpressions(made);
+    }
+
     setStatus(resolved.length > 1
       ? "Taking the photograph of " + resolved.length + " people… this takes a minute."
       : "Taking the photograph… this takes a minute.");
+    // Rebuilt now that the made faces exist: the prompt on screen was written
+    // before them, so its expression clause was correctly silent about
+    // pictures that were not there yet.
+    const shotPrompt = buildStudioPrompt({ subjects: resolved, choices, madeExpressions: made });
+
     try {
       const url = await generateImageWiro({
-        prompt,
+        prompt: shotPrompt,
         model: cfg.model,
         resolution: cfg.resolution,
         aspectRatio: aspect,
         // Wiro takes a comma-joined list here — people first, garments after,
         // which is the order the prompt refers to them in.
-        initImage: studioReferenceImages(resolved, choices).join(","),
+        initImage: studioReferenceImages(resolved, choices, made).join(","),
         // Worth recovering: a studio shot is one you set going and then put the
         // phone down on. Only one gallery can be named for a recovery, so it is
         // the first REAL person in the shot — the user is not a character and
@@ -7782,7 +7885,7 @@ function PhotoStudio({ characters, userCharacter, onBack }) {
         // nowhere rather than under an id nothing can browse.
         track: trackable ? { characterId: trackable.charId, label: "Photo studio" } : undefined,
       });
-      setShots(s => [{ url, prompt, names: resolved.map((x, i) => studioSubjectName(x, i)) }, ...s]);
+      setShots(s => [{ url, prompt: shotPrompt, names: resolved.map((x, i) => studioSubjectName(x, i)) }, ...s]);
       setStatus("");
       // Into the gallery of everybody in it. A group shot filed under one
       // person is a picture the others can never find, and the gallery is
@@ -7863,7 +7966,14 @@ function PhotoStudio({ characters, userCharacter, onBack }) {
         {resolved.map((s, i) => (
           <StudioSubjectCard key={s.charId} subject={s} index={i} count={resolved.length}
             library={library} budgetLeft={budgetLeft}
-            onChange={next => updateSubject(i, { charId: next.charId, closet: next.closet, pose: next.pose })}
+            /* Every field of a subject that is state must be named here. The
+               card is handed a RESOLVED subject — character and garments
+               spliced in for rendering — and this strips those back off before
+               they are stored. It also silently drops anything not listed,
+               which is how the expression chips came to render, respond to a
+               click and never change: the write-back threw the choice away
+               every time. */
+            onChange={next => updateSubject(i, { charId: next.charId, closet: next.closet, pose: next.pose, expression: next.expression })}
             onRemove={() => removeSubject(i)} />
         ))}
 
