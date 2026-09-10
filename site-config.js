@@ -1453,7 +1453,14 @@
         // they win: the act stops happening and she stands there modelling.
         // So this says outright that the clothes may be hidden and that the
         // action outranks them.
-        refClause: "wearing the clothes in the reference images, which may be partly hidden, pushed aside or out of frame — what she is doing matters more than showing them, and the pose must never be changed to make them visible",
+        // "the flat lay photographs", not "the reference images": the
+        // reference list is no longer only her and her clothes. An expression
+        // photograph is a real picture of a dressed person, and under the old
+        // wording the jumper she happened to have on in it was one of "the
+        // clothes in the reference images" — so it got put on her, mixed in
+        // with the garments actually being tracked. Naming the flat lays is
+        // what tells the two kinds of picture apart.
+        refClause: "wearing the clothes shown in the flat lay garment photographs — those garments only, never anything worn by a person in another reference image — which may be partly hidden, pushed aside or out of frame — what she is doing matters more than showing them, and the pose must never be changed to make them visible",
       },
 
       // What a generation costs, per endpoint family. Dezgo prices by family and
