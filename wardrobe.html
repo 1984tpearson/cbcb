@@ -538,6 +538,13 @@
   }
 
   function wardrobeCfg() { return CFG.wardrobe || DEFAULTS.wardrobe; }
+  // How many garments the fitting room can put on at once: the one reference
+  // budget every screen spends, less the one the person herself costs. See the
+  // note in site-config under image.maxReferenceImages.
+  function fittingBudget() {
+    const img = CFG.image || DEFAULTS.image || {};
+    return Math.max(1, (img.maxReferenceImages || 10) - 1);
+  }
 
   function fillStaticSelects() {
     const w = wardrobeCfg();
@@ -1448,7 +1455,7 @@
   function renderGarmentPicker() {
     const withImages = items.filter(i => i.image);
     const box = document.getElementById("fitGarments");
-    const max = wardrobeCfg().fitting.maxGarments;
+    const max = fittingBudget();
 
     // Config order, so the blocks appear in the same sequence every time
     // rather than shuffling as the wardrobe fills up. Only categories that
@@ -1555,7 +1562,7 @@
       withImages.forEach(i => chosenGarments.delete(i.id));
       fitStatus("", "");
     } else {
-      const max = wardrobeCfg().fitting.maxGarments;
+      const max = fittingBudget();
       let added = 0, skipped = 0;
       for (const it of withImages) {
         if (chosenGarments.has(it.id)) continue;
@@ -1576,7 +1583,7 @@
   window.toggleGarment = function (id) {
     if (chosenGarments.has(id)) chosenGarments.delete(id);
     else {
-      const max = wardrobeCfg().fitting.maxGarments;
+      const max = fittingBudget();
       if (chosenGarments.size >= max) {
         // A cap rather than silently dropping the extra: every garment is
         // another reference image the model has to stay faithful to while also

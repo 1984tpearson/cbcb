@@ -550,10 +550,14 @@ const resolveWornGarments = async (character) => {
     const worn = closetGarments({ closet: ids }, library).filter(g => g.image);
     // Worn, then visible. A bra under a jumper stays on her and stays in what
     // the chat model is told; it is only its photograph that is held back,
-    // because sending it is an instruction to show it. The cap counts what is
-    // actually sent, so hidden underwear no longer uses up one of the five.
-    return visibleWornGarments(worn, character.wornState)
-      .slice(0, (CFG.wardrobe.chat && CFG.wardrobe.chat.maxWorn) || 5);
+    // because sending it is an instruction to show it — so hidden underwear
+    // costs nothing out of the budget.
+    //
+    // No cap here any more: the reference budget is spent at the point the
+    // list is built, where the base image and any expression photograph are
+    // also known, and garments are last in that list so they are what gives
+    // way rather than her own face.
+    return visibleWornGarments(worn, character.wornState);
   } catch (e) {
     console.warn("Wardrobe unavailable, generating without garments:", e.message);
     return [];
@@ -1484,10 +1488,11 @@ async function persistUploadedPhoto(dataUrl) {
   return null;
 }
 
-// How many images may be handed to one generation. Wiro caps a request at 15
-// including references, and past a handful of photographs the extra ones stop
-// adding information about the face and start averaging it away.
-const MAX_REFERENCE_IMAGES = 6;
+// How many images may be handed to one generation, counting everything: her
+// base image, an expression photograph,every garment, every person in a group
+// shot. One budget rather than a cap per kind of picture — see the note in
+// site-config under image.maxReferenceImages.
+const MAX_REFERENCE_IMAGES = (CFG.image && CFG.image.maxReferenceImages) || 10;
 
 // The reference list for a generation: the anchor image first where there is
 // one, then the photographs, deduped and capped. Comma-joined because that is
@@ -3426,7 +3431,9 @@ function CharacterPersonalityPanel({ character, onSave, onClose, model, settings
             The clothes {character.name} owns, picked from the wardrobe. Tap one to put it on: worn garments are outlined, their photographs are sent to the image model so it draws those exact clothes, and their names go into the box above so she knows what she has on.
           </p>
           <ClosetStrip closet={closet} worn={worn} wornState={character.wornState}
-            maxWorn={(CFG.wardrobe.chat && CFG.wardrobe.chat.maxWorn) || 5}
+            // Her base image is the one reference always spent, so what is
+            // left for clothes is the budget less it.
+            maxWorn={MAX_REFERENCE_IMAGES - 1}
             onRemove={id => { setCloset(c => c.filter(x => x !== id)); setWorn(w => w.filter(x => x !== id)); }}
             onToggleWorn={(ids, names) => { setWorn(ids); setCharOutfit(names.join(", ")); }} />
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
@@ -6437,7 +6444,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         // one, sits with the base image rather than after the flat lays: both
         // are pictures of her, and the prompt's clause about clothing speaks
         // of "the reference images" without counting them.
-        initImage: [character.referenceImage, pickExpressionReference(character.expressionPhotos, customImgPrompt), ...worn.map(g => g.image)].filter(Boolean).join(","),
+        initImage: joinReferenceImages([character.referenceImage, pickExpressionReference(character.expressionPhotos, customImgPrompt), ...worn.map(g => g.image)]),
         // Chat images are the ones worth recovering: they are the ones you set
         // going and then put the phone down.
         track: { characterId: character.id, label: customImgPrompt },
@@ -6559,7 +6566,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         // See the custom-prompt path above for why the expression photograph
         // goes here. Matched against the extracted scene, which is where the
         // expression is actually named.
-        initImage: [character.referenceImage, pickExpressionReference(character.expressionPhotos, extracted.scene), ...worn.map(g => g.image)].filter(Boolean).join(","),
+        initImage: joinReferenceImages([character.referenceImage, pickExpressionReference(character.expressionPhotos, extracted.scene), ...worn.map(g => g.image)]),
         track: { characterId: character.id, label: prompt },
       });
       setMessages(m => [...m, { role: "image", content: url, prompt }]);
@@ -7356,15 +7363,12 @@ function StudioSubjectCard({ subject, index, count, library, onChange, onRemove,
   })();
 
   const choose = (ids) => {
-    if (ids.length > cfg.maxGarments) {
-      // A cap rather than silently dropping the extra: every garment is another
-      // reference image the model has to stay faithful to while also composing
-      // a person, and past a handful it stops managing either.
-      setCapNote("That is as many as one person can wear at once (" + cfg.maxGarments + ").");
-      return;
-    }
+    // No per-person garment cap: one photograph spends one budget, and whether
+    // it goes on a fifth garment for her or a third person is the
+    // photographer's business. Only the budget itself refuses, and only when
+    // this is adding rather than taking off.
     if (ids.length > subject.closet.length && budgetLeft <= 0) {
-      setCapNote("That is the most reference images one photograph can hold (" + cfg.maxReferenceImages + ").");
+      setCapNote("That is the most reference images one photograph can hold (" + MAX_REFERENCE_IMAGES + ").");
       return;
     }
     setCapNote("");
@@ -7400,7 +7404,8 @@ function StudioSubjectCard({ subject, index, count, library, onChange, onRemove,
       <span style={S.label}>Wearing</span>
       <p style={{ fontSize: 12, color: "var(--text3)", margin: "6px 0 8px" }}>
         {garments.length
-          ? garments.length + " of " + cfg.maxGarments + " chosen."
+          ? garments.length + (garments.length === 1 ? " garment" : " garments") + " chosen"
+            + (budgetLeft > 0 ? ", " + budgetLeft + " left in the shot's budget." : " — the shot's budget is spent.")
           : "Nothing chosen — dressed as they are in their base image."}
       </p>
       {library === null && <p style={{ fontSize: 12, color: "var(--text3)" }}>Loading the wardrobe…</p>}
@@ -7478,17 +7483,17 @@ function PhotoStudio({ characters, userCharacter, onBack }) {
 
   const inShot = new Set(resolved.map(s => s.charId));
   const refCount = resolved.length + resolved.reduce((n, s) => n + s.garments.length, 0);
-  const budgetLeft = cfg.maxReferenceImages - refCount;
+  const budgetLeft = MAX_REFERENCE_IMAGES - refCount;
   const missingBase = resolved.filter(s => !s.character.referenceImage);
   const prompt = resolved.length ? buildStudioPrompt({ subjects: resolved, choices }) : "";
 
   const addSubject = (id) => {
-    if (subjects.length >= cfg.maxCharacters) {
-      setStatus("That is as many people as one photograph can hold (" + cfg.maxCharacters + ").");
-      return;
-    }
+    // A headcount used to stop at three, on the grounds that past that the
+    // model averages the faces together. It still does — but that is a
+    // judgement about the photograph, not a limit of the request, and it is
+    // the photographer's to make. The budget is the only refusal left.
     if (budgetLeft <= 0) {
-      setStatus("That is the most reference images one photograph can hold (" + cfg.maxReferenceImages + ").");
+      setStatus("That is the most reference images one photograph can hold (" + MAX_REFERENCE_IMAGES + ").");
       return;
     }
     setStatus("");
@@ -7559,7 +7564,7 @@ function PhotoStudio({ characters, userCharacter, onBack }) {
           <h3 style={S.studioHeading}>Who</h3>
           {castables.length === 0 && <p style={{ fontSize: 13, color: "var(--text3)" }}>No characters yet.</p>}
           <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 8px" }}>
-            {"Tap to add or remove. Up to " + cfg.maxCharacters + " people in one shot" +
+            {"Tap to add or remove. People and garments share one budget of " + MAX_REFERENCE_IMAGES + " reference images" +
               (resolved.length ? " — " + resolved.length + " in it now." : ".")}
           </p>
           <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
@@ -7592,7 +7597,7 @@ function PhotoStudio({ characters, userCharacter, onBack }) {
               never sent, and the photograph comes back missing it with no
               clue why. */}
           <p style={{ fontSize: 11, color: budgetLeft <= 0 ? "#c04060" : "var(--text4)", fontWeight: 700, marginTop: 8 }}>
-            {refCount} of {cfg.maxReferenceImages} reference images used
+            {refCount} of {MAX_REFERENCE_IMAGES} reference images used
             {" — "}{resolved.length} {resolved.length === 1 ? "person" : "people"}
             {", "}{refCount - resolved.length} garment{refCount - resolved.length === 1 ? "" : "s"}.
           </p>

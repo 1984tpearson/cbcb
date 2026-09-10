@@ -1330,10 +1330,8 @@
         // Full length, so the whole outfit is in frame.
         aspectRatio: "9:16",
         resolution: "1k",
-        // Wiro caps inputImage at 15 including references, and coherence falls
-        // off long before that: each garment is another thing the model has to
-        // keep faithful while also composing a person.
-        maxGarments: 5,
+        // No cap of its own: the fitting room spends image.maxReferenceImages
+        // like everything else, less the one reference the person herself is.
         // The recent row holds a whole batch on purpose: generating eight and
         // then trying them on is the reason the row exists, and a row that
         // shows five of the eight just made sends you hunting for the rest.
@@ -1444,7 +1442,9 @@
         // Her photograph takes one of Wiro's 15 input slots, and coherence
         // falls off long before the other fourteen are used. Same number the
         // fitting room settled on.
-        maxWorn: 5,
+        // No cap of its own either — see image.maxReferenceImages. What a chat
+        // image can hold is the budget less her base image, and less the
+        // expression photograph on the shots that call for one.
         // The only clothing wording in a chat image prompt when garments are
         // worn. It replaces "wearing {charOutfit}" entirely.
         // The last clause about her before the style, and deliberately the
@@ -1548,20 +1548,17 @@
       // which is what dressing a specific person in specific clothes is.
       model: "seedream-v5-pro-uncensored",
       resolution: "1k",
-      // Per person, not per shot. Wiro caps inputImage at 15 including the
-      // references, and coherence goes long before that.
-      maxGarments: 5,
-      // How many people can be in one photograph. Every extra person is a face
-      // the model has to keep faithful while also composing a scene, and past
-      // three it starts averaging them into each other — which is the one
-      // failure that makes a group shot worthless, because the whole point is
-      // that these particular people are in it.
-      maxCharacters: 3,
-      // The hard ceiling on reference images for the whole shot, people and
-      // garments together. Deliberately shown in the UI rather than enforced
-      // silently: a garment dropped without saying so is one the model was
-      // never told about, and the photograph comes back wrong with no clue why.
-      maxReferenceImages: 8,
+      // Neither a per-person garment cap nor a headcount: one shot spends
+      // image.maxReferenceImages, and a person and a garment cost the same one
+      // reference. Still shown in the UI rather than enforced silently — a
+      // garment dropped without saying so is one the model was never told
+      // about, and the photograph comes back wrong with no clue why.
+      //
+      // What is lost with maxCharacters is a warning: past three or four faces
+      // the model does start averaging them into each other, and a group shot
+      // whose whole point is that these particular people are in it is the
+      // thing that spoils. That is now yours to judge, which is the trade you
+      // asked for.
       // Full length by default — the studio exists to photograph an outfit on
       // a person, and a portrait crop throws away half of one.
       aspectRatio: "3:4",
@@ -1594,8 +1591,11 @@
       // path, and the only version that reliably puts the right coat on the
       // right person.
       groupPromptTemplate: "{framing} photograph of {count} people together.{subjects}{heights} {garments}{together}{setting}{lighting}{camera}{mood}",
-      // first, second, third… as far as maxCharacters can reach.
-      ordinals: ["first", "second", "third", "fourth", "fifth", "sixth"],
+      // first, second, third… as far as the reference budget can reach. It
+      // stopped at six when three people was the limit; with the headcount
+      // gone it has to reach the whole budget, because two people both called
+      // "the next person" is two people the clothes cannot be told apart on.
+      ordinals: ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"],
       // Each clause and how it is worded once something is chosen for it. The
       // wording lives with the field so a new option never needs a code change.
       clauses: {
@@ -2104,6 +2104,23 @@
           maxCropPx: 768,
         },
       },
+
+      // The one ceiling on reference images, for every screen that sends any:
+      // a chat image, the fitting room, the photo studio, a base image built
+      // from uploaded photographs. It used to be four separate caps — five
+      // garments here, three people there — which meant a shot could be
+      // refused a garment while well under what the model would have taken,
+      // and the numbers had to be kept in step by hand.
+      //
+      // Now it is one budget spent by whatever the photograph actually holds:
+      // five people and two photos of one of them leaves three garments.
+      //
+      // Ten because that is the documented reference cap for Seedream. The 15
+      // these comments used to cite is a different number — inputs plus
+      // outputs — and some platforms report references working up to 14 under
+      // it. We ask for one image out, so there is room to try; this is the
+      // figure that is actually written down.
+      maxReferenceImages: 10,
 
       proportionGuard: "two arms and two hands per person, no extra limbs, anatomically coherent",
       // Instruction sent to the extractor model that turns the recent
