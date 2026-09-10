@@ -1475,7 +1475,7 @@
         // Written so it is a no-op on a nude shot: it speaks only about skin
         // that clothing covers, and where nothing covers her it asks for
         // nothing.
-        skinClause: "her tattoos, marks and skin markings are on her skin and underneath whatever she is wearing — no tattoo or marking is drawn on top of, or showing through, any garment, and skin the clothing covers is not visible",
+        skinClause: "her tattoos, marks and skin markings are on her skin and underneath whatever she is wearing — no tattoo or marking is drawn on top of, or showing through, any garment, and skin the clothing covers is not visible; they are part of her rather than a thing to display, so nothing is posed, framed or moved aside to reveal one",
       },
 
       // What a generation costs, per endpoint family. Dezgo prices by family and
@@ -1621,7 +1621,7 @@
         // garment and put whatever they had on in it onto them. Naming the
         // kind of picture instead is what tells the two apart — the same fix
         // the chat refClause needed for the same reason.
-        garmentsWorn: "They are wearing {v}. The flat lay photographs among the reference images are those garments — dress the person in exactly those garments, matching their colour, cut, fabric and detailing precisely.",
+        garmentsWorn: "They are wearing {v}. The flat lay photographs among the reference images are those garments — dress the person in exactly those garments, matching the colour, cut, fabric and detailing of whatever part of them is visible precisely.",
         // Nothing chosen is not nothing said: left silent, the model dresses
         // them however it likes and the same settings give a different outfit
         // every time.
@@ -1633,7 +1633,7 @@
         // pose belongs to a person and not to the photograph.
         subject: " The {ordinal} reference image is {name}{charDesc}{pose}.",
         subjectPose: ", {v}",
-        garmentsGroupWorn: "The flat lay photographs among the reference images are garments: {v}. Dress each person in the garments listed against their name, matching colour, cut, fabric and detailing precisely.",
+        garmentsGroupWorn: "The flat lay photographs among the reference images are garments: {v}. Dress each person in the garments listed against their name, matching the colour, cut, fabric and detailing of whatever part of them is visible precisely.",
         // Said out loud rather than left silent, for the same reason as the
         // solo case: told nothing, the model dresses them however it likes.
         garmentsGroupNone: "Everyone is dressed as they are in their own reference image.",
@@ -1645,7 +1645,27 @@
         // tattooed body and a flat lay and puts the ink over the garment; the
         // studio has the same gap the chat path does, for the same reason.
         // Silent on anyone left nude, since it speaks only about covered skin.
-        skinUnderClothes: " Tattoos, marks and skin markings sit on the skin underneath the clothing — none are drawn on top of, or showing through, any garment.",
+        skinUnderClothes: " Tattoos, marks and skin markings sit on the skin underneath the clothing — none are drawn on top of, or showing through, any garment. They are simply part of her; the photograph is not being taken to show them, and nothing is posed, framed or moved aside to reveal one.",
+
+        // ── An inventory, not a checklist ──────────────────────────────────
+        // Everything handed to this model reads to it as something that must
+        // appear. Given five flat lays it will find a way to show five
+        // garments, and the ways it finds are all wrong: a dress hitched up so
+        // the boots are in shot, an apron sliced open so the shirt under it is
+        // visible, a close-up quietly widened to full length so nothing is
+        // cropped out. Each one is the model solving the problem it was
+        // actually set, which was "show all of this".
+        //
+        // So the prompt has to set a different problem. What it is given is
+        // what she HAS. What appears is whatever the framing and the moment
+        // happen to include, and a garment that ends up invisible is a
+        // correct result rather than a failure to be worked around.
+        garmentsVisibility: " These are the clothes she has on, not a list of things to display. Layer them the way real clothes layer, and let any of them be partly covered, cropped by the frame or not visible at all — never alter the framing, the pose, or a garment's own shape or fit to bring more of them into view. A garment that cannot be seen from this angle is simply not seen.",
+
+        // The single most literal version of the same failure, and worth its
+        // own sentence because the framing is a thing the person chose. A
+        // close-up asked for a close-up.
+        framingAuthority: " The kind of shot named at the start is fixed: keep exactly that framing and crop, even where it leaves most of the clothing, and most of her, outside the frame.",
         together: " Together they are {v}.",
         // Says what a face photograph is FOR, and — as with the garment
         // clauses above — what it is not. Without the second half the model

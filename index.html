@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=65"></script>
+  <script src="site-config.js?v=66"></script>
   <script src="image-prompt.js?v=31"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -7360,7 +7360,9 @@ function buildStudioPrompt({ subjects, choices }) {
       charDesc: (d => d ? ", " + d : "")(studioCharDesc(s.character)),
       // Only when she is actually being dressed. Left in her reference image
       // she is nude, and there is nothing for the ink to be under.
-      garments: garmentText ? (fill(c.garmentsWorn, garmentText) + c.skinUnderClothes) : c.garmentsNone,
+      garments: garmentText
+        ? (fill(c.garmentsWorn, garmentText) + c.garmentsVisibility + c.skinUnderClothes)
+        : c.garmentsNone,
       pose: fill(c.pose, studioChoiceText(cfg.poses, s.pose)),
     });
   } else {
@@ -7390,7 +7392,7 @@ function buildStudioPrompt({ subjects, choices }) {
       // Some chosen and some not is the common case, and the people with no
       // garments quietly become the model's invention without this.
       if (dressed.length < subjects.length) garments += c.garmentsGroupRest;
-      garments += c.skinUnderClothes;
+      garments += c.garmentsVisibility + c.skinUnderClothes;
     }
 
     body = fillTemplate(cfg.groupPromptTemplate, {
@@ -7434,7 +7436,16 @@ function buildStudioPrompt({ subjects, choices }) {
     ? fillTemplate(c.expressionRef, { names: withExpressions.join(" and ") })
     : "";
 
-  const text = [body, extra, expressionNote, guard, motion, cfg.styleModifiers].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  // Only where a framing was actually chosen: with none picked there is no
+  // "kind of shot named at the start" for the rule to point at, and a rule
+  // pointing at nothing is still a sentence the model will act on.
+  //
+  // Placed straight after the body, before the free text — it is a rule about
+  // the whole photograph, and a rule that arrives after the notes reads as a
+  // rule about the notes.
+  const framingRule = framing ? c.framingAuthority : "";
+
+  const text = [body, framingRule, extra, expressionNote, guard, motion, cfg.styleModifiers].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
