@@ -1599,7 +1599,14 @@
       // Each clause and how it is worded once something is chosen for it. The
       // wording lives with the field so a new option never needs a code change.
       clauses: {
-        garmentsWorn: "They are wearing {v}. The reference images after the first are those garments, photographed flat — dress the person in exactly those garments, matching their colour, cut, fabric and detailing precisely.",
+        // "the flat lay photographs", not "the reference images after the
+        // first": the list is no longer only the person and their clothes. An
+        // expression photograph is a real picture of a dressed person, and a
+        // clause that names garments by POSITION would call that photograph a
+        // garment and put whatever they had on in it onto them. Naming the
+        // kind of picture instead is what tells the two apart — the same fix
+        // the chat refClause needed for the same reason.
+        garmentsWorn: "They are wearing {v}. The flat lay photographs among the reference images are those garments — dress the person in exactly those garments, matching their colour, cut, fabric and detailing precisely.",
         // Nothing chosen is not nothing said: left silent, the model dresses
         // them however it likes and the same settings give a different outfit
         // every time.
@@ -1611,7 +1618,7 @@
         // pose belongs to a person and not to the photograph.
         subject: " The {ordinal} reference image is {name}{charDesc}{pose}.",
         subjectPose: ", {v}",
-        garmentsGroupWorn: "The remaining reference images are garments, photographed flat: {v}. Dress each person in the garments listed against their name, matching colour, cut, fabric and detailing precisely.",
+        garmentsGroupWorn: "The flat lay photographs among the reference images are garments: {v}. Dress each person in the garments listed against their name, matching colour, cut, fabric and detailing precisely.",
         // Said out loud rather than left silent, for the same reason as the
         // solo case: told nothing, the model dresses them however it likes.
         garmentsGroupNone: "Everyone is dressed as they are in their own reference image.",
@@ -1619,6 +1626,12 @@
         // quietly become the model's invention.
         garmentsGroupRest: " Everyone not listed is dressed as they are in their own reference image.",
         together: " Together they are {v}.",
+        // Says what a face photograph is FOR, and — as with the garment
+        // clauses above — what it is not. Without the second half the model
+        // reads a picture of a dressed person as an instruction about clothes,
+        // which is exactly how a jumper from an expression photo ended up on
+        // her in chat.
+        expressionRef: " One reference image is a close photograph of {names} — copy the expression from it and nothing else, not the clothing, framing or background.",
         // ── Height, said as a comparison ──────────────────────────────────
         // Each subject line already carries that person's own height, and in
         // a group shot that is not enough: three independent measurements are
