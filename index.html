@@ -1330,10 +1330,20 @@ const PENDING_IMAGES_KEY = "personachat_pending_images";
 const IMAGE_TIMINGS_KEY = "personachat_image_timings";
 const readImageTimings = () => storage.get(IMAGE_TIMINGS_KEY, []);
 const recordImageTiming = (entry) => storage.set(IMAGE_TIMINGS_KEY, [entry, ...readImageTimings()].slice(0, 8));
-const readPendingImages = () => storage.get(PENDING_IMAGES_KEY, []);
+// A task Wiro has forgotten is not worth asking about forever, and a stale
+// entry means every later visit spends two polls learning nothing.
+const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const readPendingImages = () => storage.get(PENDING_IMAGES_KEY, [])
+  .filter(p => p && p.taskId && (Date.now() - (p.startedAt || 0)) < PENDING_MAX_AGE_MS);
 const writePendingImages = (list) => storage.set(PENDING_IMAGES_KEY, list.slice(0, 20));
 const addPendingImage = (entry) => writePendingImages([entry, ...readPendingImages().filter(p => p.taskId !== entry.taskId)]);
 const dropPendingImage = (taskId) => writePendingImages(readPendingImages().filter(p => p.taskId !== taskId));
+
+// Tasks this page is already waiting on. The recovery sweep reads the same
+// list from storage, so without this it would poll a generation the screen is
+// still waiting for, collect it first, and file a second copy in the gallery
+// while the screen that asked for it also received one.
+const activePollTaskIds = new Set();
 
 // setTimeout, but a backgrounded tab that comes back does not have to wait out
 // the rest of a timer the browser froze. Returning to the app polls at once.
@@ -1574,11 +1584,17 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
   }
 
   let imageUrl;
+  activePollTaskIds.add(taskId);
   try {
     imageUrl = await pollWiroTask({ taskId, outputFormat: body.outputFormat, modelId, startedAt });
   } catch (e) {
-    dropPendingImage(taskId);
+    // Left recorded, not dropped. Losing contact with the proxy is exactly
+    // what a phone going to sleep mid-poll looks like, and Wiro is still
+    // generating — and billing — either way. The sweep asks again later, and
+    // drops the entry itself if Wiro turns out not to know the task.
     throw e;
+  } finally {
+    activePollTaskIds.delete(taskId);
   }
   if (!imageUrl) {
     // Left recorded on purpose: it did not finish inside this page's patience,
@@ -1593,33 +1609,107 @@ async function generateImageWiro({ prompt, model, initImage, resolution, aspectR
 // character's gallery: the screen that asked for the image is long gone, and
 // the gallery is the one place a picture is useful without it.
 async function collectPendingImages({ onCollected } = {}) {
-  const pending = readPendingImages();
+  const pending = readPendingImages().filter(p => !activePollTaskIds.has(p.taskId));
   if (!pending.length) return 0;
   let collected = 0;
   for (const p of pending) {
-    // A short patience here — this is a check for something already finished,
-    // not a wait for something still running.
-    let imageUrl = null;
+    // Claimed for the duration, so a second sweep — a return to the tab while
+    // the first is still asking — cannot file the same picture twice.
+    if (activePollTaskIds.has(p.taskId)) continue;
+    activePollTaskIds.add(p.taskId);
     try {
-      imageUrl = await pollWiroTask({ ...p, maxPolls: 2 });
-    } catch {
-      dropPendingImage(p.taskId); // Wiro no longer knows about it
-      continue;
-    }
-    if (!imageUrl) continue; // still going — leave it for next time
-    dropPendingImage(p.taskId);
-    try {
-      const url = await persistWiroImage(imageUrl);
-      const gallery = await dataApi.getGallery(p.characterId);
-      const next = [{ url, prompt: p.label || "Recovered generation", date: Date.now() }, ...gallery].slice(0, GALLERY_LIMIT);
-      await dataApi.saveGallery(p.characterId, next);
-      collected += 1;
-      if (onCollected) onCollected({ ...p, url });
-    } catch (e) {
-      console.warn("Could not file a recovered image:", e);
+      if (await collectOnePendingImage(p, onCollected)) collected += 1;
+    } finally {
+      activePollTaskIds.delete(p.taskId);
     }
   }
   return collected;
+}
+
+// One recovered generation, or false if it is still running. Split out of the
+// sweep so the claim above can wrap the whole of it.
+async function collectOnePendingImage(p, onCollected) {
+  // A short patience here — this is a check for something already finished,
+  // not a wait for something still running.
+  let imageUrl = null;
+  try {
+    imageUrl = await pollWiroTask({ ...p, maxPolls: 2 });
+  } catch {
+    dropPendingImage(p.taskId); // Wiro no longer knows about it
+    return false;
+  }
+  if (!imageUrl) return false; // still going — leave it for next time
+  dropPendingImage(p.taskId);
+  try {
+    const url = await persistWiroImage(imageUrl);
+    const gallery = await dataApi.getGallery(p.characterId);
+    const next = [{ url, prompt: p.label || "Recovered generation", date: Date.now() }, ...gallery].slice(0, GALLERY_LIMIT);
+    await dataApi.saveGallery(p.characterId, next);
+    if (onCollected) onCollected({ ...p, url });
+    return true;
+  } catch (e) {
+    console.warn("Could not file a recovered image:", e);
+    return false;
+  }
+}
+
+// The name to put in the "a picture finished" notice, or a neutral stand-in
+// when the character has since been deleted.
+function characterNameById(characters, id) {
+  const c = (characters || []).find(x => x.id === id);
+  return (c && c.name) || "your character";
+}
+
+// Announced so whichever screen is open can show the picture rather than only
+// filing it: a recovered chat image belongs in that conversation.
+const IMAGE_RECOVERED_EVENT = "personachat:image-recovered";
+// While the app is open, ask again on this cadence. A generation started and
+// then left alone finishes on Wiro's servers, not here, so the only question
+// is how soon after it lands anyone looks.
+const PENDING_SWEEP_MS = 20000;
+
+// Collects finished generations on open, on returning to the tab, and on a
+// slow timer while it is in front. This is what makes "start an image, put the
+// phone down, come back" work: the phone freezes this page's timers and may
+// throw the page away entirely, and nothing else was ever going to collect the
+// task id that was left in storage.
+function usePendingImageSweep() {
+  const [recovered, setRecovered] = useState([]);
+  const sweeping = useRef(false);
+  useEffect(() => {
+    let live = true;
+    const sweep = async () => {
+      // Hidden means nobody is looking and the browser may be freezing us
+      // mid-poll; the visibility handler below picks it up on the way back.
+      if (sweeping.current || document.hidden || !readPendingImages().length) return;
+      sweeping.current = true;
+      try {
+        await collectPendingImages({
+          onCollected: (p) => {
+            if (!live) return;
+            setRecovered(r => [p, ...r.filter(x => x.taskId !== p.taskId)].slice(0, 5));
+            window.dispatchEvent(new CustomEvent(IMAGE_RECOVERED_EVENT, { detail: p }));
+          },
+        });
+      } catch (e) {
+        console.warn("Could not check for finished images:", e);
+      } finally {
+        sweeping.current = false;
+      }
+    };
+    sweep();
+    const timer = setInterval(sweep, PENDING_SWEEP_MS);
+    const onVisible = () => { if (!document.hidden) sweep(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      live = false;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, []);
+  return [recovered, () => setRecovered([])];
 }
 
 // Wardrobe tracking only runs when the recent turns actually talk about
@@ -4652,6 +4742,10 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
         // framing every later generation copies, and it goes first.
         initImage: joinReferenceImages([baseUrl, ...photosInUse]),
         seed: Math.floor(Math.random() * 2147483647),
+        // Long enough to be worth leaving. If this screen is gone by the time
+        // it lands it goes to her gallery rather than nowhere — not the same
+        // as becoming her base image, but recoverable instead of lost.
+        track: character && character.id ? { characterId: character.id, label: "Re-shot base image" } : undefined,
       });
       const label = changedKeys.length ? describeAppearanceChanges(changedKeys) : (photosInUse.length ? "Re-shot from photos" : "Re-shot");
       // The new image inherits the old one's description rather than starting
@@ -4684,6 +4778,7 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
         // of whoever the base image says she is now.
         initImage: baseUrl,
         seed: Math.floor(Math.random() * 2147483647),
+        track: character && character.id ? { characterId: character.id, label: "Re-shot avatar" } : undefined,
       });
       setAvatarUrl(url);
     } catch (e) { setError(e.message); }
@@ -5794,6 +5889,24 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
       .then(g => setGallery(g))
       .catch(() => {});
   }, [sessionId]);
+
+  // A picture that finished while the phone was asleep, or after the page was
+  // thrown away and reopened. The sweep has already filed it in her gallery;
+  // this puts it in the conversation it was asked for, which is where whoever
+  // asked will look for it. Matched on url so a second announcement of the
+  // same picture cannot post it twice.
+  useEffect(() => {
+    const onRecovered = (e) => {
+      const p = e.detail || {};
+      if (!p.url || p.characterId !== character.id) return;
+      setMessages(m => m.some(x => x.role === "image" && x.content === p.url)
+        ? m
+        : [...m, { role: "image", content: p.url, prompt: p.label || "" }]);
+      dataApi.getGallery(character.id).then(g => setGallery(g)).catch(() => {});
+    };
+    window.addEventListener(IMAGE_RECOVERED_EVENT, onRecovered);
+    return () => window.removeEventListener(IMAGE_RECOVERED_EVENT, onRecovered);
+  }, [character.id]);
 
   useEffect(() => {
     if (!messagesLoaded) return;
@@ -8131,6 +8244,11 @@ function App() {
   const toggleTheme = () => setTheme(t => t === "dark" ? "light" : "dark");
   const toggleDiscreet = () => setDiscreetMode(v => !v);
 
+  // Runs for as long as the app is open, whichever screen is in front — App is
+  // the one component never unmounted, and the images being waited on outlive
+  // the screen that asked for them.
+  const [recoveredImages, clearRecoveredImages] = usePendingImageSweep();
+
   useEffect(() => {
     dataApi.getCharacters()
       .then(cs => setCharacters(cs))
@@ -8209,6 +8327,14 @@ function App() {
       </header>
       <main style={S.main} className={discreetMode ? "discreet-main" : ""}>
         {loadError && <div style={S.errorBar}>{loadError}<button style={S.errorClose} onClick={() => setLoadError("")}>✕</button></div>}
+        {recoveredImages.length > 0 && (
+          <div style={S.errorBar}>
+            {recoveredImages.length === 1
+              ? `A picture finished while you were away — it's in ${characterNameById(characters, recoveredImages[0].characterId)}'s gallery.`
+              : `${recoveredImages.length} pictures finished while you were away — they're in the galleries.`}
+            <button style={S.errorClose} onClick={clearRecoveredImages}>✕</button>
+          </div>
+        )}
         {!discreetMode && (
           <div style={S.sectionHeader}>
             <h2 style={S.sectionTitle}>Characters</h2>
