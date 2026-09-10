@@ -1815,6 +1815,35 @@
       // names any part of the viewer.
       povIntimateFraming: "close to her, she fills much of the frame",
 
+      // ── Whose body the viewer has ────────────────────────────────────────
+      // The viewer is the camera, and in an intimate scene the extractor is
+      // told to name the viewer's own anatomy that is involved. Nothing ever
+      // told it whose body that is — so it fell back on the assumption a
+      // language model makes about the user of an app like this, and wrote the
+      // viewer a penis. In a scene between two women that anatomy has nowhere
+      // to belong, and the image model hung it on the woman in frame.
+      //
+      // The user's gender is already known: it is in the user persona, the
+      // same value the chat model is told. It simply never reached here.
+      viewerSexWords: {
+        Female: "a woman",
+        Male: "a man",
+        "Non-binary": "a non-binary person",
+      },
+      // Substituted into scenePromptInstruction. {viewer} is the phrase above.
+      viewerNoteKnown: " The User — the viewer, the camera — is {viewer}. Any of the User's own anatomy named in scene or viewerBody must be the anatomy of {viewer}. Never give the User the genitals of another sex.",
+      // Unset, or set to something these words do not cover. Silence here is
+      // what caused the bug, so saying nothing is not an option — but neither
+      // is inventing a body for them. Naming no genitals at all is the only
+      // answer that cannot be wrong, and the contact is still describable
+      // without them.
+      viewerNoteUnknown: " The User's sex has not been stated. Do NOT name the User's genitals in scene or viewerBody. Describe the contact by what {name} is doing and by which of the User's hands, arms, mouth, chest, thighs or hips it involves.",
+      // Added to the image prompt itself in an intimate contact shot, where
+      // the viewer's body may be in frame and so may be drawn wrong. Kept out
+      // of every other shot: a clause the model cannot use is a clause it can
+      // still render literally.
+      povViewerSex: "the viewer is {viewer}",
+
       // What the POV clause says about the viewer's own body in an explicit
       // shot: that it may be there, and nothing more.
       //
@@ -1962,7 +1991,7 @@
       // to report — an optional field a model is told to ignore is one it
       // fills in anyway.
       clothingStateField: ", \"clothingState\": \"...\"",
-      scenePromptInstruction: "You are describing one moment from a roleplay conversation so that an image can be generated of it. The image is a first-person POV shot taken through the User's own eyes: the User is the camera.\n\nCharacter description: {charDesc}.\n\nConversation:\n{recent}\n\nDescribe the moment at the very END of the conversation - what is {name} doing RIGHT NOW.\n\nReturn ONLY a JSON object, with no other text and no code fences:\n{\"scene\": \"...\", \"touching\": true or false, \"viewerBody\": \"...\"{clothingField}}\n\nscene - 15 to 30 words: {name}'s action, pose and expression in this moment. Put the most important action or pose FIRST. Be concrete and literal. Do NOT include names. Do NOT use abstract words like \"mood\" or \"atmosphere\". The location and both people's clothing are added separately, so do NOT restate or decide either of them here. Do say where {name} is in relation to the viewer when the action puts them at different heights or distances — kneeling below them, leaning over them, face to face — and which way they are looking. That is what tells the camera where it is, and only you can know it, because only you have read what just happened.\n\ntouching - true if {name} and the User are in physical contact at this moment, false if they are not. Judge it from what the text actually describes, however slight the contact is and however it is worded. Being undressed, or nearby, or talking, is not contact; any part of one of them against the other is.\n\nviewerBody - when touching is true, which of the User's OWN body parts are in the shot and where they enter the frame, as a short phrase: for example \"the viewer's hand in her hair, entering from the top of the frame\". Name the part and the frame edge it comes in from, so it is not drawn floating. When touching is false, use an empty string.\n\nThe User is the camera. Never describe the User's face, head, hair or back - the camera cannot see itself. Never refer to the User in the third person: not \"him\", \"his\", \"the man\", nor by any name - always \"the viewer\". {name}'s own body belongs in scene; only the User's body belongs in viewerBody. Where scene has to mention a part of the User's body - what her mouth or hands are on - name it as the viewer's: \"mouth covering the viewer's penis\", never a bare \"mouth on penis\", which leaves the image model to decide whose it is.{actNote}{clothingNote}",
+      scenePromptInstruction: "You are describing one moment from a roleplay conversation so that an image can be generated of it. The image is a first-person POV shot taken through the User's own eyes: the User is the camera.\n\nCharacter description: {charDesc}.\n\nConversation:\n{recent}\n\nDescribe the moment at the very END of the conversation - what is {name} doing RIGHT NOW.\n\nReturn ONLY a JSON object, with no other text and no code fences:\n{\"scene\": \"...\", \"touching\": true or false, \"viewerBody\": \"...\"{clothingField}}\n\nscene - 15 to 30 words: {name}'s action, pose and expression in this moment. Put the most important action or pose FIRST. Be concrete and literal. Do NOT include names. Do NOT use abstract words like \"mood\" or \"atmosphere\". The location and both people's clothing are added separately, so do NOT restate or decide either of them here. Do say where {name} is in relation to the viewer when the action puts them at different heights or distances — kneeling below them, leaning over them, face to face — and which way they are looking. That is what tells the camera where it is, and only you can know it, because only you have read what just happened.\n\ntouching - true if {name} and the User are in physical contact at this moment, false if they are not. Judge it from what the text actually describes, however slight the contact is and however it is worded. Being undressed, or nearby, or talking, is not contact; any part of one of them against the other is.\n\nviewerBody - when touching is true, which of the User's OWN body parts are in the shot and where they enter the frame, as a short phrase: for example \"the viewer's hand in her hair, entering from the top of the frame\". Name the part and the frame edge it comes in from, so it is not drawn floating. When touching is false, use an empty string.\n\nThe User is the camera. Never describe the User's face, head, hair or back - the camera cannot see itself. Never refer to the User in the third person: not \"him\", \"his\", \"the man\", nor by any name - always \"the viewer\". {name}'s own body belongs in scene; only the User's body belongs in viewerBody. Where scene has to mention a part of the User's body - what her mouth or hands are on - name it as the viewer's: \"mouth against the viewer's inner thigh\", never a bare \"mouth on thigh\", which leaves the image model to decide whose it is.{actNote}{viewerNote}{clothingNote}",
     },
 
     // ── Models & defaults ────────────────────────────────────────────────────

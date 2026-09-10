@@ -12,8 +12,8 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=56"></script>
-  <script src="image-prompt.js?v=27"></script>
+  <script src="site-config.js?v=57"></script>
+  <script src="image-prompt.js?v=28"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
     #decoy-root { display: block; }
@@ -1569,8 +1569,8 @@ const MOVEMENT_RE = /\b(walk|walks|walked|walking|go|goes|went|going|come|comes|
 
 // Thin wrapper: the extraction itself lives in image-prompt.js. aiComplete is
 // injected because that module is framework- and network-free by design.
-async function buildImagePromptFromContext({ messages, character, model }) {
-  return IMG.extractScene({ messages, character, model, aiComplete });
+async function buildImagePromptFromContext({ messages, character, model, viewerGender }) {
+  return IMG.extractScene({ messages, character, model, aiComplete, viewerGender });
 }
 
 const MARITAL_STATUSES = CFG.options.maritalStatuses;
@@ -5931,6 +5931,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         styleModifiers,
         keepSceneVerbatim: true,
         garmentRefs: worn.length > 0,
+        viewerGender: resolveUserPersona(character, settings).gender,
       });
       const url = await generateImageWiro({
         prompt: fullPrompt,
@@ -6023,7 +6024,10 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         ? { ...character, wornNames: worn.map(g => g.name).filter(Boolean) }
         : character;
       const extracted = messages.length > 0
-        ? await buildImagePromptFromContext({ messages, character: charForScene, model: settings.selectedModel })
+        // The viewer's own gender, from the same user persona the chat model
+        // is told about. Without it the extractor was assuming one.
+        ? await buildImagePromptFromContext({ messages, character: charForScene, model: settings.selectedModel,
+            viewerGender: resolveUserPersona(character, settings).gender })
         : { scene: `${character.name}, looking at the viewer, character art`, touching: false, viewerBody: "" };
       const prompt = extracted.scene;
       console.info(`[image] scene prompt built in ${((Date.now() - promptStartedAt) / 1000).toFixed(1)}s` +
@@ -6053,6 +6057,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
         styleModifiers,
         contact: extracted.touching,
         viewerBody: extracted.viewerBody,
+        viewerGender: resolveUserPersona(character, settings).gender,
         garmentRefs: worn.length > 0,
         clothingState: extracted.clothingState,
       });

@@ -186,7 +186,16 @@ window.ImagePrompt = {
     // replaces the generic clauses entirely — "the viewer's own body framing
     // the bottom of the shot" is what the image model kept resolving into a
     // stray limb, because nothing said which part or where it attached.
-    function buildPovModifiers(sceneText, staging, nsfw, userOutfit, contact, viewerBody) {
+    // The viewer's own sex, as a phrase, or "" when it is not known well
+    // enough to assert. "Custom" and unset both land on "" deliberately: the
+    // user persona has no free-text gender field, so "Custom" carries no word
+    // to use, and guessing is the failure this whole path exists to stop.
+    function viewerSexPhrase(gender) {
+      const words = (CFG.image && CFG.image.viewerSexWords) || {};
+      return words[String(gender || "").trim()] || "";
+    }
+
+    function buildPovModifiers(sceneText, staging, nsfw, userOutfit, contact, viewerBody, viewerGender) {
       const scene = sceneText || "";
       const parts = [POV_BASE];
       if (contact && viewerBody) {
@@ -207,6 +216,12 @@ window.ImagePrompt = {
         // satisfy. So there it is told only that the body may be there.
         if (isIntimateScene(scene, staging, nsfw)) {
           parts.push(POV_BODY_PERMISSIVE, POV_INTIMATE_FRAMING);
+          // Only here. This is the shot where the viewer's body may be drawn
+          // at all, so it is the only one where drawing it the wrong sex is
+          // possible — and every clause added elsewhere is one the model can
+          // render literally for no reason.
+          const viewerPhrase = viewerSexPhrase(viewerGender);
+          if (viewerPhrase) parts.push(fillTemplate(CFG.image.povViewerSex, { viewer: viewerPhrase }));
         } else {
           parts.push(viewerBody);
         }
@@ -759,7 +774,7 @@ window.ImagePrompt = {
     // earlobe" and accepted "I pour a drink and watch her undress". The model is
     // already reading the conversation to write the scene, so it answers that at
     // the same time, and says which of the viewer's own parts are in the shot.
-    async function extractScene({ messages, character, model, aiComplete }) {
+    async function extractScene({ messages, character, model, aiComplete, viewerGender }) {
       const recent = messages.slice(-10).filter(m => m.role !== "image").map(m => `${m.role === "user" ? "User" : character.name}: ${m.content}`).join("\n");
       // Stripped, not the full words: this is the one path whose output is
       // handed to the image model. See stripBodyMarks.
@@ -786,7 +801,17 @@ window.ImagePrompt = {
       const clothingNote = wornNames.length
         ? fillTemplate(CFG.image.clothingStateNote, { name: character.name, garments: wornNames.join(", ") })
         : "";
-      const content = await aiComplete({ model, messages: [{ role: "user", content: fillTemplate(CFG.image.scenePromptInstruction, { name: character.name, charDesc: charDesc || "not specified", recent, actNote, clothingField, clothingNote }) }] });
+      // Who the viewer is, in a prompt that until now only ever said "the
+      // User". Asked in an intimate scene to name the viewer's own anatomy
+      // with nothing to go on, the model wrote what it assumed — and between
+      // two women that anatomy had nowhere to belong, so the image model hung
+      // it on the woman in frame. Where the sex is not known the note forbids
+      // naming genitals rather than inventing them.
+      const viewerPhrase = viewerSexPhrase(viewerGender);
+      const viewerNote = viewerPhrase
+        ? fillTemplate(CFG.image.viewerNoteKnown, { viewer: viewerPhrase })
+        : fillTemplate(CFG.image.viewerNoteUnknown, { name: character.name });
+      const content = await aiComplete({ model, messages: [{ role: "user", content: fillTemplate(CFG.image.scenePromptInstruction, { name: character.name, charDesc: charDesc || "not specified", recent, actNote, viewerNote, clothingField, clothingNote }) }] });
       return parseSceneExtraction(content, messages, character.name);
     }
 
@@ -910,7 +935,7 @@ window.ImagePrompt = {
     function assembleImagePrompt({
       scenePrompt, charDesc, charOutfit, userOutfit, staging, nsfw,
       explicitDetail, messages, characterName, styleModifiers,
-      contact: contactOverride, name, keepSceneVerbatim, viewerBody, subjectNoun,
+      contact: contactOverride, name, keepSceneVerbatim, viewerBody, viewerGender, subjectNoun,
       garmentRefs, clothingState,
     }) {
       const contact = contactOverride !== undefined
@@ -924,7 +949,7 @@ window.ImagePrompt = {
         ? scenePrompt
         : stripViewerLimbs(scenePrompt);
       const parts = {
-        pov: buildPovModifiers(scene, staging, nsfw, userOutfit, contact, viewerBody),
+        pov: buildPovModifiers(scene, staging, nsfw, userOutfit, contact, viewerBody, viewerGender),
         name: name || "",
         charDesc: charDesc || "",
         // Two ways to say what she has on, and only ever one of them.
@@ -994,7 +1019,7 @@ window.ImagePrompt = {
       garmentLayer, garmentRegions, isGarmentCovered, visibleWornGarments,
       beatShowsContact, detectPhysicalContact, stripViewerLimbs,
       buildPovModifiers, joinPromptParts, subjectFor, assembleImagePrompt,
-      extractScene, parseSceneExtraction,
+      extractScene, parseSceneExtraction, viewerSexPhrase,
     };
   },
 };
