@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=66"></script>
+  <script src="site-config.js?v=67"></script>
   <script src="image-prompt.js?v=31"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -7445,7 +7445,23 @@ function buildStudioPrompt({ subjects, choices }) {
   // rule about the notes.
   const framingRule = framing ? c.framingAuthority : "";
 
-  const text = [body, framingRule, extra, expressionNote, guard, motion, cfg.styleModifiers].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  // Said rather than left silent. Held back from the reference list, a garment
+  // would otherwise simply cease to exist as far as the model knows, and it
+  // would dress her in whatever it thought belonged there instead.
+  const outOfFrameNames = subjects.flatMap((sub, i) => (sub.hidden || []).map(g => {
+    const label = g.name || "a garment";
+    // Whose, once there is more than one person it could belong to.
+    return subjects.length > 1 ? studioSubjectName(sub, i) + "'s " + label : label;
+  }));
+  const outOfFrame = outOfFrameNames.length
+    ? fillTemplate(c.outOfFrameClause, {
+        v: outOfFrameNames.length === 1
+          ? outOfFrameNames[0]
+          : outOfFrameNames.slice(0, -1).join(", ") + " and " + outOfFrameNames[outOfFrameNames.length - 1],
+      })
+    : "";
+
+  const text = [body, outOfFrame, framingRule, extra, expressionNote, guard, motion, cfg.styleModifiers].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
@@ -7470,6 +7486,33 @@ function studioExpressionRef(subject, choices) {
 function filledExpressionSlots(character) {
   const photos = (character && character.expressionPhotos) || {};
   return (((CFG.image || {}).expressions || {}).slots || []).filter(sl => expressionUrl(photos[sl.key]));
+}
+
+// Which of a person's garments the chosen crop can physically contain, and
+// which it cannot. The ones it cannot are not sent as flat lays at all: a flat
+// lay in the reference list is an instruction to show that garment, and words
+// telling the model it need not appear lose to the picture telling it it must.
+// A close-up with a boot photograph attached came back with the leg folded up
+// beside the head — the crop held, so the boot was what moved.
+//
+// Conservative by design. A garment whose category is not mapped, Accessory
+// above all, is never held back: not knowing where something sits is not the
+// same as knowing it is out of shot, and wrongly withholding a garment that
+// should have shown is the worse of the two errors.
+//
+// Pure, so the whole rule can be checked across framings in a script rather
+// than one generation at a time.
+function studioFramedGarments(garments, framingId) {
+  const cfg = studioCfg();
+  const regions = (cfg.framingRegions || {})[framingId];
+  if (!regions) return { shown: garments || [], hidden: [] };
+  const shown = [], hidden = [];
+  for (const g of (garments || [])) {
+    const where = (cfg.categoryFrameRegions || {})[g.category];
+    if (!where || where.some(r => regions.includes(r))) shown.push(g);
+    else hidden.push(g);
+  }
+  return { shown, hidden };
 }
 
 // People first, then their faces, then the clothes — the order the prompt
@@ -7514,12 +7557,17 @@ function StudioChoiceRow({ label, options, value, onChange, compact }) {
 // One person in the shot: their clothes and their pose. A pose belongs to a
 // person rather than to the photograph, which is why it sits in here and not
 // with the lighting — two people in one frame are rarely doing the same thing.
-function StudioSubjectCard({ subject, index, count, library, onChange, onRemove, budgetLeft }) {
+function StudioSubjectCard({ subject, index, count, library, onChange, onRemove, budgetLeft, framingId }) {
   const cfg = studioCfg();
   const [showPicker, setShowPicker] = useState(false);
   const [capNote, setCapNote] = useState("");
   const c = subject.character;
   const garments = library ? closetGarments({ closet: subject.closet }, library).filter(g => g.image) : [];
+  // Which of them this crop cannot contain. Shown here rather than quietly
+  // dropped: the garment is still on her and still picked, but its photograph
+  // is not being sent, and a picker that looks identical either way would make
+  // that a thing you could only discover from the result.
+  const outOfFrame = new Set(studioFramedGarments(garments, framingId).hidden.map(g => g.id));
   const expressionChoices = filledExpressionSlots(c);
 
   // Grouped by category, the same as the picker. A row of eleven thumbnails is
@@ -7586,9 +7634,14 @@ function StudioSubjectCard({ subject, index, count, library, onChange, onRemove,
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
             {items.map(g => (
               <button key={g.id} onClick={() => choose(subject.closet.filter(x => x !== g.id))}
-                title={"Take off " + (g.name || "this")} style={S.studioGarment}>
+                title={outOfFrame.has(g.id)
+                  ? (g.name || "This") + " — worn, but outside this framing, so no photograph of it is sent"
+                  : "Take off " + (g.name || "this")}
+                style={{ ...S.studioGarment, opacity: outOfFrame.has(g.id) ? 0.4 : 1 }}>
                 <img src={g.image} alt="" style={{ width: 64, height: 64, objectFit: "cover", display: "block" }} />
-                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text2)", padding: "3px 4px", display: "block" }}>{g.name || "Untitled"}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text2)", padding: "3px 4px", display: "block" }}>
+                  {outOfFrame.has(g.id) ? "· " : ""}{g.name || "Untitled"}
+                </span>
               </button>
             ))}
           </div>
@@ -7675,7 +7728,15 @@ function PhotoStudio({ characters, userCharacter, onBack }) {
   const resolved = subjects
     .map(s => ({ ...s, character: castables.find(c => c.id === s.charId) }))
     .filter(s => s.character)
-    .map(s => ({ ...s, garments: library ? closetGarments({ closet: s.closet }, library).filter(g => g.image) : [] }));
+    // Split here, once, so the prompt and the reference list can never
+    // disagree about which garments are in this shot: `garments` is what gets
+    // a flat lay, `hidden` is what is named in words and photographed by
+    // nobody.
+    .map(s => {
+      const all = library ? closetGarments({ closet: s.closet }, library).filter(g => g.image) : [];
+      const { shown, hidden } = studioFramedGarments(all, choices.framing && choices.framing.id);
+      return { ...s, garments: shown, hidden };
+    });
 
   const inShot = new Set(resolved.map(s => s.charId));
   // Counted from the list that is actually sent rather than from a formula
@@ -7805,6 +7866,7 @@ function PhotoStudio({ characters, userCharacter, onBack }) {
 
         {resolved.map((s, i) => (
           <StudioSubjectCard key={s.charId} subject={s} index={i} count={resolved.length}
+            framingId={choices.framing && choices.framing.id}
             library={library} budgetLeft={budgetLeft}
             onChange={next => updateSubject(i, { charId: next.charId, closet: next.closet, pose: next.pose })}
             onRemove={() => removeSubject(i)} />

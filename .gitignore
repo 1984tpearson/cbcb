@@ -1,0 +1,7 @@
+# Local-only dev dependencies. CLAUDE.md asks for these to be installed so
+# check-app-boot.js can actually evaluate the app's top level rather than
+# skipping; nothing in the app itself is built from them, and the checked-in
+# pages load React and Babel from a CDN at runtime.
+node_modules/
+package.json
+package-lock.json
