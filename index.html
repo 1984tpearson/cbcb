@@ -3521,7 +3521,7 @@ function ClosetStrip({ closet, worn, wornState, onRemove, onToggleWorn, maxWorn 
 }
 
 // ─── CHARACTER PERSONALITY PANEL (in-chat) ────────────────────────────────────
-function CharacterPersonalityPanel({ character, onSave, onClose, model, settings }) {
+function CharacterPersonalityPanel({ character, onSave, onClose, model, settings, messages }) {
   const [sliders, setSliders] = useState(character.sliders || DEFAULT_SLIDERS);
   const [disabledSliders, setDisabledSliders] = useState(character.disabledSliders || []);
   const [reactiveEnabled, setReactiveEnabled] = useState(character.reactiveEnabled !== false);
@@ -3846,10 +3846,23 @@ function CharacterPersonalityPanel({ character, onSave, onClose, model, settings
                 setMemoryGenLoading(true);
                 setMemoryGenError("");
                 try {
-                  const chatHistory = storage.get(`chat_${character.id}`, []);
-                  const chatText = chatHistory.filter(m => m.role !== "image").map(m => `${m.role === "user" ? "User" : character.name}: ${m.content}`).join("\n");
-                  if (!chatText.trim()) { setMemoryGenLoading(false); return; }
-                  const raw = await aiComplete({ model: "meta-llama/llama-3.1-8b-instruct", messages: [{ role: "user", content:
+                  // The live conversation, passed down from the chat screen —
+                  // NOT localStorage. This read `chat_<id>` out of localStorage,
+                  // which nothing has written since chats moved to the server:
+                  // it always came back [], the empty-history guard below fired,
+                  // and the button cleared its own spinner and did nothing at
+                  // all, silently. That is why memory looked broken rather than
+                  // wrong. The server copy is the fallback for a panel opened
+                  // without live messages.
+                  let chatHistory = Array.isArray(messages) ? messages : [];
+                  if (chatHistory.length === 0) {
+                    chatHistory = await dataApi.getChat(character.id).catch(() => []);
+                  }
+                  const chatText = chatHistory.filter(m => m.role !== "image" && (m.content || "").trim()).map(m => `${m.role === "user" ? "User" : character.name}: ${m.content}`).join("\n");
+                  // Say so rather than stopping silently: an empty box after a
+                  // press is indistinguishable from a broken button.
+                  if (!chatText.trim()) { setMemoryGenError("No chat history to summarise yet."); setMemoryGenLoading(false); return; }
+                  const raw = await aiComplete({ model: model || settings.selectedModel || CFG.models.reactivity, messages: [{ role: "user", content:
   `Summarise the following roleplay conversation between a user and ${character.name}. Return a JSON object with two fields:
   - "summary": a 3-5 sentence narrative summary of what has happened so far — key events, emotional moments, how the relationship has developed
   - "facts": a concise bullet-point list of key facts to remember — names used, places, things agreed to, relationship milestones, important details mentioned
@@ -7413,7 +7426,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       )}
 
       {showPersonality && (
-        <CharacterPersonalityPanel character={character} model={settings.selectedModel} settings={settings} onSave={handlePersonalitySave} onClose={() => setShowPersonality(false)} />
+        <CharacterPersonalityPanel character={character} messages={messages} model={settings.selectedModel} settings={settings} onSave={handlePersonalitySave} onClose={() => setShowPersonality(false)} />
       )}
 
       {/* Opened from the header avatar. commitCharacter both updates the chat's
