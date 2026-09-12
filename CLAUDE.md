@@ -75,7 +75,23 @@ npm i @babel/core @babel/preset-react   # once
 node check-app-boot.js                  # skips cleanly if they are absent
 ```
 
-Run it after editing index.html, alongside `node check-interpolations.js`.
+**The same mistake one scope in is just as fatal, and the boot check cannot see
+it.** `check-app-boot.js` mounts nothing, so a const read above its declaration
+*inside a component* compiles, boots, and then throws the moment that screen is
+opened. `expressionSummary` in `UserProfileEditor` was an IIFE reading
+`expressions` forty lines above the const declaring it: the user profile editor
+took the whole app down with "Cannot access 'expressions' before
+initialization". `node check-tdz.js` walks every scope in the file for that
+shape — a reference that runs while its own function body is still running,
+above the line that declares it.
+
+Run all three after editing index.html:
+
+```
+node check-interpolations.js
+node check-app-boot.js
+node check-tdz.js
+```
 
 ## Two images per character, and they must never swap
 

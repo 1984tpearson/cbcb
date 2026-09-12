@@ -2868,10 +2868,6 @@ function UserProfileEditor({ persona, settings, title, onSave, onClose }) {
   const [imgPrompt, setImgPrompt] = useState("");
   const [analysing, setAnalysing] = useState(false);
   const [exprNote, setExprNote] = useState("");
-  const expressionSummary = (() => {
-    const n = Object.values(expressions || {}).filter(Boolean).length;
-    return n ? `${n} set` : "none";
-  })();
   const [suggestedAge, setSuggestedAge] = useState(null);
   const [lightbox, setLightbox] = useState(null);
   // Every base image this profile has had, newest first, so a regeneration you
@@ -2909,6 +2905,18 @@ function UserProfileEditor({ persona, settings, title, onSave, onClose }) {
   }));
   const expressions = form.expressionPhotos || {};
   const setExpressions = (next) => setForm(f => ({ ...f, expressionPhotos: next }));
+  // Below the declaration it reads, not above it. This ran on the line it was
+  // written on — an IIFE, evaluated the moment the component rendered — while
+  // `expressions` was still in its temporal dead zone forty lines further
+  // down, so opening this editor threw "Cannot access 'expressions' before
+  // initialization" and took the whole app down with it. Same trap as the
+  // top-level const ordering in CLAUDE.md, one scope in: check-app-boot.js
+  // evaluates the file's top level and never renders a component, so it
+  // cannot see this one.
+  const expressionSummary = (() => {
+    const n = Object.values(expressions || {}).filter(Boolean).length;
+    return n ? `${n} set` : "none";
+  })();
 
   // The same subject shape the character generator hands the image helpers:
   // a name, a gender, an age and an appearance. The user has all four.
