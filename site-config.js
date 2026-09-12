@@ -2540,6 +2540,88 @@
     return content;
   }
 
+  // The same call, streamed. Calls onDelta with each fragment as it arrives and
+  // resolves with the whole reply, so a caller that ignores onDelta behaves
+  // exactly like aiComplete.
+  //
+  // Falls back to aiComplete whenever streaming cannot be had — an ai-proxy
+  // that predates the passthrough, a response that is not an event stream, a
+  // browser without a readable body. The fallback only fires when nothing has
+  // been emitted yet; once fragments are on screen, re-running the request
+  // would write a second, different reply over the one being read.
+  async function aiStreamComplete({ model, messages, params, onDelta }) {
+    let res;
+    try {
+      res = await fetch(AI_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model, messages, ...(params || {}), stream: true }),
+      });
+    } catch (e) {
+      throw new Error(`AI proxy unreachable: ${e.message}`);
+    }
+
+    const contentType = (res.headers.get("content-type") || "").toLowerCase();
+    if (!res.ok || !res.body || !contentType.includes("text/event-stream")) {
+      return aiComplete({ model, messages, params });
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let full = "";
+    let sawAnyEvent = false;
+
+    const consume = (payload) => {
+      if (payload === "[DONE]") return;
+      let parsed;
+      try { parsed = JSON.parse(payload); } catch { return; }
+      sawAnyEvent = true;
+      if (parsed && parsed.error) {
+        const msg = typeof parsed.error === "string" ? parsed.error : (parsed.error.message || "stream error");
+        throw new Error(`AI proxy error: ${String(msg).slice(0, 200)}`);
+      }
+      const choice = parsed && parsed.choices && parsed.choices[0];
+      // delta on a stream, message on the single object some providers send
+      // as a final frame.
+      const piece = (choice && choice.delta && choice.delta.content)
+        || (choice && choice.message && choice.message.content)
+        || "";
+      if (!piece) return;
+      full += piece;
+      if (typeof onDelta === "function") onDelta(piece, full);
+    };
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // Events are separated by a blank line, but a fragment can end
+        // mid-event, so only whole lines are consumed and the tail is kept.
+        let nl;
+        while ((nl = buffer.indexOf("\n")) !== -1) {
+          const line = buffer.slice(0, nl).replace(/\r$/, "").trim();
+          buffer = buffer.slice(nl + 1);
+          // ": OPENROUTER PROCESSING" and friends are keep-alive comments.
+          if (!line || line.startsWith(":")) continue;
+          if (line.startsWith("data:")) consume(line.slice(5).trim());
+        }
+      }
+    } catch (e) {
+      if (full) throw e;
+      try { reader.cancel(); } catch {}
+      return aiComplete({ model, messages, params });
+    }
+
+    if (!full) {
+      // An empty stream is not an empty reply — something went wrong quietly.
+      if (!sawAnyEvent) return aiComplete({ model, messages, params });
+      throw new Error("AI proxy returned no completion");
+    }
+    return full;
+  }
+
   // Strips markdown fences and parses. Returns null instead of throwing —
   // callers decide whether a malformed reply is worth surfacing.
   function parseJsonReply(raw) {
@@ -2923,6 +3005,7 @@
     AI_PROXY_URL,
     call,
     aiComplete,
+    aiStreamComplete,
     // Recoverable image generation — see the block above.
     pendingImages,
     recordPendingImage,

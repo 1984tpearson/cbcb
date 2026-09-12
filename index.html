@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=71"></script>
+  <script src="site-config.js?v=72"></script>
   <script src="image-prompt.js?v=32"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -132,6 +132,7 @@
     @keyframes pulse { 0%, 100% { opacity: 0.3; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1); } }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    @keyframes caretBlink { 0%, 100% { opacity: 0.55; } 50% { opacity: 0; } }
 
     /* ── DISCREET MODE ────────────────────────────────────────────────── */
     .discreet-app { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif !important; background: #ffffff !important; }
@@ -311,7 +312,7 @@
     // just the first one that broke. A stale cached copy missing any of them
     // fails at a call site with a TypeError naming a function, which points
     // at anything except the caching that actually caused it.
-    const REQUIRED_EXPORTS = ["aiComplete", "parseJsonReply", "garmentGender", "garmentFitsGender",
+    const REQUIRED_EXPORTS = ["aiComplete", "aiStreamComplete", "parseJsonReply", "garmentGender", "garmentFitsGender",
       "pendingImages", "recordPendingImage", "dropPendingImage", "pollImageTask",
       "persistGeneratedImage", "startImageTaskSweeps", "recoveredImages"];
     if (!window.SiteConfig || REQUIRED_EXPORTS.some(k => typeof window.SiteConfig[k] !== "function")) {
@@ -595,6 +596,7 @@ const closetGarments = (character, library) => {
 // the same call and the same handling of its failures. Kept as a name here so
 // that every caller below reads as it always did.
 const aiComplete = window.SiteConfig.aiComplete;
+const aiStreamComplete = window.SiteConfig.aiStreamComplete;
 const parseJsonReply = window.SiteConfig.parseJsonReply;
 
 const storage = {
@@ -1299,7 +1301,7 @@ function buildPersonalityAddendum(sliders, gender, customGender, age, maritalSta
 
 
 // ─── API HELPERS ──────────────────────────────────────────────────────────────
-async function sendChat({ messages, character, model, settings }) {
+async function sendChat({ messages, character, model, settings, onDelta }) {
   const addendum = buildPersonalityAddendum(
     character.sliders || DEFAULT_SLIDERS,
     character.gender || "Female",
@@ -1403,7 +1405,10 @@ async function sendChat({ messages, character, model, settings }) {
     ...(replyLengthDirective ? [{ role: "user", content: replyLengthDirective }] : []),
   ];
 
-  const reply = await aiComplete({
+  // Streamed when the caller wants to show the reply arriving, plain otherwise.
+  // The trackers and the scene readers all want the finished text and nothing
+  // else, so they pass no onDelta and take the same path they always did.
+  const request = {
     model,
     messages: [{ role: "system", content: sysContent }, ...outbound],
     // Without these the model occasionally locks into a degenerate loop and
@@ -1414,7 +1419,10 @@ async function sendChat({ messages, character, model, settings }) {
       frequency_penalty: 0.4, presence_penalty: 0.2, repetition_penalty: 1.05,
       ...(replyLengthMaxTokens ? { max_tokens: replyLengthMaxTokens } : {}),
     },
-  });
+  };
+  const reply = onDelta
+    ? await aiStreamComplete({ ...request, onDelta })
+    : await aiComplete(request);
   return sanitizeReply(reply);
 }
 
@@ -5770,6 +5778,10 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [regenLoading, setRegenLoading] = useState(false);
+  // The reply as it arrives, shown in place of the typing dots and thrown away
+  // the moment the finished message is committed to the transcript. Never
+  // stored: the transcript only ever holds whole replies.
+  const [streamingText, setStreamingText] = useState("");
   const [imgLoading, setImgLoading] = useState(false);
   const [showCustomImgInput, setShowCustomImgInput] = useState(false);
   const [customImgPrompt, setCustomImgPrompt] = useState("");
@@ -5862,6 +5874,19 @@ function ChatWindow({ character: initialChar, settings, onBack, onUpdateCharacte
     dataApi.saveChatSession(sessionId, messages).catch(e => setError(e.message));
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // A reply that streams grows the bubble a fragment at a time, and without
+  // this it grows straight off the bottom of the screen. Instant rather than
+  // smooth: a smooth scroll per fragment never finishes before the next one
+  // starts, and the list ends up crawling behind the text. Only when the
+  // reader is already at the bottom — someone who has scrolled up to re-read
+  // something earlier should not be dragged back down mid-sentence.
+  useEffect(() => {
+    if (!streamingText) return;
+    const list = bottomRef.current?.parentElement;
+    if (list && list.scrollHeight - list.scrollTop - list.clientHeight > 160) return;
+    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+  }, [streamingText]);
 
   // The character list previews the last thing said, so the snippet rides on
   // the character rather than making the list fetch every chat. Committing only
@@ -6642,8 +6667,10 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     commitCharacter({ lastUsedAt: Date.now() });
     try {
       const stateBefore = sceneSnapshot(characterRef.current);
-      const reply = await sendChat({ messages: newMessages.filter(m => m.role !== "image"), character, model: settings.selectedModel, settings });
+      const reply = await sendChat({ messages: newMessages.filter(m => m.role !== "image"), character, model: settings.selectedModel, settings,
+        onDelta: (_piece, sofar) => setStreamingText(sofar) });
       const withReply = [...newMessages, { role: "assistant", content: reply }];
+      setStreamingText("");
       setMessages(m => [...m, { role: "assistant", content: reply, stateBefore }]);
       // Fire reactivity and wardrobe tracking in background — don't await, don't block
       applyReactivity(withReply, character);
@@ -6651,6 +6678,7 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       applyStaging(withReply, character);
       applyIntentions(withReply, character);
     } catch (e) { setError(e.message); }
+    setStreamingText("");
     setLoading(false);
   };
 
@@ -6668,8 +6696,10 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     const restoredChar = restoreScene(stateBefore);
     setMessages(trimmed); setRegenLoading(true); setError("");
     try {
-      const reply = await sendChat({ messages: messagesWithInstruction.filter(m => m.role !== "image"), character: restoredChar, model: settings.selectedModel, settings });
+      const reply = await sendChat({ messages: messagesWithInstruction.filter(m => m.role !== "image"), character: restoredChar, model: settings.selectedModel, settings,
+        onDelta: (_piece, sofar) => setStreamingText(sofar) });
       const withReply = [...trimmed, { role: "assistant", content: reply, stateBefore }];
+      setStreamingText("");
       setMessages(withReply);
       // Regeneration never re-ran the trackers, so the scene stayed frozen at
       // the pre-reply state until the next message. Run them on the new reply.
@@ -7078,13 +7108,25 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
 
         {(loading || regenLoading) && (
           <div style={{ ...S.bubbleWrapper, justifyContent: "flex-start" }} className="msg-anim">
-            <div style={{ ...S.messageBubble, ...S.aiBubble }}>
-              <span style={S.bubbleName}>{regenLoading ? `↺ ${character.name} is rethinking…` : character.name}</span>
-              <div style={S.typingDots}>
-                <span style={{ ...S.dot, animationDelay: "0s" }} />
-                <span style={{ ...S.dot, animationDelay: "0.2s" }} />
-                <span style={{ ...S.dot, animationDelay: "0.4s" }} />
-              </div>
+            <div style={{ ...S.messageBubble, ...(discreetMode ? { background: "#e9e9eb", border: "none", borderRadius: "18px 18px 18px 4px", boxShadow: "none" } : S.aiBubble), maxWidth: "75%" }}>
+              {!(discreetMode && streamingText) && (
+                <span style={S.bubbleName}>{regenLoading ? `↺ ${character.name} is rethinking…` : character.name}</span>
+              )}
+              {/* Dots until the first fragment lands, then the reply itself,
+                  growing in the same bubble it will finally sit in — the
+                  committed message replaces it without anything moving. */}
+              {streamingText ? (
+                <span>
+                  {renderMessageContent(streamingText, false, discreetMode ? { ...S.bubbleText, color: "#000", fontWeight: 400 } : S.bubbleText)}
+                  <span style={S.streamCaret} />
+                </span>
+              ) : (
+                <div style={S.typingDots}>
+                  <span style={{ ...S.dot, animationDelay: "0s" }} />
+                  <span style={{ ...S.dot, animationDelay: "0.2s" }} />
+                  <span style={{ ...S.dot, animationDelay: "0.4s" }} />
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -8501,6 +8543,9 @@ const S = {
   editTextarea: { width:"100%", minHeight:80, background:"var(--bg3)", border:"1px solid var(--border2)", borderRadius:10, padding:10, color:"var(--text)", fontSize:14, resize:"vertical", outline:"none", fontFamily:"inherit", boxSizing:"border-box", fontWeight:600 },
   msgActions: { display:"flex", gap:8, marginTop:4, paddingLeft:4 },
   msgActionBtn: { background:"none", border:"none", color:"var(--text4)", fontSize:11, cursor:"pointer", padding:"2px 5px", fontWeight:700 },
+  // A block that blinks at the end of the text as it streams, so a pause
+  // between fragments reads as the character thinking rather than as a stall.
+  streamCaret: { display:"inline-block", width:7, height:13, marginLeft:2, verticalAlign:"-1px", background:"currentColor", opacity:0.55, animation:"caretBlink 1s steps(2, start) infinite" },
   typingDots: { display:"flex", gap:5, alignItems:"center", height:20 },
   dot: { width:7, height:7, borderRadius:"50%", background:"var(--blue-light)", animation:"pulse 1.2s ease-in-out infinite" },
   imageMessage: { textAlign:"center", background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:16, padding:12, maxWidth:300, margin:"8px auto", boxShadow:"0 2px 8px var(--shadow)" },
