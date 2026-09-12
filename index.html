@@ -1344,6 +1344,26 @@ async function sendChat({ messages, character, model, settings }) {
     ? `\n\n[REPLY LENGTH — CRITICAL] ${String(replyLengthTier.prompt || "").trim()} This governs how long every reply is and overrides anything above that would make them longer or shorter — the writing-style, staging and physicality notes say how to write, not how much.`
     : "";
 
+  // The same instruction again, as the last thing in the request rather than a
+  // line in the system prompt. A system prompt this long — persona, twenty-odd
+  // traits, appearance, staging, memory — is a lot of context asking for rich
+  // prose, and one sentence inside it loses to all of it however loudly it is
+  // capitalised; a message at the end of the conversation does not. This is the
+  // same trick the ready-intention directive already uses, and for the same
+  // reason. Appended to the request only, never stored in the transcript.
+  const replyLengthDirective = replyLengthTier
+    ? `[Reply length for this reply — non-negotiable] ${String(replyLengthTier.prompt || "").trim()}`
+    : "";
+
+  // And a ceiling, because an instruction is a request and a token limit is
+  // not. Derived from the slider here rather than from a field on the tiers:
+  // traitTiers arrays are stored whole once edited, so a field added to the
+  // default tier list would never reach an owner who has edited them. Set well
+  // above what each tier actually asks for — it is a backstop against a reply
+  // that ignores the instruction outright, not the mechanism, and a cut
+  // mid-sentence should only ever happen to a reply already far over spec.
+  const replyLengthMaxTokens = replyLengthTier ? Math.round(120 + rl * 13) : null;
+
   const wardrobeClause = (character.charOutfit || character.userOutfit)
     ? `\n\n[WARDROBE — current clothing]\n${character.charOutfit ? `You are currently wearing: ${character.charOutfit}.` : ""}${character.userOutfit ? ` The person you're talking to is currently wearing: ${character.userOutfit}.` : ""} Reference these naturally if relevant — don't force it, but don't contradict them either.`
     : "";
@@ -1375,9 +1395,13 @@ async function sendChat({ messages, character, model, settings }) {
   // Appended to the request only — never stored in the conversation — exactly
   // as the regeneration instruction is.
   const turnDirective = readyIntentionDirective(character);
-  const outbound = turnDirective
-    ? [...messages, { role: "user", content: turnDirective.trim() }]
-    : messages;
+  const outbound = [
+    ...messages,
+    ...(turnDirective ? [{ role: "user", content: turnDirective.trim() }] : []),
+    // Last of everything the model reads, after the intention directive: an
+    // intention says what to do, this says how much room to do it in.
+    ...(replyLengthDirective ? [{ role: "user", content: replyLengthDirective }] : []),
+  ];
 
   const reply = await aiComplete({
     model,
@@ -1386,7 +1410,10 @@ async function sendChat({ messages, character, model, settings }) {
     // emits one token — usually "!" — dozens of times in a row. Kept modest:
     // roleplay prose legitimately repeats names, pet names and phrasings, and
     // heavy penalties make the writing read as strained.
-    params: { frequency_penalty: 0.4, presence_penalty: 0.2, repetition_penalty: 1.05 },
+    params: {
+      frequency_penalty: 0.4, presence_penalty: 0.2, repetition_penalty: 1.05,
+      ...(replyLengthMaxTokens ? { max_tokens: replyLengthMaxTokens } : {}),
+    },
   });
   return sanitizeReply(reply);
 }
