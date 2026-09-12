@@ -1330,15 +1330,19 @@ async function sendChat({ messages, character, model, settings }) {
   const memoryClause = (character.memorySummary || character.memoryFacts)
     ? `\n\n[MEMORY — what you already know]\n${character.memorySummary ? `Story so far: ${character.memorySummary}` : ""}${character.memoryFacts ? `\nKey facts: ${character.memoryFacts}` : ""}`
     : "";
-  // Pull reply length out of addendum and inject it first so it gets highest prompt weight
+  // Reply length is emitted on its own, out of the trait addendum, and last of
+  // all — see below for why it moved. Its wording is table-driven off
+  // CFG.traitTiers.replyLength, the same tiers the slider preview reads, so the
+  // label can never say something different from what the model is told. The
+  // ladder that used to sit here was hardcoded, so the owner's edits to Reply
+  // Length in settings.html changed the preview and never reached the prompt.
   const s = character.sliders || DEFAULT_SLIDERS;
-  const rl = s.replyLength ?? 50;
-  let replyLengthClause = "";
-  if (rl <= 20) replyLengthClause = "\n\n[REPLY LENGTH — CRITICAL] Keep all replies extremely short — one or two sentences maximum. Be terse. This overrides all other instructions.";
-  else if (rl <= 40) replyLengthClause = "\n\n[REPLY LENGTH — CRITICAL] Keep replies concise — 2 to 4 sentences maximum. Do not pad or elaborate.";
-  else if (rl <= 60) replyLengthClause = "\n\n[REPLY LENGTH] Give moderate-length replies — a short paragraph, enough to be engaging but not overwhelming.";
-  else if (rl <= 80) replyLengthClause = "\n\n[REPLY LENGTH] Give detailed, expressive replies of at least 2-3 paragraphs.";
-  else replyLengthClause = "\n\n[REPLY LENGTH — CRITICAL] Give long, rich, immersive replies — at least 3-4 paragraphs minimum. Elaborate freely, linger on details, describe feelings, actions, and surroundings in depth. Never cut yourself short.";
+  const replyLengthOff = new Set(character.disabledSliders || []).has("replyLength");
+  const rl = s.replyLength ?? CFG.sliderDefaults.replyLength ?? 50;
+  const replyLengthTier = replyLengthOff ? null : tierFor(CFG.traitTiers.replyLength, rl);
+  const replyLengthClause = replyLengthTier
+    ? `\n\n[REPLY LENGTH — CRITICAL] ${String(replyLengthTier.prompt || "").trim()} This governs how long every reply is and overrides anything above that would make them longer or shorter — the writing-style, staging and physicality notes say how to write, not how much.`
+    : "";
 
   const wardrobeClause = (character.charOutfit || character.userOutfit)
     ? `\n\n[WARDROBE — current clothing]\n${character.charOutfit ? `You are currently wearing: ${character.charOutfit}.` : ""}${character.userOutfit ? ` The person you're talking to is currently wearing: ${character.userOutfit}.` : ""} Reference these naturally if relevant — don't force it, but don't contradict them either.`
@@ -1360,7 +1364,13 @@ async function sendChat({ messages, character, model, settings }) {
       ].filter(Boolean).join(" ")} Stay physically consistent with this — don't teleport, stand up without standing up, or forget where you both are. Move only when the scene actually calls for it, and describe the movement when you do.`
     : "";
 
-  const sysContent = basePrompt + replyLengthClause + appearanceNote + addendum + voiceNote + personaNote + nsfwClause + actionClause + agencyClause + plainClause + wardrobeClause + stagingClause + memoryClause + intentionsNote + physicalityNote;
+  // Reply length goes last, not second. Placed near the top it was outranked by
+  // everything after it — the writing-style clause asking for blended prose, the
+  // staging and physicality notes asking for described movement — and the repo
+  // has already learned once that a rule sitting before the thing it overrides
+  // loses. It does not compete with the physicality note, which arbitrates
+  // distance rather than length, so both can be last in their own way.
+  const sysContent = basePrompt + appearanceNote + addendum + voiceNote + personaNote + nsfwClause + actionClause + agencyClause + plainClause + wardrobeClause + stagingClause + memoryClause + intentionsNote + physicalityNote + replyLengthClause;
 
   // Appended to the request only — never stored in the conversation — exactly
   // as the regeneration instruction is.
