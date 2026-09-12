@@ -169,3 +169,11 @@ but fast-forward `main` to it before saying the work is finished.
 the last fix is actually on `main`.** `git log --oneline origin/main..HEAD`
 answering with anything at all means the thing being tested is not the thing
 that was written.
+
+**And say so, every time, when something is not on `main`.** Finishing a round
+means ending it with either "this is on `main`, refresh and you have it" or an
+explicit "this is NOT on `main` yet, and here is why" — a branch name, a failing
+check, a question waiting on an answer. Never let a round end silent about it:
+silence reads as shipped, and the owner then tests code that is not running.
+Run `git log --oneline origin/main..HEAD` before saying the work is done and
+report what it answers. Standing instruction from the owner, given 2026-09-12.
