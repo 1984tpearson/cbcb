@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=72"></script>
+  <script src="site-config.js?v=73"></script>
   <script src="image-prompt.js?v=32"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -387,7 +387,7 @@
 
 <script type="text/x-app-source" id="app-source">
 
-const { useState, useEffect, useRef } = React;
+const { useState, useEffect, useRef, useMemo } = React;
 
 // Editable site config — the defaults in site-config.js, deep-merged with the
 // overrides saved from settings.html. Everything below reads from CFG instead
@@ -407,7 +407,25 @@ const REACTIVE_SLIDER_KEYS = CFG.reactiveSliderKeys;
 // Max drift per turn for each slider (base, before multipliers)
 const REACTIVE_MAX_DRIFT = CFG.reactiveMaxDrift;
 
+// What a model is called, for a collapsed section header that has to say which
+// one is selected without the dropdown being open.
+const modelLabel = (id) => (OPENROUTER_MODELS.find(m => m.id === id) || {}).label || id || "not set";
+
 const SLIDER_DEFS = CFG.sliderDefs.map(def => ({ ...def, previewFn: v => personalitySliderPreview(def.key, v) }));
+
+// Reply length is not one of them. It says how the app should behave, not what
+// the character is like — nobody's personality is "answers in four sentences" —
+// so it sits on its own rather than in a list of traits, and it is the one
+// slider the personality addendum has always had to be told to skip. Its value
+// still lives at sliders.replyLength and its wording still comes from
+// CFG.traitTiers.replyLength, so nothing about a saved character moves.
+const REPLY_LENGTH_DEF = {
+  key: "replyLength", label: "Reply Length", left: "Terse", right: "Verbose",
+  previewFn: v => personalitySliderPreview("replyLength", v),
+};
+const replyLengthOf = (sliders) => (sliders && sliders.replyLength != null)
+  ? sliders.replyLength
+  : (CFG.sliderDefaults.replyLength ?? 50);
 
 // The user, described the same way a character is. Everything past name,
 // gender and notes was added when the user got their own creator; appearance
@@ -2718,6 +2736,44 @@ function SliderRow({ def, value, onChange, off, onToggleOff, activateOnChange })
   );
 }
 
+// ─── COLLAPSIBLE SECTIONS ─────────────────────────────────────────────────────
+// Every long screen here was one scrolling column, which on a phone means the
+// thing you came for sits somewhere past everything you did not. A screen is
+// now a stack of sections, all shut when it opens and one open at a time:
+// opening a second closes the first, so the screen is never longer than its
+// headers plus whichever section is in use.
+//
+// The open section is held by the screen, not by each section. That is what
+// makes one-at-a-time possible at all — a section cannot close a sibling it
+// knows nothing about — and it is also why reopening a screen starts shut
+// again, since the state goes with the screen that was closed.
+function useAccordion(initial = null) {
+  const [openId, setOpenId] = useState(initial);
+  return useMemo(() => ({
+    openId,
+    isOpen: (id) => openId === id,
+    toggle: (id) => setOpenId(cur => (cur === id ? null : id)),
+  }), [openId]);
+}
+
+// `summary` is what the header says while shut — "3 active", "terse", the
+// outfit itself. Without it a closed screen is a list of nouns and every
+// question about the current state costs a tap, which is the crowding moved
+// rather than fixed.
+function Section({ acc, id, title, summary, children }) {
+  const open = acc.isOpen(id);
+  return (
+    <div style={{ ...S.section, ...(open ? S.sectionOpen : null) }}>
+      <div style={S.sectionHeader} onClick={() => acc.toggle(id)} role="button" aria-expanded={open}>
+        <span style={{ ...S.sectionTitle, color: open ? "var(--pink)" : "var(--text)" }}>{title}</span>
+        {!open && summary ? <span style={S.sectionSummary}>{summary}</span> : null}
+        <span style={{ ...S.sectionChevron, transform: open ? "rotate(90deg)" : "rotate(0deg)" }}>›</span>
+      </div>
+      {open && <div style={S.sectionBody}>{children}</div>}
+    </div>
+  );
+}
+
 function SliderGroup({ sliders, onChange, reactiveFirst, disabled, onToggleDisabled }) {
   const offKeys = new Set(disabled || []);
   let sections = [...new Set(SLIDER_DEFS.map(d => d.section))];
@@ -2812,6 +2868,10 @@ function UserProfileEditor({ persona, settings, title, onSave, onClose }) {
   const [imgPrompt, setImgPrompt] = useState("");
   const [analysing, setAnalysing] = useState(false);
   const [exprNote, setExprNote] = useState("");
+  const expressionSummary = (() => {
+    const n = Object.values(expressions || {}).filter(Boolean).length;
+    return n ? `${n} set` : "none";
+  })();
   const [suggestedAge, setSuggestedAge] = useState(null);
   const [lightbox, setLightbox] = useState(null);
   // Every base image this profile has had, newest first, so a regeneration you
@@ -3163,6 +3223,7 @@ function SettingsPanel({ settings, onSave, onClose }) {
   // fields here: it has as many tabs as the character creator does, and
   // Settings is already long enough to scroll past.
   const [showProfile, setShowProfile] = useState(false);
+  const acc = useAccordion();
   const persona = form.userPersona;
   const summary = [
     persona.name,
@@ -3179,38 +3240,47 @@ function SettingsPanel({ settings, onSave, onClose }) {
           <button style={S.iconBtn} onClick={onClose}>✕</button>
         </div>
         <div style={S.modalBody}>
-          <label style={S.label}>Chat Model</label>
-          <select style={S.select} value={form.selectedModel} onChange={e => setForm(f => ({...f, selectedModel: e.target.value}))}>
-            {OPENROUTER_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-          </select>
+          <Section acc={acc} id="models" title="Models" summary={modelLabel(form.selectedModel)}>
+            <label style={S.label}>Chat Model</label>
+            <select style={S.select} value={form.selectedModel} onChange={e => setForm(f => ({...f, selectedModel: e.target.value}))}>
+              {OPENROUTER_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
 
-          <label style={S.label}>Reactivity Model</label>
-          <select style={S.select} value={form.reactivityModel || "meta-llama/llama-3.1-8b-instruct"} onChange={e => setForm(f => ({...f, reactivityModel: e.target.value}))}>
-            {OPENROUTER_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-          </select>
-          <p style={{ fontSize:11, color:"var(--text4)", marginTop:3 }}>Cheaper/faster model used for personality drift analysis after each message. Llama 3.1 8B recommended.</p>
+            <label style={S.label}>Reactivity Model</label>
+            <select style={S.select} value={form.reactivityModel || "meta-llama/llama-3.1-8b-instruct"} onChange={e => setForm(f => ({...f, reactivityModel: e.target.value}))}>
+              {OPENROUTER_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
+            <p style={{ fontSize:11, color:"var(--text4)", marginTop:3 }}>Cheaper/faster model used for personality drift analysis after each message. Llama 3.1 8B recommended.</p>
 
-          <label style={S.label}>Image Model</label>
-          <select style={S.select} value={resolveImageModel(form.imageModel)} onChange={e => setForm(f => ({...f, imageModel: e.target.value}))}>
-            {DEZGO_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-          </select>
+            <label style={S.label}>Image Model</label>
+            <select style={S.select} value={resolveImageModel(form.imageModel)} onChange={e => setForm(f => ({...f, imageModel: e.target.value}))}>
+              {DEZGO_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
+          </Section>
 
-          <ImageTimings />
+          {/* Only when there is something to show: ImageTimings renders
+              nothing without rows, and a header that opens onto nothing is
+              worse than no header. */}
+          {readImageTimings().length > 0 && (
+            <Section acc={acc} id="timings" title="Image Timings" summary="where the time went">
+              <ImageTimings />
+            </Section>
+          )}
 
-          <div style={S.divider} />
-          <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>About You</span>
-          <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 4 }}>Used by characters so they know who they're talking to. Applies to all characters by default — individual characters can override this.</p>
+          <Section acc={acc} id="about" title="About You" summary={summary || "nothing set"}>
+            <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 4 }}>Used by characters so they know who they're talking to. Applies to all characters by default — individual characters can override this.</p>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {userPersonaAvatar(persona) && (
-              <img src={userPersonaAvatar(persona)} alt="you"
-                style={{ width: 48, height: 48, borderRadius: "50%", objectFit: "cover", flexShrink: 0, background: "var(--bg3)" }} />
-            )}
-            <span style={{ fontSize: 12, color: "var(--text3)", flex: 1, minWidth: 0 }}>
-              {summary || "Nothing set yet."}
-            </span>
-            <button style={S.btnPrimary} onClick={() => setShowProfile(true)}>Edit</button>
-          </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {userPersonaAvatar(persona) && (
+                <img src={userPersonaAvatar(persona)} alt="you"
+                  style={{ width: 48, height: 48, borderRadius: "50%", objectFit: "cover", flexShrink: 0, background: "var(--bg3)" }} />
+              )}
+              <span style={{ fontSize: 12, color: "var(--text3)", flex: 1, minWidth: 0 }}>
+                {summary || "Nothing set yet."}
+              </span>
+              <button style={S.btnPrimary} onClick={() => setShowProfile(true)}>Edit</button>
+            </div>
+          </Section>
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
@@ -3495,6 +3565,14 @@ function CharacterPersonalityPanel({ character, onSave, onClose, model, settings
   // different needs the same fields to say it with.
   const [showOverrideEditor, setShowOverrideEditor] = useState(false);
 
+  // Shut on open, one at a time. Held here rather than in each Section so a
+  // section can close the one before it.
+  const acc = useAccordion();
+  const identitySummary = [gender === "Custom" ? (customGender || "Custom") : gender, age, relationship === "Custom" ? relationshipCustom : relationship]
+    .filter(Boolean).join(" · ");
+  const behaviourSummary = [reactiveEnabled && "reactive", nsfw && "NSFW", autoImage && "auto image", speakPlainly && "plain"]
+    .filter(Boolean).join(" · ") || "all off";
+
   return (
     <div style={S.overlay}>
       <div style={{ ...S.modal, maxWidth: 480 }}>
@@ -3503,341 +3581,352 @@ function CharacterPersonalityPanel({ character, onSave, onClose, model, settings
           <button style={S.iconBtn} onClick={onClose}>✕</button>
         </div>
         <div style={S.modalBody}>
-          <label style={S.label}>Gender</label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {GENDERS.map(g => (
-              <button key={g} style={gender === g ? S.genderBtnOn : S.genderBtnOff} onClick={() => setGender(g)}>{g}</button>
-            ))}
-          </div>
-          {gender === "Custom" && (
-            <input style={{ ...S.input, marginTop: 8 }} placeholder="Describe gender identity..." value={customGender} onChange={e => setCustomGender(e.target.value)} />
-          )}
-
-          <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
-            <div style={{ flex: 1 }}>
-              <label style={S.label}>Age</label>
-              <input style={S.input} type="number" min="18" max="99" placeholder="e.g. 28"
-                value={age} onChange={e => setAge(e.target.value)} />
+          {/* Everything here used to be one column about a thousand pixels
+              tall. Same fields, same order, behind headers that open one at a
+              time. */}
+          <Section acc={acc} id="identity" title="Identity" summary={identitySummary}>
+            <label style={S.label}>Gender</label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {GENDERS.map(g => (
+                <button key={g} style={gender === g ? S.genderBtnOn : S.genderBtnOff} onClick={() => setGender(g)}>{g}</button>
+              ))}
             </div>
-            <div style={{ flex: 2 }}>
-              <label style={S.label}>Marital Status</label>
-              <select style={S.select} value={maritalStatus} onChange={e => setMaritalStatus(e.target.value)}>
-                {MARITAL_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <label style={S.label}>Relationship to User</label>
-          <select style={S.select} value={relationship} onChange={e => setRelationship(e.target.value)}>
-            <option value="">Not specified</option>
-            {RELATIONSHIP_TYPES.map(group => (
-              <optgroup key={group.group} label={group.group}>
-                {group.options.map(o => <option key={o} value={o}>{o}</option>)}
-              </optgroup>
-            ))}
-          </select>
-          {relationship === "Custom" && (
-            <input style={{ ...S.input, marginTop: 6 }} placeholder="e.g. next door neighbour's daughter..."
-              value={relationshipCustom} onChange={e => setRelationshipCustom(e.target.value)} />
-          )}
-
-          {/* Appearance used to be editable here. It is not any more: changing
-              it changed nothing visible, since chat images take their look from
-              the base image and not from these words. It lives in the body
-              editor now, next to the regenerate button that makes it real. */}
-          <div style={S.divider} />
-          <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Wardrobe</span>
-          <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Tracked automatically as clothing is mentioned in conversation. Edit manually to correct or set the starting state.</p>
-          <label style={S.label}>{character.name} is wearing</label>
-          <input style={S.input} placeholder="e.g. a black dress and heels"
-            value={charOutfit} onChange={e => setCharOutfit(e.target.value)} />
-          <label style={S.label}>User is wearing</label>
-          <input style={S.input} placeholder="e.g. jeans and a grey t-shirt"
-            value={userOutfit} onChange={e => setUserOutfit(e.target.value)} />
-          <button style={{ ...S.btnSecondary, marginTop: 4, color: "#c04060" }}
-            onClick={() => { setCharOutfit(""); setUserOutfit(""); setWorn([]); }}>
-            Clear Wardrobe
-          </button>
-
-          <label style={S.label}>{character.name}'s closet</label>
-          <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>
-            The clothes {character.name} owns, picked from the wardrobe. Tap one to put it on: worn garments are outlined, their photographs are sent to the image model so it draws those exact clothes, and their names go into the box above so she knows what she has on.
-          </p>
-          <ClosetStrip closet={closet} worn={worn} wornState={character.wornState}
-            // Her base image is the one reference always spent, so what is
-            // left for clothes is the budget less it.
-            maxWorn={MAX_REFERENCE_IMAGES - 1}
-            onRemove={id => { setCloset(c => c.filter(x => x !== id)); setWorn(w => w.filter(x => x !== id)); }}
-            onToggleWorn={(ids, names) => { setWorn(ids); setCharOutfit(names.join(", ")); }} />
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button style={S.btnSecondary} onClick={() => setShowClosetPicker(true)}>
-              {closet.length ? `Edit closet (${closet.length})` : "Add clothes"}
-            </button>
-            {closet.length > 0 && (
-              <button style={{ ...S.btnSecondary, color: "#c04060" }} onClick={() => { setCloset([]); setWorn([]); }}>Empty closet</button>
+            {gender === "Custom" && (
+              <input style={{ ...S.input, marginTop: 8 }} placeholder="Describe gender identity..." value={customGender} onChange={e => setCustomGender(e.target.value)} />
             )}
-          </div>
-          {/* For characters built before the wardrobe existed, and for one
-              whose persona has moved on from the clothes she was given.
-              Replaces the closet rather than adding to it — a restock is a
-              fresh answer to "what does this person own", and merging it with
-              the old one would leave the previous job's uniform in there
-              forever. Nothing is saved until Save Changes. */}
-          <button style={{ ...S.btnSecondary, marginTop: 8 }} disabled={closetBusy}
-            onClick={async () => {
-              setClosetBusy(true); setClosetNote("");
-              try {
-                const { closet: picked, missing, who } = await suggestCloset({
-                  character: { ...character, closet }, model });
-                if (picked.length) { setCloset(picked); setWorn(w => w.filter(id => picked.includes(id))); }
-                setClosetNote(picked.length
-                  ? `Picked ${picked.length}${who ? ` for ${who}` : ""}.${missing.length ? ` Nothing in the wardrobe for: ${missing.join(", ")}.` : ""} Save to keep them.`
-                  : "Couldn't pick anything — check there are garments in the wardrobe.");
-              } catch (e) { setClosetNote(`Failed: ${e.message}`); }
-              setClosetBusy(false);
-            }}>
-            {closetBusy ? "Choosing…" : (closet.length ? "Regenerate closet from wardrobe" : "Stock closet from wardrobe")}
-          </button>
-          {closetNote && <p style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>{closetNote}</p>}
-          {showClosetPicker && (
-            <ClosetPicker selected={closet} onChange={setCloset} subjectGender={subjectGenderOf({ gender, customGender })} onClose={() => setShowClosetPicker(false)} />
-          )}
 
-          <div style={S.divider} />
-          <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Scene / Staging</span>
-          <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Tracked automatically from the action text (*…*) in the conversation, and used to place the camera in generated images. Edit manually to correct or set the starting scene.</p>
-          <label style={S.label}>Location</label>
-          <input style={S.input} placeholder="e.g. a small kitchen at night"
-            value={staging?.location || ""} onChange={e => setStagingField("location", e.target.value)} />
-          <label style={S.label}>{character.name} is...</label>
-          <input style={S.input} placeholder="e.g. sitting on the edge of the bed, leaning forward"
-            value={staging?.charPose || ""} onChange={e => setStagingField("charPose", e.target.value)} />
-          <label style={S.label}>User is...</label>
-          <input style={S.input} placeholder="e.g. standing in the doorway"
-            value={staging?.userPose || ""} onChange={e => setStagingField("userPose", e.target.value)} />
-          <label style={S.label}>Distance apart</label>
-          <input style={S.input} placeholder="e.g. an arm's length apart"
-            value={staging?.proximity || ""} onChange={e => setStagingField("proximity", e.target.value)} />
-          <button style={{ ...S.btnSecondary, marginTop: 4, color: "#c04060" }}
-            onClick={() => setStaging(EMPTY_STAGING)}>
-            Clear Scene
-          </button>
+            <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
+              <div style={{ flex: 1 }}>
+                <label style={S.label}>Age</label>
+                <input style={S.input} type="number" min="18" max="99" placeholder="e.g. 28"
+                  value={age} onChange={e => setAge(e.target.value)} />
+              </div>
+              <div style={{ flex: 2 }}>
+                <label style={S.label}>Marital Status</label>
+                <select style={S.select} value={maritalStatus} onChange={e => setMaritalStatus(e.target.value)}>
+                  {MARITAL_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <label style={S.label}>Relationship to User</label>
+            <select style={S.select} value={relationship} onChange={e => setRelationship(e.target.value)}>
+              <option value="">Not specified</option>
+              {RELATIONSHIP_TYPES.map(group => (
+                <optgroup key={group.group} label={group.group}>
+                  {group.options.map(o => <option key={o} value={o}>{o}</option>)}
+                </optgroup>
+              ))}
+            </select>
+            {relationship === "Custom" && (
+              <input style={{ ...S.input, marginTop: 6 }} placeholder="e.g. next door neighbour's daughter..."
+                value={relationshipCustom} onChange={e => setRelationshipCustom(e.target.value)} />
+            )}
+
+            {/* Appearance used to be editable here. It is not any more: changing
+                it changed nothing visible, since chat images take their look from
+                the base image and not from these words. It lives in the body
+                editor now, next to the regenerate button that makes it real. */}
+          </Section>
+
+          <Section acc={acc} id="replyLength" title="Reply Length" summary={personalitySliderPreview("replyLength", replyLengthOf(sliders))}>
+            <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>How much {character.name} writes per reply. A setting rather than a personality trait, which is why it is no longer in with the sliders.</p>
+            <SliderRow def={REPLY_LENGTH_DEF} value={replyLengthOf(sliders)}
+              onChange={v => setSliders(s => ({ ...s, replyLength: v }))} />
+          </Section>
+
+          <Section acc={acc} id="wardrobe" title="Wardrobe" summary={charOutfit || "not set"}>
+            <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Tracked automatically as clothing is mentioned in conversation. Edit manually to correct or set the starting state.</p>
+            <label style={S.label}>{character.name} is wearing</label>
+            <input style={S.input} placeholder="e.g. a black dress and heels"
+              value={charOutfit} onChange={e => setCharOutfit(e.target.value)} />
+            <label style={S.label}>User is wearing</label>
+            <input style={S.input} placeholder="e.g. jeans and a grey t-shirt"
+              value={userOutfit} onChange={e => setUserOutfit(e.target.value)} />
+            <button style={{ ...S.btnSecondary, marginTop: 4, color: "#c04060" }}
+              onClick={() => { setCharOutfit(""); setUserOutfit(""); setWorn([]); }}>
+              Clear Wardrobe
+            </button>
+
+            <label style={S.label}>{character.name}'s closet</label>
+            <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>
+              The clothes {character.name} owns, picked from the wardrobe. Tap one to put it on: worn garments are outlined, their photographs are sent to the image model so it draws those exact clothes, and their names go into the box above so she knows what she has on.
+            </p>
+            <ClosetStrip closet={closet} worn={worn} wornState={character.wornState}
+              // Her base image is the one reference always spent, so what is
+              // left for clothes is the budget less it.
+              maxWorn={MAX_REFERENCE_IMAGES - 1}
+              onRemove={id => { setCloset(c => c.filter(x => x !== id)); setWorn(w => w.filter(x => x !== id)); }}
+              onToggleWorn={(ids, names) => { setWorn(ids); setCharOutfit(names.join(", ")); }} />
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button style={S.btnSecondary} onClick={() => setShowClosetPicker(true)}>
+                {closet.length ? `Edit closet (${closet.length})` : "Add clothes"}
+              </button>
+              {closet.length > 0 && (
+                <button style={{ ...S.btnSecondary, color: "#c04060" }} onClick={() => { setCloset([]); setWorn([]); }}>Empty closet</button>
+              )}
+            </div>
+            {/* For characters built before the wardrobe existed, and for one
+                whose persona has moved on from the clothes she was given.
+                Replaces the closet rather than adding to it — a restock is a
+                fresh answer to "what does this person own", and merging it with
+                the old one would leave the previous job's uniform in there
+                forever. Nothing is saved until Save Changes. */}
+            <button style={{ ...S.btnSecondary, marginTop: 8 }} disabled={closetBusy}
+              onClick={async () => {
+                setClosetBusy(true); setClosetNote("");
+                try {
+                  const { closet: picked, missing, who } = await suggestCloset({
+                    character: { ...character, closet }, model });
+                  if (picked.length) { setCloset(picked); setWorn(w => w.filter(id => picked.includes(id))); }
+                  setClosetNote(picked.length
+                    ? `Picked ${picked.length}${who ? ` for ${who}` : ""}.${missing.length ? ` Nothing in the wardrobe for: ${missing.join(", ")}.` : ""} Save to keep them.`
+                    : "Couldn't pick anything — check there are garments in the wardrobe.");
+                } catch (e) { setClosetNote(`Failed: ${e.message}`); }
+                setClosetBusy(false);
+              }}>
+              {closetBusy ? "Choosing…" : (closet.length ? "Regenerate closet from wardrobe" : "Stock closet from wardrobe")}
+            </button>
+            {closetNote && <p style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>{closetNote}</p>}
+            {showClosetPicker && (
+              <ClosetPicker selected={closet} onChange={setCloset} subjectGender={subjectGenderOf({ gender, customGender })} onClose={() => setShowClosetPicker(false)} />
+            )}
+          </Section>
+
+          <Section acc={acc} id="scene" title="Scene / Staging" summary={(staging && staging.location) || "not set"}>
+            <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Tracked automatically from the action text (*…*) in the conversation, and used to place the camera in generated images. Edit manually to correct or set the starting scene.</p>
+            <label style={S.label}>Location</label>
+            <input style={S.input} placeholder="e.g. a small kitchen at night"
+              value={staging?.location || ""} onChange={e => setStagingField("location", e.target.value)} />
+            <label style={S.label}>{character.name} is...</label>
+            <input style={S.input} placeholder="e.g. sitting on the edge of the bed, leaning forward"
+              value={staging?.charPose || ""} onChange={e => setStagingField("charPose", e.target.value)} />
+            <label style={S.label}>User is...</label>
+            <input style={S.input} placeholder="e.g. standing in the doorway"
+              value={staging?.userPose || ""} onChange={e => setStagingField("userPose", e.target.value)} />
+            <label style={S.label}>Distance apart</label>
+            <input style={S.input} placeholder="e.g. an arm's length apart"
+              value={staging?.proximity || ""} onChange={e => setStagingField("proximity", e.target.value)} />
+            <button style={{ ...S.btnSecondary, marginTop: 4, color: "#c04060" }}
+              onClick={() => setStaging(EMPTY_STAGING)}>
+              Clear Scene
+            </button>
+          </Section>
 
           {nsfw && (
-            <>
-              <div style={S.divider} />
-              <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Explicit Image Detail</span>
-              <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Your own wording, added to generated image prompts word for word — but only while NSFW is on and the scene reads as intimate. Leave empty to add nothing.</p>
-              <textarea style={{ ...S.input, height: 70, resize: "vertical" }}
-                placeholder="Wording to append to explicit image prompts..."
-                value={explicitDetail} onChange={e => setExplicitDetail(e.target.value)} />
-            </>
+            <Section acc={acc} id="explicit" title="Explicit Image Detail" summary={explicitDetail ? "set" : "not set"}>
+                <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Your own wording, added to generated image prompts word for word — but only while NSFW is on and the scene reads as intimate. Leave empty to add nothing.</p>
+                <textarea style={{ ...S.input, height: 70, resize: "vertical" }}
+                  placeholder="Wording to append to explicit image prompts..."
+                  value={explicitDetail} onChange={e => setExplicitDetail(e.target.value)} />
+            </Section>
           )}
 
-          <div style={S.divider} />
-          <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Private Intentions</span>
-          <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>
-            Things {character.name} quietly wants and works toward over many turns, without saying so. They form on their own as you talk — edit or add your own here. "Nerve" is how much courage the goal takes: the higher it is, the longer they work up to it, and a shy character takes longer than a bold one for the same goal. A goal can also have steps — things that must happen before it is even possible. They are worked through in order, one at a time, and only once they are all done does the character start on the goal itself.
-          </p>
-          <label style={{ ...S.label, display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
-            <input type="checkbox" checked={intentionsEnabled} onChange={e => setIntentionsEnabled(e.target.checked)} />
-            Let {character.name} form intentions
-          </label>
-          {intentions.length === 0 && (
-            <p style={{ fontSize: 12, color: "var(--text4)", margin: "6px 0" }}>
-              None yet — they appear after a few messages, or add one now.
+          <Section acc={acc} id="intentions" title="Private Intentions" summary={intentionsEnabled ? `${intentions.length} set` : "off"}>
+            <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>
+              Things {character.name} quietly wants and works toward over many turns, without saying so. They form on their own as you talk — edit or add your own here. "Nerve" is how much courage the goal takes: the higher it is, the longer they work up to it, and a shy character takes longer than a bold one for the same goal. A goal can also have steps — things that must happen before it is even possible. They are worked through in order, one at a time, and only once they are all done does the character start on the goal itself.
             </p>
-          )}
-          {intentions.map((intent, idx) => {
-            const threshold = currentThreshold(intent, sliders);
-            const pct = Math.round(Math.max(0, Math.min(1, (intent.progress || 0) / threshold)) * 100);
-            const done = (intent.status || "active") !== "active";
-            const set = (patch) => setIntentions(list => list.map((x, i) => i === idx ? { ...x, ...patch } : x));
-            // Steps are prerequisites, so the progress bar under them is
-            // always the CURRENT one's climb, not the goal's. Which is what
-            // makes the readout honest: "buy the ingredients — 60%" rather
-            // than a bar that barely moves while the groundwork is done.
-            const steps = Array.isArray(intent.steps) ? intent.steps : [];
-            const current = activeStep(intent);
-            const setSteps = (fn) => set({ steps: fn(steps) });
-            const setStep = (si, patch) => setSteps(list => list.map((x, i) => i === si ? { ...x, ...patch } : x));
-            return (
-              <div key={intent.id || idx} style={{ border:"1px solid var(--border)", borderRadius:10, padding:10, marginBottom:8, opacity: done ? 0.55 : 1 }}>
-                <textarea style={{ ...S.input, height: 48, resize:"vertical" }}
-                  value={intent.goal || ""} placeholder="what they want, e.g. get the user to come swimming"
-                  onChange={e => set({ goal: e.target.value })} />
-                <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:6 }}>
-                  <span style={{ fontSize:11, color:"var(--text4)", flexShrink:0 }}>Nerve</span>
-                  <input type="range" min={0} max={100} style={{ flex:1 }}
-                    value={intent.nerve ?? 40} onChange={e => set({ nerve: Number(e.target.value) })} />
-                  <span style={{ fontSize:11, color:"var(--text3)", width:26, textAlign:"right" }}>{intent.nerve ?? 40}</span>
+            <label style={{ ...S.label, display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
+              <input type="checkbox" checked={intentionsEnabled} onChange={e => setIntentionsEnabled(e.target.checked)} />
+              Let {character.name} form intentions
+            </label>
+            {intentions.length === 0 && (
+              <p style={{ fontSize: 12, color: "var(--text4)", margin: "6px 0" }}>
+                None yet — they appear after a few messages, or add one now.
+              </p>
+            )}
+            {intentions.map((intent, idx) => {
+              const threshold = currentThreshold(intent, sliders);
+              const pct = Math.round(Math.max(0, Math.min(1, (intent.progress || 0) / threshold)) * 100);
+              const done = (intent.status || "active") !== "active";
+              const set = (patch) => setIntentions(list => list.map((x, i) => i === idx ? { ...x, ...patch } : x));
+              // Steps are prerequisites, so the progress bar under them is
+              // always the CURRENT one's climb, not the goal's. Which is what
+              // makes the readout honest: "buy the ingredients — 60%" rather
+              // than a bar that barely moves while the groundwork is done.
+              const steps = Array.isArray(intent.steps) ? intent.steps : [];
+              const current = activeStep(intent);
+              const setSteps = (fn) => set({ steps: fn(steps) });
+              const setStep = (si, patch) => setSteps(list => list.map((x, i) => i === si ? { ...x, ...patch } : x));
+              return (
+                <div key={intent.id || idx} style={{ border:"1px solid var(--border)", borderRadius:10, padding:10, marginBottom:8, opacity: done ? 0.55 : 1 }}>
+                  <textarea style={{ ...S.input, height: 48, resize:"vertical" }}
+                    value={intent.goal || ""} placeholder="what they want, e.g. get the user to come swimming"
+                    onChange={e => set({ goal: e.target.value })} />
+                  <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:6 }}>
+                    <span style={{ fontSize:11, color:"var(--text4)", flexShrink:0 }}>Nerve</span>
+                    <input type="range" min={0} max={100} style={{ flex:1 }}
+                      value={intent.nerve ?? 40} onChange={e => set({ nerve: Number(e.target.value) })} />
+                    <span style={{ fontSize:11, color:"var(--text3)", width:26, textAlign:"right" }}>{intent.nerve ?? 40}</span>
+                  </div>
+                  <div style={{ marginTop:10 }}>
+                    <span style={{ fontSize:11, color:"var(--text4)" }}>
+                      Steps first {steps.length > 0 ? `(${steps.filter(st => st.done).length}/${steps.length} done)` : ""}
+                    </span>
+                    {steps.length === 0 && (
+                      <p style={{ fontSize:11, color:"var(--text4)", margin:"4px 0" }}>
+                        None — they work on the goal directly. Add steps for something that cannot happen yet, e.g. buy the ingredients before baking the cake.
+                      </p>
+                    )}
+                    {steps.map((st, si) => (
+                      <div key={si} style={{ display:"flex", alignItems:"center", gap:6, marginTop:4,
+                        opacity: st.done ? 0.5 : 1 }}>
+                        <input type="checkbox" checked={!!st.done}
+                          title="Done"
+                          onChange={e => setStep(si, { done: e.target.checked })} />
+                        <input style={{ ...S.input, flex:1, fontSize:12, padding:"5px 7px",
+                          textDecoration: st.done ? "line-through" : "none" }}
+                          value={st.text || ""} placeholder="e.g. buy the ingredients"
+                          onChange={e => setStep(si, { text: e.target.value })} />
+                        <input type="number" min={0} max={100} title="Nerve for this step"
+                          style={{ ...S.input, width:52, fontSize:12, padding:"5px 6px" }}
+                          value={st.nerve ?? (CFG.intentions.defaultStepNerve ?? 15)}
+                          onChange={e => setStep(si, { nerve: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })} />
+                        <button style={{ ...S.btnSecondary, fontSize:11, padding:"4px 8px" }}
+                          onClick={() => setSteps(list => list.filter((_, i) => i !== si))}>×</button>
+                      </div>
+                    ))}
+                    <button style={{ ...S.btnSecondary, fontSize:11, padding:"4px 8px", marginTop:6 }}
+                      onClick={() => setSteps(list => [...list, { text:"", nerve: CFG.intentions.defaultStepNerve ?? 15, done:false }])}>
+                      + Add a step
+                    </button>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:8 }}>
+                    <span style={{ fontSize:11, color:"var(--text4)", flexShrink:0 }}>
+                      {current ? "Step" : "Progress"}
+                    </span>
+                    {/* Draggable, not just a readout. Progress only ever moved by
+                        the tracker's judgement, and the only control was a reset
+                        to zero — so a goal the scene had plainly set up could sit
+                        at 0%, stuck in the stage that says "nothing has come of
+                        this yet", with no way to say otherwise. */}
+                    <input type="range" min={0} max={100} style={{ flex:1 }}
+                      value={pct}
+                      onChange={e => set({ progress: Math.round((Number(e.target.value) / 100) * threshold) })} />
+                    <span style={{ fontSize:11, color: pct >= 100 ? "var(--pink)" : "var(--text3)", width:64, textAlign:"right" }}>
+                      {done ? (intent.status === "achieved" ? "achieved" : "dropped") : (pct >= 100 ? "ready" : `${pct}%`)}
+                    </span>
+                  </div>
+                  <div style={{ fontSize:11, color:"var(--text4)", marginTop:4 }}>
+                    {done ? "" : current
+                      ? `Working on: ${(current.text || "").trim() || "an unnamed step"}`
+                      : (steps.length ? "Groundwork done — working on the goal itself" : "")}
+                  </div>
+                  <div style={{ display:"flex", gap:8, marginTop:8 }}>
+                    {done
+                      ? <button style={{ ...S.btnSecondary, flex:1, fontSize:12 }} onClick={() => set({ status:"active" })}>Reactivate</button>
+                      : <button style={{ ...S.btnSecondary, flex:1, fontSize:12 }} onClick={() => set({ progress: 0 })}>Reset progress</button>}
+                    <button style={{ ...S.btnSecondary, flex:1, fontSize:12 }}
+                      onClick={() => setIntentions(list => list.filter((_, i) => i !== idx))}>Remove</button>
+                  </div>
                 </div>
-                <div style={{ marginTop:10 }}>
-                  <span style={{ fontSize:11, color:"var(--text4)" }}>
-                    Steps first {steps.length > 0 ? `(${steps.filter(st => st.done).length}/${steps.length} done)` : ""}
-                  </span>
-                  {steps.length === 0 && (
-                    <p style={{ fontSize:11, color:"var(--text4)", margin:"4px 0" }}>
-                      None — they work on the goal directly. Add steps for something that cannot happen yet, e.g. buy the ingredients before baking the cake.
-                    </p>
-                  )}
-                  {steps.map((st, si) => (
-                    <div key={si} style={{ display:"flex", alignItems:"center", gap:6, marginTop:4,
-                      opacity: st.done ? 0.5 : 1 }}>
-                      <input type="checkbox" checked={!!st.done}
-                        title="Done"
-                        onChange={e => setStep(si, { done: e.target.checked })} />
-                      <input style={{ ...S.input, flex:1, fontSize:12, padding:"5px 7px",
-                        textDecoration: st.done ? "line-through" : "none" }}
-                        value={st.text || ""} placeholder="e.g. buy the ingredients"
-                        onChange={e => setStep(si, { text: e.target.value })} />
-                      <input type="number" min={0} max={100} title="Nerve for this step"
-                        style={{ ...S.input, width:52, fontSize:12, padding:"5px 6px" }}
-                        value={st.nerve ?? (CFG.intentions.defaultStepNerve ?? 15)}
-                        onChange={e => setStep(si, { nerve: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })} />
-                      <button style={{ ...S.btnSecondary, fontSize:11, padding:"4px 8px" }}
-                        onClick={() => setSteps(list => list.filter((_, i) => i !== si))}>×</button>
-                    </div>
-                  ))}
-                  <button style={{ ...S.btnSecondary, fontSize:11, padding:"4px 8px", marginTop:6 }}
-                    onClick={() => setSteps(list => [...list, { text:"", nerve: CFG.intentions.defaultStepNerve ?? 15, done:false }])}>
-                    + Add a step
-                  </button>
-                </div>
-                <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:8 }}>
-                  <span style={{ fontSize:11, color:"var(--text4)", flexShrink:0 }}>
-                    {current ? "Step" : "Progress"}
-                  </span>
-                  {/* Draggable, not just a readout. Progress only ever moved by
-                      the tracker's judgement, and the only control was a reset
-                      to zero — so a goal the scene had plainly set up could sit
-                      at 0%, stuck in the stage that says "nothing has come of
-                      this yet", with no way to say otherwise. */}
-                  <input type="range" min={0} max={100} style={{ flex:1 }}
-                    value={pct}
-                    onChange={e => set({ progress: Math.round((Number(e.target.value) / 100) * threshold) })} />
-                  <span style={{ fontSize:11, color: pct >= 100 ? "var(--pink)" : "var(--text3)", width:64, textAlign:"right" }}>
-                    {done ? (intent.status === "achieved" ? "achieved" : "dropped") : (pct >= 100 ? "ready" : `${pct}%`)}
-                  </span>
-                </div>
-                <div style={{ fontSize:11, color:"var(--text4)", marginTop:4 }}>
-                  {done ? "" : current
-                    ? `Working on: ${(current.text || "").trim() || "an unnamed step"}`
-                    : (steps.length ? "Groundwork done — working on the goal itself" : "")}
-                </div>
-                <div style={{ display:"flex", gap:8, marginTop:8 }}>
-                  {done
-                    ? <button style={{ ...S.btnSecondary, flex:1, fontSize:12 }} onClick={() => set({ status:"active" })}>Reactivate</button>
-                    : <button style={{ ...S.btnSecondary, flex:1, fontSize:12 }} onClick={() => set({ progress: 0 })}>Reset progress</button>}
-                  <button style={{ ...S.btnSecondary, flex:1, fontSize:12 }}
-                    onClick={() => setIntentions(list => list.filter((_, i) => i !== idx))}>Remove</button>
-                </div>
-              </div>
-            );
-          })}
-          <button style={{ ...S.btnSecondary, marginBottom: 4 }}
-            onClick={() => setIntentions(list => [...list, {
-              id: `int_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-              goal: "", nerve: 40, progress: 0, status: "active", source: "manual", steps: [],
-            }])}>+ Add an intention</button>
+              );
+            })}
+            <button style={{ ...S.btnSecondary, marginBottom: 4 }}
+              onClick={() => setIntentions(list => [...list, {
+                id: `int_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                goal: "", nerve: 40, progress: 0, status: "active", source: "manual", steps: [],
+              }])}>+ Add an intention</button>
+          </Section>
 
-          <div style={S.divider} />
-          <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Memory</span>
-          <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Injected into every message so the character remembers past events even as the conversation grows long. Edit freely or regenerate from chat history.</p>
-          <label style={S.label}>Story So Far</label>
-          <textarea style={{ ...S.input, height: 90, resize: "vertical" }}
-            placeholder="A running narrative of what has happened between you and this character..."
-            value={memorySummary} onChange={e => setMemorySummary(e.target.value)} />
-          <label style={S.label}>Key Facts</label>
-          <textarea style={{ ...S.input, height: 70, resize: "vertical" }}
-            placeholder="Names used, places visited, things agreed to, relationship milestones..."
-            value={memoryFacts} onChange={e => setMemoryFacts(e.target.value)} />
-          <button
-            style={{ ...S.btnSecondary, marginTop: 4 }}
-            disabled={memoryGenLoading}
-            onClick={async () => {
-              setMemoryGenLoading(true);
-              setMemoryGenError("");
-              try {
-                const chatHistory = storage.get(`chat_${character.id}`, []);
-                const chatText = chatHistory.filter(m => m.role !== "image").map(m => `${m.role === "user" ? "User" : character.name}: ${m.content}`).join("\n");
-                if (!chatText.trim()) { setMemoryGenLoading(false); return; }
-                const raw = await aiComplete({ model: "meta-llama/llama-3.1-8b-instruct", messages: [{ role: "user", content:
-`Summarise the following roleplay conversation between a user and ${character.name}. Return a JSON object with two fields:
-- "summary": a 3-5 sentence narrative summary of what has happened so far — key events, emotional moments, how the relationship has developed
-- "facts": a concise bullet-point list of key facts to remember — names used, places, things agreed to, relationship milestones, important details mentioned
+          <Section acc={acc} id="memory" title="Memory" summary={(memorySummary || memoryFacts) ? "has memory" : "empty"}>
+            <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Injected into every message so the character remembers past events even as the conversation grows long. Edit freely or regenerate from chat history.</p>
+            <label style={S.label}>Story So Far</label>
+            <textarea style={{ ...S.input, height: 90, resize: "vertical" }}
+              placeholder="A running narrative of what has happened between you and this character..."
+              value={memorySummary} onChange={e => setMemorySummary(e.target.value)} />
+            <label style={S.label}>Key Facts</label>
+            <textarea style={{ ...S.input, height: 70, resize: "vertical" }}
+              placeholder="Names used, places visited, things agreed to, relationship milestones..."
+              value={memoryFacts} onChange={e => setMemoryFacts(e.target.value)} />
+            <button
+              style={{ ...S.btnSecondary, marginTop: 4 }}
+              disabled={memoryGenLoading}
+              onClick={async () => {
+                setMemoryGenLoading(true);
+                setMemoryGenError("");
+                try {
+                  const chatHistory = storage.get(`chat_${character.id}`, []);
+                  const chatText = chatHistory.filter(m => m.role !== "image").map(m => `${m.role === "user" ? "User" : character.name}: ${m.content}`).join("\n");
+                  if (!chatText.trim()) { setMemoryGenLoading(false); return; }
+                  const raw = await aiComplete({ model: "meta-llama/llama-3.1-8b-instruct", messages: [{ role: "user", content:
+  `Summarise the following roleplay conversation between a user and ${character.name}. Return a JSON object with two fields:
+  - "summary": a 3-5 sentence narrative summary of what has happened so far — key events, emotional moments, how the relationship has developed
+  - "facts": a concise bullet-point list of key facts to remember — names used, places, things agreed to, relationship milestones, important details mentioned
 
-Conversation:
-${chatText.slice(-8000)}
+  Conversation:
+  ${chatText.slice(-8000)}
 
-Return ONLY the JSON object, no other text.` }] });
-                const parsed = parseJsonReply(raw);
-                if (!parsed) throw new Error("Could not read the model's reply");
-                if (parsed.summary) setMemorySummary(parsed.summary);
-                if (parsed.facts) setMemoryFacts(typeof parsed.facts === "string" ? parsed.facts : parsed.facts.join("\n"));
-              } catch (e) { setMemoryGenError(e.message); }
-              setMemoryGenLoading(false);
-            }}>
-            {memoryGenLoading ? "Generating…" : "↺ Regenerate from Chat History"}
-          </button>
-          {memoryGenError && <span style={{ fontSize: 12, color: "#c04060" }}>{memoryGenError}</span>}
-          <button style={{ ...S.btnSecondary, marginTop: 4, color: "#c04060" }}
-            onClick={() => { setMemorySummary(""); setMemoryFacts(""); }}>
-            Clear Memory
-          </button>
+  Return ONLY the JSON object, no other text.` }] });
+                  const parsed = parseJsonReply(raw);
+                  if (!parsed) throw new Error("Could not read the model's reply");
+                  if (parsed.summary) setMemorySummary(parsed.summary);
+                  if (parsed.facts) setMemoryFacts(typeof parsed.facts === "string" ? parsed.facts : parsed.facts.join("\n"));
+                } catch (e) { setMemoryGenError(e.message); }
+                setMemoryGenLoading(false);
+              }}>
+              {memoryGenLoading ? "Generating…" : "↺ Regenerate from Chat History"}
+            </button>
+            {memoryGenError && <span style={{ fontSize: 12, color: "#c04060" }}>{memoryGenError}</span>}
+            <button style={{ ...S.btnSecondary, marginTop: 4, color: "#c04060" }}
+              onClick={() => { setMemorySummary(""); setMemoryFacts(""); }}>
+              Clear Memory
+            </button>
+          </Section>
 
-          <div style={S.divider} />
-          <span style={{ ...S.label, color:"var(--pink)", fontSize:13 }}>Personality Sliders</span>
-          <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 12 }}>These shape how the character speaks and behaves — changes take effect immediately.</p>
+          <Section acc={acc} id="sliders" title="Personality Sliders" summary={`${SLIDER_DEFS.length - disabledSliders.length} of ${SLIDER_DEFS.length} on`}>
+            <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 12 }}>These shape how the character speaks and behaves — changes take effect immediately.</p>
 
-          <SliderGroup sliders={sliders} onChange={(key, v) => setSliders(s => ({ ...s, [key]: v }))} reactiveFirst
-            disabled={disabledSliders}
-            onToggleDisabled={(key, off) => setDisabledSliders(d => off ? [...d, key] : d.filter(k => k !== key))} />
+            <SliderGroup sliders={sliders} onChange={(key, v) => setSliders(s => ({ ...s, [key]: v }))} reactiveFirst
+              disabled={disabledSliders}
+              onToggleDisabled={(key, off) => setDisabledSliders(d => off ? [...d, key] : d.filter(k => k !== key))} />
+          </Section>
 
-          <div style={S.divider} />
-          <div style={S.toggleRow}>
-            <span style={S.label}>Reactive Personality</span>
-            <button style={reactiveEnabled ? S.toggleOn : S.toggleOff} onClick={() => setReactiveEnabled(v => !v)}>{reactiveEnabled ? "ON" : "OFF"}</button>
-          </div>
-          <p style={{ fontSize: 11, color: "var(--text4)", marginTop: -4 }}>When on, personality sliders drift gradually based on conversation — familiarity, attraction, and mood all evolve naturally over time.</p>
-
-          <div style={S.divider} />
-          <div style={S.toggleRow}>
-            <span style={S.label}>NSFW Content</span>
-            <button style={nsfw ? S.toggleOn : S.toggleOff} onClick={() => setNsfw(v => !v)}>{nsfw ? "ON" : "OFF"}</button>
-          </div>
-          <div style={S.toggleRow}>
-            <span style={S.label}>Auto Image Generation</span>
-            <button style={autoImage ? S.toggleOn : S.toggleOff} onClick={() => setAutoImage(v => !v)}>{autoImage ? "ON" : "OFF"}</button>
-          </div>
-          <div style={S.toggleRow}>
-            <span style={S.label}>Speak Plainly</span>
-            <button style={speakPlainly ? S.toggleOn : S.toggleOff} onClick={() => setSpeakPlainly(v => !v)}>{speakPlainly ? "ON" : "OFF"}</button>
-          </div>
-          <p style={{ fontSize: 11, color: "var(--text4)", marginTop: -4 }}>Reduces melodrama and purple prose — useful for models that lean flowery.</p>
-
-          <div style={S.divider} />
-          <div style={S.toggleRow}>
-            <span style={S.label}>Custom "About You" for this character</span>
-            <button style={useUserPersonaOverride ? S.toggleOn : S.toggleOff} onClick={() => setUseUserPersonaOverride(v => !v)}>{useUserPersonaOverride ? "ON" : "OFF"}</button>
-          </div>
-          {useUserPersonaOverride && (
-            <div style={{ marginTop: 8 }}>
-              <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 6 }}>Overrides your global "About You" settings just for {character.name}.</p>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                {userPersonaAvatar(userPersonaOverride) && (
-                  <img src={userPersonaAvatar(userPersonaOverride)} alt="you"
-                    style={{ width: 48, height: 48, borderRadius: "50%", objectFit: "cover", flexShrink: 0, background: "var(--bg3)" }} />
-                )}
-                <span style={{ fontSize: 12, color: "var(--text3)", flex: 1, minWidth: 0 }}>
-                  {[userPersonaOverride.name, personaGenderWord(userPersonaOverride), userPersonaOverride.age,
-                    userPersonaOverride.appearance ? "appearance set" : "",
-                    userPersonaOverride.referenceImage ? "images set" : ""].filter(Boolean).join(" · ") || "Nothing set yet."}
-                </span>
-                <button style={S.btnPrimary} onClick={() => setShowOverrideEditor(true)}>Edit</button>
-              </div>
+          <Section acc={acc} id="behaviour" title="Behaviour" summary={behaviourSummary}>
+            <div style={S.toggleRow}>
+              <span style={S.label}>Reactive Personality</span>
+              <button style={reactiveEnabled ? S.toggleOn : S.toggleOff} onClick={() => setReactiveEnabled(v => !v)}>{reactiveEnabled ? "ON" : "OFF"}</button>
             </div>
-          )}
+            <p style={{ fontSize: 11, color: "var(--text4)", marginTop: -4 }}>When on, personality sliders drift gradually based on conversation — familiarity, attraction, and mood all evolve naturally over time.</p>
+
+            <div style={S.toggleRow}>
+              <span style={S.label}>NSFW Content</span>
+              <button style={nsfw ? S.toggleOn : S.toggleOff} onClick={() => setNsfw(v => !v)}>{nsfw ? "ON" : "OFF"}</button>
+            </div>
+            <div style={S.toggleRow}>
+              <span style={S.label}>Auto Image Generation</span>
+              <button style={autoImage ? S.toggleOn : S.toggleOff} onClick={() => setAutoImage(v => !v)}>{autoImage ? "ON" : "OFF"}</button>
+            </div>
+            <div style={S.toggleRow}>
+              <span style={S.label}>Speak Plainly</span>
+              <button style={speakPlainly ? S.toggleOn : S.toggleOff} onClick={() => setSpeakPlainly(v => !v)}>{speakPlainly ? "ON" : "OFF"}</button>
+            </div>
+            <p style={{ fontSize: 11, color: "var(--text4)", marginTop: -4 }}>Reduces melodrama and purple prose — useful for models that lean flowery.</p>
+          </Section>
+
+          <Section acc={acc} id="aboutyou" title={`"About You" for ${character.name}`} summary={useUserPersonaOverride ? "custom" : "global"}>
+            <div style={S.toggleRow}>
+              <span style={S.label}>Custom "About You" for this character</span>
+              <button style={useUserPersonaOverride ? S.toggleOn : S.toggleOff} onClick={() => setUseUserPersonaOverride(v => !v)}>{useUserPersonaOverride ? "ON" : "OFF"}</button>
+            </div>
+            {useUserPersonaOverride && (
+              <div style={{ marginTop: 8 }}>
+                <p style={{ fontSize: 12, color: "#4a4840", marginBottom: 6 }}>Overrides your global "About You" settings just for {character.name}.</p>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {userPersonaAvatar(userPersonaOverride) && (
+                    <img src={userPersonaAvatar(userPersonaOverride)} alt="you"
+                      style={{ width: 48, height: 48, borderRadius: "50%", objectFit: "cover", flexShrink: 0, background: "var(--bg3)" }} />
+                  )}
+                  <span style={{ fontSize: 12, color: "var(--text3)", flex: 1, minWidth: 0 }}>
+                    {[userPersonaOverride.name, personaGenderWord(userPersonaOverride), userPersonaOverride.age,
+                      userPersonaOverride.appearance ? "appearance set" : "",
+                      userPersonaOverride.referenceImage ? "images set" : ""].filter(Boolean).join(" · ") || "Nothing set yet."}
+                  </span>
+                  <button style={S.btnPrimary} onClick={() => setShowOverrideEditor(true)}>Edit</button>
+                </div>
+              </div>
+            )}
+          </Section>
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
@@ -4102,6 +4191,18 @@ function AppearanceTabFields({ tab, face, onFace, appearance, onAppearance, body
   const groups = (FACE_CFG.groups || []).filter(g => (g.tab || "Face") === tab);
   const showStructure = tab === (FACE_CFG.structureTab || "Face");
   const colourFields = colourFieldsFor(tab, hasCharacterTab);
+  // A tab was every group at once — eyes, brows, nose, mouth, makeup, then the
+  // whole of face structure under them. One group at a time instead, keyed on
+  // the tab so switching tabs starts shut rather than reopening whatever
+  // happened to share a name.
+  const acc = useAccordion();
+  // What a group is currently set to, for its shut header. Fields left on the
+  // "leave it alone" value say nothing, which is the point — a header reading
+  // "green, almond" is the group worth opening.
+  const groupSummary = (group) => (group.fields || [])
+    .map(f => face[group.key][f.key])
+    .filter(v => v && v !== FACE_CFG.noneValue && v !== FACE_CFG.unsetValue)
+    .join(", ");
 
   if (tab === "Body") {
     return (
@@ -4162,8 +4263,7 @@ function AppearanceTabFields({ tab, face, onFace, appearance, onAppearance, body
         </div>
       )}
       {groups.map(group => (
-        <div key={group.key}>
-          <label style={S.label}>{group.label}</label>
+        <Section key={group.key} acc={acc} id={group.key} title={group.label} summary={groupSummary(group)}>
           <div style={grid}>
             {(group.fields || []).map(field => (
               <FaceField key={field.key} field={field}
@@ -4173,11 +4273,11 @@ function AppearanceTabFields({ tab, face, onFace, appearance, onAppearance, body
                 onCustomChange={v => onFace(group.key, field.key + "Custom", v)} />
             ))}
           </div>
-        </div>
+        </Section>
       ))}
       {showStructure && (
-        <div>
-          <label style={S.label}>Face structure</label>
+        <Section acc={acc} id="__structure" title="Face structure"
+          summary={(FACE_CFG.structure || []).map(f => face.structure[f.key]).filter(v => v && v !== FACE_CFG.unsetValue).join(", ")}>
           <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 4px" }}>
             Left on “{FACE_CFG.unsetValue}”, a trait is not mentioned at all and stays as it is. Changing one lets the
             face itself be reshaped, so the likeness will move.
@@ -4191,7 +4291,7 @@ function AppearanceTabFields({ tab, face, onFace, appearance, onAppearance, body
                 onCustomChange={v => onFace("structure", field.key + "Custom", v)} />
             ))}
           </div>
-        </div>
+        </Section>
       )}
     </div>
   );
@@ -4536,7 +4636,9 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
     return [{ id: "original", url: character.referenceImage, label: "Original", date: Date.now(), description: saved }];
   });
   const [extraPrompt, setExtraPrompt] = useState("");
-  const [showDesc, setShowDesc] = useState(false);
+  // The Images tab is its own accordion, separate from the appearance tabs':
+  // they are never on screen together, and one open section each is the point.
+  const imgAcc = useAccordion();
   const [avatar, setAvatar] = useState(() => normaliseAvatar(character.appearance && character.appearance.avatar));
   const patchAvatar = (patch) => setAvatar(a => ({ ...a, ...patch }));
   const [busy, setBusy] = useState("");
@@ -4835,63 +4937,58 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
               </p>
               <input style={{ ...S.input, marginTop: 8 }} placeholder="Extra instruction (optional) — e.g. smiling, hair tied back"
                 value={extraPrompt} onChange={e => setExtraPrompt(e.target.value)} />
-              <label style={S.label}>Photos of her</label>
-              <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 6px" }}>
-                Real photographs, read alongside the base image when it is regenerated. Another angle or another light
-                tells the generator more about a face than any description can. Never shown in the app.
-              </p>
-              {!!photos.length && (
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
-                  {photos.map((p, i) => (
-                    <div key={i} style={{ position: "relative" }}>
-                      <img src={p.url} alt={`photo ${i + 1}`} onClick={() => setLightbox(p.url)}
-                        style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, cursor: "zoom-in", background: "var(--bg3)", opacity: p.hosted ? 1 : 0.4 }} />
-                      <button onClick={() => setPhotos(ps => ps.filter((_, j) => j !== i))} title="Remove"
-                        style={{ position: "absolute", top: -6, right: -6, width: 18, height: 18, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 11, lineHeight: "18px", padding: 0, cursor: "pointer" }}>✕</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <button style={S.btnSecondary} onClick={() => photoRef.current.click()} disabled={!!busy}>
-                  {busy === "photos" ? "Uploading…" : photos.length ? "Add more photos" : "Add photos"}
-                </button>
-                <input ref={photoRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={addPhotos} />
-                {!!hostedPhotos.length && (
-                  <label style={{ fontSize: 12, color: "var(--text3)", display: "flex", alignItems: "center", gap: 6 }}>
-                    <input type="checkbox" checked={usePhotos} onChange={e => setUsePhotos(e.target.checked)} />
-                    Re-anchor to {hostedPhotos.length === 1 ? "it" : "them"} when regenerating
-                  </label>
+              <Section acc={imgAcc} id="photos" title="Photos of her" summary={photosInUse.length ? `${photosInUse.length} in use` : "none"}>
+                <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 6px" }}>
+                  Real photographs, read alongside the base image when it is regenerated. Another angle or another light
+                  tells the generator more about a face than any description can. Never shown in the app.
+                </p>
+                {!!photos.length && (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                    {photos.map((p, i) => (
+                      <div key={i} style={{ position: "relative" }}>
+                        <img src={p.url} alt={`photo ${i + 1}`} onClick={() => setLightbox(p.url)}
+                          style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, cursor: "zoom-in", background: "var(--bg3)", opacity: p.hosted ? 1 : 0.4 }} />
+                        <button onClick={() => setPhotos(ps => ps.filter((_, j) => j !== i))} title="Remove"
+                          style={{ position: "absolute", top: -6, right: -6, width: 18, height: 18, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 11, lineHeight: "18px", padding: 0, cursor: "pointer" }}>✕</button>
+                      </div>
+                    ))}
+                  </div>
                 )}
-              </div>
-              {usePhotos && !!changedKeys.length && (
-                <p style={{ fontSize: 12, color: "var(--blue)", margin: "6px 0 0" }}>
-                  The photos show her as she was, so they will argue with your change to{" "}
-                  {describeAppearanceChanges(changedKeys)} — and a photograph usually wins. Untick the box to make just
-                  that change from the base image.
-                </p>
-              )}
-              {!usePhotos && !!hostedPhotos.length && (
-                <p style={{ fontSize: 11, color: "var(--text3)", margin: "6px 0 0" }}>
-                  Not being used — this regenerates from the base image alone, so a change to her hair or makeup is all
-                  that moves. Tick the box when you want her pulled back towards the photographs instead.
-                </p>
-              )}
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <button style={S.btnSecondary} onClick={() => photoRef.current.click()} disabled={!!busy}>
+                    {busy === "photos" ? "Uploading…" : photos.length ? "Add more photos" : "Add photos"}
+                  </button>
+                  <input ref={photoRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={addPhotos} />
+                  {!!hostedPhotos.length && (
+                    <label style={{ fontSize: 12, color: "var(--text3)", display: "flex", alignItems: "center", gap: 6 }}>
+                      <input type="checkbox" checked={usePhotos} onChange={e => setUsePhotos(e.target.checked)} />
+                      Re-anchor to {hostedPhotos.length === 1 ? "it" : "them"} when regenerating
+                    </label>
+                  )}
+                </div>
+                {usePhotos && !!changedKeys.length && (
+                  <p style={{ fontSize: 12, color: "var(--blue)", margin: "6px 0 0" }}>
+                    The photos show her as she was, so they will argue with your change to{" "}
+                    {describeAppearanceChanges(changedKeys)} — and a photograph usually wins. Untick the box to make just
+                    that change from the base image.
+                  </p>
+                )}
+                {!usePhotos && !!hostedPhotos.length && (
+                  <p style={{ fontSize: 11, color: "var(--text3)", margin: "6px 0 0" }}>
+                    Not being used — this regenerates from the base image alone, so a change to her hair or makeup is all
+                    that moves. Tick the box when you want her pulled back towards the photographs instead.
+                  </p>
+                )}
+              </Section>
 
               <button style={{ ...S.btnPrimary, marginTop: 8 }} onClick={generateBase} disabled={!!busy}>
                 {busy === "base" ? "Generating…" : photosInUse.length ? "Generate base image from photos" : "Generate base image"}
               </button>
 
-              {/* The written description of THIS base image. Folded away by
-                  default because it is not something you set — it is read off
-                  the picture, and most of the time you never need to look at
-                  it. What it is for is on the label, since a description that
-                  never reaches an image is otherwise baffling. */}
-              <button style={{ ...S.btnSecondary, marginTop: 8, width: "100%", textAlign: "center" }}
-                onClick={() => setShowDesc(v => !v)} disabled={!baseUrl}>
-                {showDesc ? "▲ Hide written description" : description ? "▼ Written description" : "▼ Written description — none yet"}
-              </button>
-              {showDesc && (
+              {/* The written description of THIS base image. Shut by default
+                  because it is not something you set — it is read off the
+                  picture, and most of the time you never need to look at it. */}
+              <Section acc={imgAcc} id="description" title="Written description" summary={description ? "written" : "empty"}>
                 <div style={{ marginTop: 8 }}>
                   <p style={{ fontSize: 12, color: "var(--text3)", margin: "0 0 6px" }}>
                     How this image is described to the chat model in words. The image model never sees it — it sees the
@@ -4913,35 +5010,36 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
                     )}
                   </div>
                 </div>
-              )}
+              </Section>
 
-              <label style={S.label}>Previous versions</label>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {variants.map(v => (
-                  <div key={v.id} style={{ position: "relative" }}>
-                    <img src={v.url} alt={v.label} title={v.label} onClick={() => pickVariant(v)}
-                      style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, cursor: "pointer", background: "var(--bg3)", border: v.url === baseUrl ? "2px solid var(--pink)" : "2px solid transparent" }} />
-                    {v.id !== "original" && (
-                      <button onClick={() => removeVariant(v.id)} title="Remove"
-                        style={{ position: "absolute", top: -6, right: -6, width: 18, height: 18, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 11, lineHeight: "18px", padding: 0, cursor: "pointer" }}>✕</button>
-                    )}
-                  </div>
-                ))}
-                {!variants.length && <span style={{ fontSize: 12, color: "var(--text3)" }}>None yet.</span>}
-              </div>
+              <Section acc={imgAcc} id="variants" title="Previous versions" summary={variants.length ? `${variants.length}` : "none yet"}>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {variants.map(v => (
+                    <div key={v.id} style={{ position: "relative" }}>
+                      <img src={v.url} alt={v.label} title={v.label} onClick={() => pickVariant(v)}
+                        style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, cursor: "pointer", background: "var(--bg3)", border: v.url === baseUrl ? "2px solid var(--pink)" : "2px solid transparent" }} />
+                      {v.id !== "original" && (
+                        <button onClick={() => removeVariant(v.id)} title="Remove"
+                          style={{ position: "absolute", top: -6, right: -6, width: 18, height: 18, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 11, lineHeight: "18px", padding: 0, cursor: "pointer" }}>✕</button>
+                      )}
+                    </div>
+                  ))}
+                  {!variants.length && <span style={{ fontSize: 12, color: "var(--text3)" }}>None yet.</span>}
+                </div>
+              </Section>
 
-              <div style={S.divider} />
+              <Section acc={imgAcc} id="expressions" title="Expressions" summary={expressionSummary}>
+                <ExpressionSlots expressions={expressions} onChange={setExpressions}
+                  disabled={!!busy} note={exprNote} warnNoPhotos={!hostedPhotos.length}
+                  subject="her" onError={setError}
+                  baseImage={baseUrl} imageModel={settings.imageModel} />
+              </Section>
 
-              <ExpressionSlots expressions={expressions} onChange={setExpressions}
-                disabled={!!busy} note={exprNote} warnNoPhotos={!hostedPhotos.length}
-                subject="her" onError={setError}
-                baseImage={baseUrl} imageModel={settings.imageModel} />
-
-              <div style={S.divider} />
-
-              <AvatarControls avatar={avatar} onPatch={patchAvatar} avatarUrl={avatarUrl}
-                subject={character} model={settings.selectedModel}
-                onExpand={setLightbox} onGenerate={generateAvatar} busy={busy} />
+              <Section acc={imgAcc} id="avatar" title="Avatar" summary={avatarUrl ? "set" : "not set"}>
+                <AvatarControls avatar={avatar} onPatch={patchAvatar} avatarUrl={avatarUrl}
+                  subject={character} model={settings.selectedModel}
+                  onExpand={setLightbox} onGenerate={generateAvatar} busy={busy} />
+              </Section>
             </div>
           )}
 
@@ -4994,8 +5092,14 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
   const [showCustomImgInput, setShowCustomImgInput] = useState(false);
   const [customImgPrompt, setCustomImgPrompt] = useState("");
   const [error, setError] = useState("");
-  const [showSliders, setShowSliders] = useState(false);
+  // The sliders used to have their own show/hide button here, which was the
+  // right instinct applied to one block; every block on this tab has it now.
+  const acc = useAccordion();
   const [tab, setTab] = useState("Character");
+  const formIdentitySummary = [form.name, form.gender === "Custom" ? (form.customGender || "Custom") : form.gender, form.age]
+    .filter(Boolean).join(" · ") || "unnamed";
+  const formBehaviourSummary = [form.nsfw && "NSFW", form.autoImage && "auto image", form.speakPlainly && "plain"]
+    .filter(Boolean).join(" · ") || "all off";
 
   // The appearance tabs are shared with the appearance editor, which holds face
   // and tattoos as their own state. Here they live inside the form, so these
@@ -5335,125 +5439,121 @@ function CharacterForm({ character, onSave, onCancel, settings }) {
           </div>
           <p style={{ fontSize: 12, color: "#4a4840", margin: "4px 0 8px" }}>Populates name & personality — editable after.</p>
 
-          <div style={S.divider} />
+          <Section acc={acc} id="identity" title="Identity" summary={formIdentitySummary}>
+            {/* Name */}
+            <label style={S.label}>Name</label>
+            <input style={S.input} placeholder="Character name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
 
-          {/* Name */}
-          <label style={S.label}>Name</label>
-          <input style={S.input} placeholder="Character name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-
-          {/* Gender */}
-          <label style={S.label}>Gender</label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {GENDERS.map(g => (
-              <button key={g} style={form.gender === g ? S.genderBtnOn : S.genderBtnOff} onClick={() => setForm(f => ({ ...f, gender: g }))}>{g}</button>
-            ))}
-          </div>
-          {form.gender === "Custom" && (
-            <input style={{ ...S.input, marginTop: 8 }} placeholder="Describe gender identity..." value={form.customGender || ""} onChange={e => setForm(f => ({ ...f, customGender: e.target.value }))} />
-          )}
-
-          {/* Ethnicity sits with name, gender and age rather than on an
-              appearance tab: it is read as who the character is, and it is the
-              one appearance field that also reaches the written prompts. */}
-          <ColourField field={ETHNICITY_FIELD}
-            appearance={{ ...DEFAULT_APPEARANCE, ...(form.appearance || {}) }}
-            onChange={patchAppearance} />
-
-          {/* Age & Marital Status */}
-          <div style={{ display: "flex", gap: 12 }}>
-            <div style={{ flex: 1 }}>
-              <label style={S.label}>Age</label>
-              <input style={S.input} type="number" min="18" max="99" placeholder="e.g. 28"
-                value={form.age || ""} onChange={e => setForm(f => ({ ...f, age: e.target.value }))} />
+            {/* Gender */}
+            <label style={S.label}>Gender</label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {GENDERS.map(g => (
+                <button key={g} style={form.gender === g ? S.genderBtnOn : S.genderBtnOff} onClick={() => setForm(f => ({ ...f, gender: g }))}>{g}</button>
+              ))}
             </div>
-            <div style={{ flex: 2 }}>
-              <label style={S.label}>Marital Status</label>
-              {/* Blank rather than Single by default. Vibe used to treat Single
-                  as "not chosen" and roll its own status over the top, so the
-                  one status you could not ask for was the commonest one. */}
-              <select style={S.select} value={form.maritalStatus || ""} onChange={e => setForm(f => ({ ...f, maritalStatus: e.target.value }))}>
-                <option value="">Any — let the vibe decide</option>
-                {MARITAL_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
+            {form.gender === "Custom" && (
+              <input style={{ ...S.input, marginTop: 8 }} placeholder="Describe gender identity..." value={form.customGender || ""} onChange={e => setForm(f => ({ ...f, customGender: e.target.value }))} />
+            )}
+
+            {/* Ethnicity sits with name, gender and age rather than on an
+                appearance tab: it is read as who the character is, and it is the
+                one appearance field that also reaches the written prompts. */}
+            <ColourField field={ETHNICITY_FIELD}
+              appearance={{ ...DEFAULT_APPEARANCE, ...(form.appearance || {}) }}
+              onChange={patchAppearance} />
+
+            {/* Age & Marital Status */}
+            <div style={{ display: "flex", gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <label style={S.label}>Age</label>
+                <input style={S.input} type="number" min="18" max="99" placeholder="e.g. 28"
+                  value={form.age || ""} onChange={e => setForm(f => ({ ...f, age: e.target.value }))} />
+              </div>
+              <div style={{ flex: 2 }}>
+                <label style={S.label}>Marital Status</label>
+                {/* Blank rather than Single by default. Vibe used to treat Single
+                    as "not chosen" and roll its own status over the top, so the
+                    one status you could not ask for was the commonest one. */}
+                <select style={S.select} value={form.maritalStatus || ""} onChange={e => setForm(f => ({ ...f, maritalStatus: e.target.value }))}>
+                  <option value="">Any — let the vibe decide</option>
+                  {MARITAL_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
             </div>
-          </div>
 
-          {/* Relationship to User */}
-          <label style={S.label}>Relationship to User</label>
-          <select style={S.select} value={form.relationship || ""} onChange={e => setForm(f => ({ ...f, relationship: e.target.value }))}>
-            <option value="">Not specified</option>
-            {RELATIONSHIP_TYPES.map(group => (
-              <optgroup key={group.group} label={group.group}>
-                {group.options.map(o => <option key={o} value={o}>{o}</option>)}
-              </optgroup>
-            ))}
-          </select>
-          {form.relationship === "Custom" && (
-            <input style={{ ...S.input, marginTop: 6 }} placeholder="e.g. next door neighbour's daughter..."
-              value={form.relationshipCustom || ""} onChange={e => setForm(f => ({ ...f, relationshipCustom: e.target.value }))} />
-          )}
+            {/* Relationship to User */}
+            <label style={S.label}>Relationship to User</label>
+            <select style={S.select} value={form.relationship || ""} onChange={e => setForm(f => ({ ...f, relationship: e.target.value }))}>
+              <option value="">Not specified</option>
+              {RELATIONSHIP_TYPES.map(group => (
+                <optgroup key={group.group} label={group.group}>
+                  {group.options.map(o => <option key={o} value={o}>{o}</option>)}
+                </optgroup>
+              ))}
+            </select>
+            {form.relationship === "Custom" && (
+              <input style={{ ...S.input, marginTop: 6 }} placeholder="e.g. next door neighbour's daughter..."
+                value={form.relationshipCustom || ""} onChange={e => setForm(f => ({ ...f, relationshipCustom: e.target.value }))} />
+            )}
+          </Section>
 
-          {/* Persona */}
-          <label style={S.label}>Personality / System Prompt</label>
-          <textarea style={{ ...S.input, height: 90, resize: "vertical" }} placeholder="Describe how this character speaks, their backstory, personality..."
-            value={form.persona} onChange={e => setForm(f => ({ ...f, persona: e.target.value }))} />
+          <Section acc={acc} id="persona" title="Personality / System Prompt" summary={form.persona ? "written" : "empty"}>
+            {/* Persona */}
+            <label style={S.label}>Personality / System Prompt</label>
+            <textarea style={{ ...S.input, height: 90, resize: "vertical" }} placeholder="Describe how this character speaks, their backstory, personality..."
+              value={form.persona} onChange={e => setForm(f => ({ ...f, persona: e.target.value }))} />
+          </Section>
 
-          {/* Closet. Stocked automatically by the vibe generator; the button is
-              for a persona written by hand, which never went through it. */}
-          <label style={S.label}>Closet</label>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button style={S.btnSecondary} disabled={closetLoading}
-              onClick={async () => {
-                setClosetLoading(true); setClosetNote("");
-                try {
-                  const { closet, missing, who } = await suggestCloset({ character: form, model: settings.selectedModel });
-                  if (closet.length) setForm(f => ({ ...f, closet }));
-                  setClosetNote(closet.length
-                    ? `Stocked ${closet.length}${who ? ` for ${who}` : ""}.${missing.length ? ` Nothing in the wardrobe for: ${missing.join(", ")}.` : ""}`
-                    : "Couldn't pick anything — is there a persona, and are there garments in the wardrobe?");
-                } catch (e) { setClosetNote(`Failed: ${e.message}`); }
-                setClosetLoading(false);
-              }}>
-              {closetLoading ? "Choosing…" : ((form.closet || []).length ? "Restock from wardrobe" : "Stock from wardrobe")}
-            </button>
-            <span style={{ fontSize: 12, color: "var(--text3)" }}>
-              {(form.closet || []).length ? `${form.closet.length} garments` : "empty"}
-            </span>
-          </div>
-          {closetNote && <p style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>{closetNote}</p>}
+          <Section acc={acc} id="closet" title="Closet" summary={(form.closet || []).length ? `${form.closet.length} garments` : "empty"}>
+            {/* Closet. Stocked automatically by the vibe generator; the button is
+                for a persona written by hand, which never went through it. */}
+            <label style={S.label}>Closet</label>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button style={S.btnSecondary} disabled={closetLoading}
+                onClick={async () => {
+                  setClosetLoading(true); setClosetNote("");
+                  try {
+                    const { closet, missing, who } = await suggestCloset({ character: form, model: settings.selectedModel });
+                    if (closet.length) setForm(f => ({ ...f, closet }));
+                    setClosetNote(closet.length
+                      ? `Stocked ${closet.length}${who ? ` for ${who}` : ""}.${missing.length ? ` Nothing in the wardrobe for: ${missing.join(", ")}.` : ""}`
+                      : "Couldn't pick anything — is there a persona, and are there garments in the wardrobe?");
+                  } catch (e) { setClosetNote(`Failed: ${e.message}`); }
+                  setClosetLoading(false);
+                }}>
+                {closetLoading ? "Choosing…" : ((form.closet || []).length ? "Restock from wardrobe" : "Stock from wardrobe")}
+              </button>
+              <span style={{ fontSize: 12, color: "var(--text3)" }}>
+                {(form.closet || []).length ? `${form.closet.length} garments` : "empty"}
+              </span>
+            </div>
+            {closetNote && <p style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>{closetNote}</p>}
+          </Section>
 
-          {/* Sliders toggle */}
-          <button style={{ ...S.btnSecondary, marginTop: 8, width: "100%", textAlign: "center" }}
-            onClick={() => setShowSliders(v => !v)}>
-            {showSliders ? "▲ Hide Personality Sliders" : "▼ Personality Sliders"}
-          </button>
-
-          {showSliders && (
+          <Section acc={acc} id="sliders" title="Personality Sliders" summary={`${SLIDER_DEFS.length - (form.disabledSliders || []).length} of ${SLIDER_DEFS.length} on`}>
             <div style={{ marginTop: 12 }}>
               <SliderGroup sliders={form.sliders} onChange={(key, v) => setForm(f => ({ ...f, sliders: { ...f.sliders, [key]: v } }))}
                 disabled={form.disabledSliders || []}
                 onToggleDisabled={(key, off) => setForm(f => ({ ...f, disabledSliders: off ? [...(f.disabledSliders || []), key] : (f.disabledSliders || []).filter(k => k !== key) }))} />
             </div>
-          )}
+          </Section>
 
-          <div style={S.divider} />
-
-          {/* Toggles */}
-          <div style={S.toggleRow}>
-            <span style={S.label}>NSFW Content</span>
-            <button style={form.nsfw ? S.toggleOn : S.toggleOff} onClick={() => setForm(f => ({ ...f, nsfw: !f.nsfw }))}>{form.nsfw ? "ON" : "OFF"}</button>
-          </div>
-          <div style={S.toggleRow}>
-            <span style={S.label}>Auto Image Generation</span>
-            <button style={form.autoImage ? S.toggleOn : S.toggleOff} onClick={() => setForm(f => ({ ...f, autoImage: !f.autoImage }))}>{form.autoImage ? "ON" : "OFF"}</button>
-          </div>
-          <div style={S.toggleRow}>
-            <span style={S.label}>Speak Plainly</span>
-            <button style={form.speakPlainly ? S.toggleOn : S.toggleOff} onClick={() => setForm(f => ({ ...f, speakPlainly: !f.speakPlainly }))}>{form.speakPlainly ? "ON" : "OFF"}</button>
-          </div>
-          <p style={{ fontSize: 11, color: "var(--text4)", marginTop: -4 }}>Reduces melodrama and purple prose — useful for models that lean flowery.</p>
-
-          <div style={S.divider} />
+          <Section acc={acc} id="behaviour" title="Behaviour" summary={formBehaviourSummary}>
+            {/* Toggles */}
+            <div style={S.toggleRow}>
+              <span style={S.label}>NSFW Content</span>
+              <button style={form.nsfw ? S.toggleOn : S.toggleOff} onClick={() => setForm(f => ({ ...f, nsfw: !f.nsfw }))}>{form.nsfw ? "ON" : "OFF"}</button>
+            </div>
+            <div style={S.toggleRow}>
+              <span style={S.label}>Auto Image Generation</span>
+              <button style={form.autoImage ? S.toggleOn : S.toggleOff} onClick={() => setForm(f => ({ ...f, autoImage: !f.autoImage }))}>{form.autoImage ? "ON" : "OFF"}</button>
+            </div>
+            <div style={S.toggleRow}>
+              <span style={S.label}>Speak Plainly</span>
+              <button style={form.speakPlainly ? S.toggleOn : S.toggleOff} onClick={() => setForm(f => ({ ...f, speakPlainly: !f.speakPlainly }))}>{form.speakPlainly ? "ON" : "OFF"}</button>
+            </div>
+            <p style={{ fontSize: 11, color: "var(--text4)", marginTop: -4 }}>Reduces melodrama and purple prose — useful for models that lean flowery.</p>
+          </Section>
 
             </div>
           )}
@@ -8546,6 +8646,13 @@ const S = {
   // A block that blinks at the end of the text as it streams, so a pause
   // between fragments reads as the character thinking rather than as a stall.
   streamCaret: { display:"inline-block", width:7, height:13, marginLeft:2, verticalAlign:"-1px", background:"currentColor", opacity:0.55, animation:"caretBlink 1s steps(2, start) infinite" },
+  section: { border:"1px solid var(--border)", borderRadius:12, marginBottom:8, background:"var(--bg2)", overflow:"hidden" },
+  sectionOpen: { borderColor:"var(--pink-border)" },
+  sectionHeader: { display:"flex", alignItems:"center", gap:10, padding:"12px 14px", cursor:"pointer", userSelect:"none" },
+  sectionTitle: { fontSize:13, fontWeight:700, letterSpacing:"0.04em", flexShrink:0 },
+  sectionSummary: { fontSize:12, color:"var(--text4)", flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", textAlign:"right" },
+  sectionChevron: { marginLeft:"auto", fontSize:18, lineHeight:1, color:"var(--text4)", transition:"transform 0.15s ease", flexShrink:0 },
+  sectionBody: { padding:"2px 14px 14px", borderTop:"1px solid var(--border)" },
   typingDots: { display:"flex", gap:5, alignItems:"center", height:20 },
   dot: { width:7, height:7, borderRadius:"50%", background:"var(--blue-light)", animation:"pulse 1.2s ease-in-out infinite" },
   imageMessage: { textAlign:"center", background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:16, padding:12, maxWidth:300, margin:"8px auto", boxShadow:"0 2px 8px var(--shadow)" },

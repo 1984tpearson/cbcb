@@ -228,7 +228,6 @@
     },
     sliderDefs: [
       { key: "amorous",          label: "Amorous",               left: "Reserved",              right: "Flirtatious",             section: "Personality" },
-      { key: "replyLength",      label: "Reply Length",          left: "Terse",                 right: "Verbose",                 section: "Personality" },
       { key: "formality",        label: "Formality",             left: "Casual",                right: "Formal",                  section: "Personality" },
       { key: "assertiveness",    label: "Assertiveness",         left: "Passive",               right: "Dominant",                section: "Personality" },
       { key: "playfulness",      label: "Playfulness",           left: "Serious",               right: "Playful",                 section: "Personality" },
@@ -310,8 +309,11 @@
       // tuned character still leads with a short, readable list.
       definingCount: 5,
       definingMinDistance: 0.4,
-      // replyLength is emitted separately, ahead of everything else, so that it
-      // carries more weight — including it here as well only repeats it.
+      // replyLength is not a personality trait — it is a setting about the
+      // app, not about the character — so it has its own control and is not in
+      // sliderDefs at all. This stays as belt and braces: an owner whose saved
+      // sliderDefs still lists it would otherwise have it described twice, once
+      // as a trait and once as the reply-length rule.
       excludeFromTraits: ["replyLength"],
     },
 

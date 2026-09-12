@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Site Settings</title>
-<script src="site-config.js?v=72"></script>
+<script src="site-config.js?v=73"></script>
 <style>
   :root {
     --pink: #d4547a; --pink-bg: #fdf1f4; --pink-border: #f0c4d1;
@@ -466,11 +466,16 @@
     const byKey = {};
     config.sliderDefs.forEach(d => { byKey[d.key] = d; });
 
+    // Reply length has tiers but no sliderDefs row: it is a setting, not a
+    // personality trait, so it has its own control in the app. Its tiers are
+    // still edited here, and still name themselves properly.
+    const TIERS_WITHOUT_SLIDERS = { replyLength: "Reply Length" };
+
     const traitCards = Object.keys(config.traitTiers).map(key => {
       const def = byKey[key];
       return el("details", { className: "trait" }, [
         el("summary", null, [
-          def ? def.label : key,
+          def ? def.label : (TIERS_WITHOUT_SLIDERS[key] || key),
           el("span", { className: "key" }, ["(" + key + ")"]),
         ]),
         el("div", { className: "body" }, [tierEditor("traitTiers." + key)]),
