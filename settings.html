@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Site Settings</title>
-<script src="site-config.js?v=74"></script>
+<script src="site-config.js?v=75"></script>
 <style>
   :root {
     --pink: #d4547a; --pink-bg: #fdf1f4; --pink-border: #f0c4d1;
@@ -446,6 +446,7 @@
     ["prompts", "Prompt text", buildPrompts],
     ["voice", "Age & voice", buildVoice],
     ["intentions", "Intentions", buildIntentions],
+    ["memory", "Memory", buildMemory],
     ["physicality", "Closeness", buildPhysicality],
     ["openings", "Openings", buildOpenings],
     ["image", "Image prompts", buildImage],
@@ -572,6 +573,27 @@
         field("Used when the character has no age set", "ageVoice.templateNoAge", "area", "{banned} is substituted in."),
       ],
     )];
+  }
+
+  function buildMemory() {
+    const i = "memory.";
+    return [
+      card("Memory",
+        "The Story So Far and Key Facts that go into every one of a character's prompts. Left on, they update themselves as a conversation runs: every few exchanges the model is handed the memory as it stands plus only the turns since the last update, and asked to fold one into the other. That is what lets a long chat keep its beginning \u2014 a plain re-summarise of recent history cannot, because whatever has scrolled out of the window is simply absent from the next version. Each update is one extra model call, so \u201chow often\u201d is the cost dial. A character can opt out individually in its own Memory panel.",
+        [
+          checkboxField("Update memory automatically", i + "enabled",
+            "Off leaves memory entirely manual \u2014 the button in the character's Memory panel, and nothing else."),
+          field("How often (messages)", i + "everyTurns", "number",
+            "Messages that must accumulate before an update runs. 8 is about four exchanges. Images do not count."),
+          field("Most new conversation per update", i + "excerptChars", "number",
+            "Only the turns since the last update are sent, so this rarely bites."),
+          field("Longest Story So Far", i + "maxSummaryChars", "number",
+            "Enforced in the app as well as asked for in the prompt. This text sits in EVERY prompt from here on, so an unbounded summary quietly becomes the biggest thing in it."),
+          field("Longest Key Facts", i + "maxFactsChars", "number"),
+          field("Update prompt", i + "updatePrompt", "area",
+            "{name}, {summary}, {facts}, {recent}, {summaryLimit} and {factsLimit} are substituted in. It must ask for a JSON object with \u201csummary\u201d and \u201cfacts\u201d \u2014 an answer that cannot be read is discarded and the existing memory kept, so a broken prompt here looks like memory that has quietly stopped moving."),
+        ]),
+    ];
   }
 
   function buildIntentions() {

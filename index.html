@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=74"></script>
+  <script src="site-config.js?v=75"></script>
   <script src="image-prompt.js?v=32"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -3538,6 +3538,11 @@ function CharacterPersonalityPanel({ character, onSave, onClose, model, settings
   const [intentionsEnabled, setIntentionsEnabled] = useState(character.intentionsEnabled !== false);
   const [memorySummary, setMemorySummary] = useState(character.memorySummary || "");
   const [memoryFacts, setMemoryFacts] = useState(character.memoryFacts || "");
+  const [memoryAuto, setMemoryAuto] = useState(character.memoryAuto !== false);
+  // How many turns the stored memory already accounts for. Carried through the
+  // panel so a manual rebuild resets the automatic pass's backlog instead of
+  // leaving it to re-fold turns the rebuild has just covered.
+  const [memoryTurns, setMemoryTurns] = useState(character.memoryTurns || 0);
   const [charOutfit, setCharOutfit] = useState(character.charOutfit || "");
   const [userOutfit, setUserOutfit] = useState(character.userOutfit || "");
   const [staging, setStaging] = useState(character.staging || EMPTY_STAGING);
@@ -3829,8 +3834,12 @@ function CharacterPersonalityPanel({ character, onSave, onClose, model, settings
               }])}>+ Add an intention</button>
           </Section>
 
-          <Section acc={acc} id="memory" title="Memory" summary={(memorySummary || memoryFacts) ? "has memory" : "empty"}>
-            <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Injected into every message so the character remembers past events even as the conversation grows long. Edit freely or regenerate from chat history.</p>
+          <Section acc={acc} id="memory" title="Memory" summary={(memorySummary || memoryFacts) ? (memoryAuto ? "kept up to date" : "manual") : (memoryAuto ? "empty so far" : "off")}>
+            <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8 }}>Injected into every message so the character remembers past events even as the conversation grows long. Left on, it updates itself every few exchanges, folding what has just happened into what was already there. Edit freely — an update revises what is written here rather than replacing it, so your own wording survives.</p>
+            <label style={{ ...S.label, display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
+              <input type="checkbox" checked={memoryAuto} onChange={e => setMemoryAuto(e.target.checked)} />
+              Keep memory up to date automatically
+            </label>
             <label style={S.label}>Story So Far</label>
             <textarea style={{ ...S.input, height: 90, resize: "vertical" }}
               placeholder="A running narrative of what has happened between you and this character..."
@@ -3875,6 +3884,11 @@ function CharacterPersonalityPanel({ character, onSave, onClose, model, settings
                   if (!parsed) throw new Error("Could not read the model's reply");
                   if (parsed.summary) setMemorySummary(parsed.summary);
                   if (parsed.facts) setMemoryFacts(typeof parsed.facts === "string" ? parsed.facts : parsed.facts.join("\n"));
+                  // This rebuild covers the conversation up to here, so the
+                  // automatic pass starts its next backlog from this point —
+                  // otherwise it would immediately fold in turns the rebuild
+                  // has just summarised.
+                  setMemoryTurns(chatHistory.filter(m => m.role !== "image" && (m.content || "").trim()).length);
                 } catch (e) { setMemoryGenError(e.message); }
                 setMemoryGenLoading(false);
               }}>
@@ -3882,7 +3896,7 @@ function CharacterPersonalityPanel({ character, onSave, onClose, model, settings
             </button>
             {memoryGenError && <span style={{ fontSize: 12, color: "#c04060" }}>{memoryGenError}</span>}
             <button style={{ ...S.btnSecondary, marginTop: 4, color: "#c04060" }}
-              onClick={() => { setMemorySummary(""); setMemoryFacts(""); }}>
+              onClick={() => { setMemorySummary(""); setMemoryFacts(""); setMemoryTurns(0); }}>
               Clear Memory
             </button>
           </Section>
@@ -3943,7 +3957,7 @@ function CharacterPersonalityPanel({ character, onSave, onClose, model, settings
         </div>
         <div style={S.modalFooter}>
           <button style={S.btnSecondary} onClick={onClose}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, disabledSliders, reactiveEnabled, intentionsEnabled, intentions: intentions.filter(i => (i.goal || "").trim()).map(i => ({ ...i, steps: (i.steps || []).filter(st => (st.text || "").trim()) })), memorySummary, memoryFacts, charOutfit: charOutfit || null, userOutfit: userOutfit || null, closet, worn, staging: hasStaging(staging) ? staging : null, explicitDetail: explicitDetail.trim() || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
+          <button style={S.btnPrimary} onClick={() => { onSave({ ...character, sliders, disabledSliders, reactiveEnabled, intentionsEnabled, intentions: intentions.filter(i => (i.goal || "").trim()).map(i => ({ ...i, steps: (i.steps || []).filter(st => (st.text || "").trim()) })), memorySummary, memoryFacts, memoryAuto, memoryTurns, charOutfit: charOutfit || null, userOutfit: userOutfit || null, closet, worn, staging: hasStaging(staging) ? staging : null, explicitDetail: explicitDetail.trim() || null, gender, customGender, age, maritalStatus, relationship, relationshipCustom, nsfw, autoImage, speakPlainly, userPersonaOverride: useUserPersonaOverride ? userPersonaOverride : null }); onClose(); }}>Save Changes</button>
         </div>
       </div>
       {showOverrideEditor && (
@@ -6768,6 +6782,78 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
     }
   };
 
+  // Keeps Story So Far / Key Facts current as the conversation runs, instead of
+  // only when the panel is opened and the button pressed. Fired after a reply
+  // like the other trackers, never awaited.
+  //
+  // Incremental, not a re-summarise: the model gets the memory as it stands
+  // plus ONLY the turns since the last update, and folds one into the other.
+  // memoryTurns records how many non-image messages the stored memory already
+  // accounts for, so nothing is summarised twice and nothing in between is
+  // missed. The manual button re-summarises a window of recent history, which
+  // cannot accumulate — whatever had scrolled out of that window was simply
+  // absent from the next summary, so a long conversation forgot its beginning.
+  const memoryBusyRef = useRef(false);
+  const applyMemory = async (newMessages, currentChar) => {
+    const cfg = CFG.memory;
+    if (!cfg || cfg.enabled === false) return;
+    if (currentChar.memoryAuto === false) return;
+    const epoch = sceneEpochRef.current;   // see commitIfCurrent
+    const convo = newMessages.filter(m => m.role !== "image" && (m.content || "").trim());
+    const turns = convo.length;
+    // Replies get regenerated, edited and deleted, so the conversation can end
+    // up SHORTER than the point the memory was taken from. The marker is walked
+    // back down to meet it, and WRITTEN BACK rather than just clamped for this
+    // one test: left sitting above the true length, it counts the turns that
+    // replaced the deleted ones as already summarised, and those never reach
+    // the memory at all. (Nothing can un-summarise the deleted turns themselves
+    // — the manual rebuild is the way out of that.)
+    const marker = Math.max(0, Number(currentChar.memoryTurns) || 0);
+    const covered = Math.min(marker, turns);
+    if (marker > turns) commitCharacter(prev => ({ ...prev, memoryTurns: covered }));
+    if (turns - covered < (cfg.everyTurns || 8)) return;
+    // One at a time. These are fired per reply without being awaited, so a slow
+    // call and a fast typist otherwise means two updates folding overlapping
+    // turns into two different summaries, and whichever lands second wins.
+    if (memoryBusyRef.current) return;
+    memoryBusyRef.current = true;
+    try {
+      const recent = convo.slice(covered)
+        .map(m => `${m.role === "user" ? "User" : currentChar.name}: ${m.content}`)
+        .join("\n").slice(-(cfg.excerptChars || 6000));
+      const raw = await aiComplete({ model: settings.selectedModel || CFG.models.reactivity, messages: [{ role: "user", content:
+        fillTemplate(cfg.updatePrompt, {
+          name: currentChar.name,
+          summary: currentChar.memorySummary || "(nothing recorded yet)",
+          facts: currentChar.memoryFacts || "(nothing recorded yet)",
+          recent,
+          summaryLimit: cfg.maxSummaryChars || 1400,
+          factsLimit: cfg.maxFactsChars || 1400,
+        }) }] });
+      const parsed = parseJsonReply(raw);
+      if (!parsed) return;
+      const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
+      const facts = Array.isArray(parsed.facts)
+        ? parsed.facts.join("\n")
+        : (typeof parsed.facts === "string" ? parsed.facts.trim() : "");
+      // A blank or unreadable answer is not an instruction to forget. Keeping
+      // what was already there costs one skipped update; clearing it costs the
+      // whole history of the relationship.
+      if (!summary && !facts) return;
+      commitIfCurrent(epoch, prev => ({
+        ...prev,
+        memorySummary: summary ? summary.slice(0, cfg.maxSummaryChars || 1400) : prev.memorySummary,
+        memoryFacts: facts ? facts.slice(0, cfg.maxFactsChars || 1400) : prev.memoryFacts,
+        memoryTurns: turns,
+        memoryUpdatedAt: Date.now(),
+      }));
+    } catch (e) {
+      console.warn("Memory update failed:", e.message);
+    } finally {
+      memoryBusyRef.current = false;
+    }
+  };
+
   const sendMessage = async (content) => {
     const text = content || input.trim();
     if (!text || loading) return;
@@ -6790,6 +6876,10 @@ Return ONLY a JSON object of slider keys and integer delta values, e.g. {"famili
       applyWardrobe(withReply, character);
       applyStaging(withReply, character);
       applyIntentions(withReply, character);
+      // Off characterRef, not the pre-reply snapshot: this is the one tracker
+      // that reads its own previous output back in, so it needs the memory as
+      // the last update left it.
+      applyMemory(withReply, characterRef.current);
     } catch (e) { setError(e.message); }
     setStreamingText("");
     setLoading(false);

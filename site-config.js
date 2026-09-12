@@ -1056,6 +1056,54 @@
     // having no intentions at all. Two things hold it back: the pacing rules,
     // and a gate that keeps the character from acting until progress has
     // caught up with how much nerve the goal takes for them specifically.
+    // ── Memory ───────────────────────────────────────────────────────────────
+    // Story So Far / Key Facts, kept up to date as the conversation runs rather
+    // than only when the owner opens the panel and presses the button.
+    //
+    // The update is INCREMENTAL: the model is handed the memory as it stands
+    // plus only the exchanges since the last update, and asked to fold one into
+    // the other. A full re-summarise of the recent window (what the manual
+    // button does) cannot accumulate — anything that scrolled out of the window
+    // is simply gone from the next summary, so a long conversation kept
+    // forgetting its own beginning.
+    memory: {
+      enabled: true,
+      // Non-image messages that must accumulate before an update runs. Every
+      // update is an extra model call, so this is the cost dial: 8 is roughly
+      // four exchanges.
+      everyTurns: 8,
+      // How much of the new conversation to send. Only the turns since the last
+      // update go in, so this rarely binds.
+      excerptChars: 6000,
+      // Caps on what comes back, enforced in code as well as asked for in the
+      // prompt. These two strings sit in EVERY system prompt from here on, so
+      // an unbounded summary quietly becomes the largest thing in the prompt.
+      maxSummaryChars: 1400,
+      maxFactsChars: 1400,
+      // {name} {summary} {facts} {recent}
+      updatePrompt: `You maintain the long-term memory of a roleplay conversation between a user and {name}.
+
+Here is the memory as it currently stands.
+
+STORY SO FAR:
+{summary}
+
+KEY FACTS:
+{facts}
+
+Here is what has happened SINCE that memory was last updated:
+{recent}
+
+Update the memory so it accounts for the new events. Rules:
+- Build on what is already there. Keep everything still true, in roughly its existing wording. You are revising a document, not writing a new one.
+- Only drop something if the new events have made it wrong or superseded it, and then say the corrected version instead.
+- Do not invent anything that is not in the memory or the new events.
+- "Story so far" is a flowing narrative of the relationship — what has happened, how things stand between them. Keep it under {summaryLimit} characters, condensing older material as it grows rather than dropping it.
+- "Key facts" is a terse list, one item per line, of things worth remembering exactly: names, places, promises, preferences, milestones, physical details mentioned. No more than {factsLimit} characters.
+
+Return ONLY a JSON object: {"summary": "...", "facts": "..."}`,
+    },
+
     intentions: {
       maxActive: 2,
       header: "\n\n[PRIVATE INTENTIONS — yours alone, never stated outright]\n",
