@@ -82,10 +82,52 @@ traverse(ast, {
   },
 });
 
-if (problems.length === 0) {
-  console.log("tdz check: no const read above its declaration");
+// ── Second pass: names nothing declares ──────────────────────────────────────
+// `expressionSummary` was declared inside UserProfileEditor and read inside
+// AppearanceEditor — a different function — so opening a character's editor
+// threw "expressionSummary is not defined" and took the app down, exactly like
+// the dead-zone bug above. check-interpolations.js could not catch it: it asks
+// whether a name is declared ANYWHERE in the file, and this one was.
+//
+// Babel collects every reference with no binding in scope. Anything that is a
+// real global in Node, or a browser global the app legitimately uses, is
+// filtered out; what is left is a name that exists nowhere the code reading it
+// can see.
+const BROWSER_GLOBALS = new Set([
+  "window", "document", "navigator", "location", "history", "localStorage",
+  "sessionStorage", "alert", "confirm", "prompt", "getComputedStyle",
+  "matchMedia", "requestAnimationFrame", "cancelAnimationFrame", "scrollTo",
+  "FileReader", "Image", "Audio", "Blob", "File", "FormData", "Headers",
+  "Request", "Response", "CustomEvent", "Event", "HTMLElement", "Node",
+  "IntersectionObserver", "ResizeObserver", "MutationObserver", "DOMParser",
+  "XMLHttpRequest", "WebSocket", "getSelection", "open", "close", "self",
+  "React", "ReactDOM", "Babel", "SiteConfig",
+]);
+const isKnownGlobal = (name) =>
+  BROWSER_GLOBALS.has(name) || Object.prototype.hasOwnProperty.call(globalThis, name);
+
+const undeclared = [];
+traverse(ast, {
+  Program(programPath) {
+    for (const name of Object.keys(programPath.scope.globals)) {
+      if (isKnownGlobal(name)) continue;
+      const node = programPath.scope.globals[name];
+      undeclared.push({ name, line: lineOffset + node.loc.start.line });
+    }
+  },
+});
+
+if (problems.length === 0 && undeclared.length === 0) {
+  console.log("tdz check: no const read above its declaration, no undeclared names");
   process.exit(0);
 }
+if (undeclared.length) {
+  console.error("tdz check: UNDECLARED — nothing in scope declares these");
+  for (const u of undeclared) {
+    console.error(`  index.html:${u.line}: '${u.name}'`);
+  }
+}
+if (problems.length === 0) process.exit(1);
 console.error("tdz check: READ BEFORE DECLARATION — these throw the moment the code runs");
 for (const p of problems) {
   console.error(`  index.html:${p.line}: '${p.name}' is read here, declared at line ${p.declLine}`);

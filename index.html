@@ -2875,6 +2875,17 @@ function ImageTimings() {
 // with the other two, further down: it is built from APPEARANCE_TABS, and a
 // const cannot be read above the line that declares it.
 
+// How many expression slots are filled, for the collapsed section header.
+// Both screens that show expression slots need this line, and the character
+// side was reading a name that only existed inside UserProfileEditor — a
+// different function — so opening a character's editor threw
+// "expressionSummary is not defined". One function declaration, hoisted,
+// called from both.
+function expressionsSetLabel(expressions) {
+  const n = Object.values(expressions || {}).filter(Boolean).length;
+  return n ? `${n} set` : "none";
+}
+
 function UserProfileEditor({ persona, settings, title, onSave, onClose }) {
   const [form, setForm] = useState(() => normaliseUserPersona(persona));
   const [tab, setTab] = useState("You");
@@ -2922,18 +2933,10 @@ function UserProfileEditor({ persona, settings, title, onSave, onClose }) {
   }));
   const expressions = form.expressionPhotos || {};
   const setExpressions = (next) => setForm(f => ({ ...f, expressionPhotos: next }));
-  // Below the declaration it reads, not above it. This ran on the line it was
-  // written on — an IIFE, evaluated the moment the component rendered — while
-  // `expressions` was still in its temporal dead zone forty lines further
-  // down, so opening this editor threw "Cannot access 'expressions' before
-  // initialization" and took the whole app down with it. Same trap as the
-  // top-level const ordering in CLAUDE.md, one scope in: check-app-boot.js
-  // evaluates the file's top level and never renders a component, so it
-  // cannot see this one.
-  const expressionSummary = (() => {
-    const n = Object.values(expressions || {}).filter(Boolean).length;
-    return n ? `${n} set` : "none";
-  })();
+  // Below the declaration it reads, not above it: written above it, the IIFE
+  // this used to be ran while `expressions` was still in its temporal dead
+  // zone and took the whole app down on open.
+  const expressionSummary = expressionsSetLabel(expressions);
 
   // The same subject shape the character generator hands the image helpers:
   // a name, a gender, an age and an appearance. The user has all four.
@@ -5080,7 +5083,7 @@ function AppearanceEditor({ character, settings, onSave, onClose }) {
                 </div>
               </Section>
 
-              <Section acc={imgAcc} id="expressions" title="Expressions" summary={expressionSummary}>
+              <Section acc={imgAcc} id="expressions" title="Expressions" summary={expressionsSetLabel(expressions)}>
                 <ExpressionSlots expressions={expressions} onChange={setExpressions}
                   disabled={!!busy} note={exprNote} warnNoPhotos={!hostedPhotos.length}
                   subject="her" onError={setError}

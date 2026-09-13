@@ -85,6 +85,16 @@ initialization". `node check-tdz.js` walks every scope in the file for that
 shape — a reference that runs while its own function body is still running,
 above the line that declares it.
 
+It also reports **names nothing in scope declares**, which is the same crash
+arriving from the other direction: `expressionSummary` was declared inside
+`UserProfileEditor` and read inside `AppearanceEditor`, so opening a
+*character's* editor threw "expressionSummary is not defined".
+`check-interpolations.js` cannot catch that — it asks whether a name is
+declared ANYWHERE in the file, and that one was. Both bugs came from the same
+commit, the one that folded the long screens into sections and gave each a
+summary line: a helper written for one screen and then referenced from the
+other.
+
 Run all three after editing index.html:
 
 ```
