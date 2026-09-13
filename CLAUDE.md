@@ -20,6 +20,16 @@ appearance fields.
 **So: before editing a default, read what is actually saved and see whether it
 overrides the thing you are about to change.**
 
+**An offer to promote is not a promotion.** On 2026-09-13 the stored config
+held four overrides — `intentions.maxActive`, `pacing`, `pacingReady` and
+`sfwNote` — that had diverged from the defaults since 2026-09-07. Session after
+session read them, correctly reported the clash, offered to promote them, and
+then changed nothing, so the identical conversation happened again the next
+time and the owner was asked to re-decide something they had already decided.
+They have all been promoted and the override rows deleted. If you offer a
+promote and it is accepted, do both halves in that same session — edit
+`site-config.js` AND clear the override — or do not offer.
+
 ```sql
 -- via the Supabase MCP tools, project keqzqhykfygplolcnxnn
 select data from chats where character_id = '__site_config__';
