@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=76"></script>
+  <script src="site-config.js?v=77"></script>
   <script src="image-prompt.js?v=32"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -314,7 +314,7 @@
     // at anything except the caching that actually caused it.
     const REQUIRED_EXPORTS = ["aiComplete", "aiStreamComplete", "parseJsonReply", "garmentGender", "garmentFitsGender",
       "pendingImages", "recordPendingImage", "dropPendingImage", "pollImageTask",
-      "persistGeneratedImage", "startImageTaskSweeps", "recoveredImages", "balanceCloset"];
+      "persistGeneratedImage", "startImageTaskSweeps", "recoveredImages", "balanceCloset", "closetShortfall"];
     if (!window.SiteConfig || REQUIRED_EXPORTS.some(k => typeof window.SiteConfig[k] !== "function")) {
       document.body.innerHTML =
         '<div style="padding:28px;font-family:system-ui,sans-serif;line-height:1.6;max-width:520px;margin:0 auto;color:#3a2b30">' +
@@ -2212,9 +2212,15 @@ async function suggestCloset({ character, model }) {
   // that ran away and fills the ones it forgot out of the same library.
   const closet = window.SiteConfig.balanceCloset(picked, library, cfg)
     .slice(0, cfg.maxCount || 24);
-  const missing = (parsed.missing || [])
-    .filter(m => typeof m === "string" && m.trim())
-    .map(m => m.trim()).slice(0, 8);
+  // What the model said it could not find, plus the floors the library could
+  // not meet — a wardrobe with no men's underwear in it should say so, not
+  // hand back a man who owns none and leave that looking like a bug.
+  const short = window.SiteConfig.closetShortfall(closet, library, cfg)
+    .map(c => `${c.toLowerCase()} (nothing suitable in the wardrobe)`);
+  const missing = [...new Set([
+    ...(parsed.missing || []).filter(m => typeof m === "string" && m.trim()).map(m => m.trim()),
+    ...short,
+  ])].slice(0, 10);
   const spread = {};
   closet.forEach(id => {
     const c = (library.find(g => g.id === id) || {}).category || "uncategorised";

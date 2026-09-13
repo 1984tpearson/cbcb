@@ -1406,6 +1406,46 @@ Return ONLY a JSON object: {"summary": "...", "facts": "..."}`,
       // a person is. Who wears it is a separate question, and the answer is
       // whoever wants to — the filter it drives is a default, not a rule.
       genders: ["Women's", "Men's", "Unisex"],
+      // Correcting a cut the reader got lazy about. "Unisex" is the answer a
+      // vision model reaches for when it is not sure, and the library shows
+      // what that costs: 90 garments filed Unisex against ONE filed Men's,
+      // with a skirt and both halves of a bikini sitting in the pile that a
+      // male character is offered. The prompts above now say so outright, but
+      // a prompt cannot reach a garment that was read last year.
+      //
+      // So a garment left on the default cut is checked against these, and the
+      // first match decides. Read as a regular expression over the garment's
+      // NAME and TAGS only — never its description, which says things like
+      // "wear it with a skirt" about garments that are not one.
+      //
+      // Applied to a garment sitting on the default cut (Unisex) or on no cut
+      // at all, and never to one marked Women's or Men's — those are a real
+      // decision and are left alone, so correcting a cut in the editor sticks.
+      //
+      // Unisex is treated as undecided rather than as an answer on purpose:
+      // it is what the reader says when it did not look, and every one of the
+      // 90 garments wearing it got it that way. The cost is that a garment
+      // matching one of these cannot be deliberately held at Unisex — mark it
+      // Men's, or rename it, if that is really what it is.
+      //
+      // Kept deliberately short. Every entry here is a garment type that is
+      // cut for one body and simply not made for the other — the moment it
+      // starts holding things that are merely more common on one, it is
+      // guessing, which is the thing it exists to stop.
+      cutHints: [
+        // A dress is a dress. Reading the word out of a name instead would
+        // catch "dress shirt" and "dress trousers", which are neither.
+        { match: ".", categories: ["Dress"], cut: "Women's" },
+        // Thongs and trunks are the two traps: a thong is a sandal in
+        // Australia and trunks are swimwear, so both are read only where the
+        // category already says underwear.
+        { match: "\\bthong\\b|\\bg-?string\\b", categories: ["Underwear"], cut: "Women's" },
+        { match: "\\btrunks?\\b|\\bboxers?\\b|\\bbriefs?\\b", categories: ["Underwear", "Swimwear"], cut: "Men's" },
+        { match: "skirt|sundress|pinafore|blouse|bikini|\\bbra\\b|bralette|bandeau|knicker|pantie|camisole|corset|bustier|basque|negligee|nightie|nightdress|nightgown|teddy\\b|bodysuit|leotard|playsuit|romper|\\btights\\b|hold-?ups?|stockings|suspender|garter|\\bheels?\\b|stiletto|ballet flat|court shoe|wedges?\\b|women|ladies|girls", cut: "Women's" },
+        { match: "y-?fronts?|jockstrap|\\bmens\\b|\\bmen's\\b|\\bboys\\b", cut: "Men's" },
+      ],
+
+
       // What an untagged garment counts as. Unisex, so a library that predates
       // the field keeps being offered to everybody exactly as it was.
       defaultGender: "Unisex",
@@ -1488,7 +1528,7 @@ Return ONLY a JSON object: {"summary": "...", "facts": "..."}`,
       // model is asked for what the garment IS, not what the photo shows: a
       // dress half hidden behind an arm still has a hem and a neckline, and
       // guessing them is the job. {categories} is substituted.
-      extractInstruction: "Look at this photograph and list every distinct item of clothing or footwear worn in it.\n\nReturn ONLY a JSON object, no markdown and no commentary, of the form {\"outfit\": \"...\", \"garments\": [ ... ]}.\n\n\"outfit\" is a short name for what these clothes are as an outfit, 2-4 words \u2014 what someone would call this way of dressing, like \"navy business suit\" or \"summer running kit\". The garments in one photograph are worn together, so they are a set, and this names it.\n\nEach element of \"garments\" is an object:\n{\n  \"name\": a short specific name, 2-5 words,\n  \"category\": exactly one of [{categories}],\n  \"gender\": exactly one of [{genders}] — the cut, not who may wear it. \"Unisex\" whenever the garment is not clearly cut for one, which is true of most plain tops, trousers, coats and trainers,\n  \"description\": 15 to 30 words describing the garment ALONE — colour, fabric, cut, length, neckline, sleeves, fastenings, pattern,\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion. Only ever tags that will fit many garments \u2014 never the cut, the fastening, the fit or the sleeve length, because a tag describing one garment can never group anything\n}\n\nDescribe each garment as it would look laid out flat on its own, not as it appears on the body. Where the photograph hides part of it, infer the most likely form rather than omitting it. Ignore jewellery, bags, glasses and anything that is not worn clothing or footwear. If no clothing is visible, return an empty garments list.",
+      extractInstruction: "Look at this photograph and list every distinct item of clothing or footwear worn in it.\n\nReturn ONLY a JSON object, no markdown and no commentary, of the form {\"outfit\": \"...\", \"garments\": [ ... ]}.\n\n\"outfit\" is a short name for what these clothes are as an outfit, 2-4 words \u2014 what someone would call this way of dressing, like \"navy business suit\" or \"summer running kit\". The garments in one photograph are worn together, so they are a set, and this names it.\n\nEach element of \"garments\" is an object:\n{\n  \"name\": a short specific name, 2-5 words,\n  \"category\": exactly one of [{categories}],\n  \"gender\": exactly one of [{genders}] — the cut, not who may wear it. \"Unisex\" for a garment genuinely cut for either, which is true of most plain tops, trousers, coats and trainers. But \"Unisex\" is not the safe answer and it is not the default: a skirt, a dress, a blouse, a bikini, a bra, knickers, tights, a camisole, a bodysuit, a playsuit, heels and ballet flats are \"Women's\" — never \"Unisex\", and so is anything with a fitted bust, a nipped waist or a womens cut. Boxers, Y-fronts and swim trunks are \"Men's\". Decide by the cut of the garment in front of you, not by who could get away with wearing it,\n  \"description\": 15 to 30 words describing the garment ALONE — colour, fabric, cut, length, neckline, sleeves, fastenings, pattern,\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion. Only ever tags that will fit many garments \u2014 never the cut, the fastening, the fit or the sleeve length, because a tag describing one garment can never group anything\n}\n\nDescribe each garment as it would look laid out flat on its own, not as it appears on the body. Where the photograph hides part of it, infer the most likely form rather than omitting it. Ignore jewellery, bags, glasses and anything that is not worn clothing or footwear. If no clothing is visible, return an empty garments list.",
 
       // ── Splitting a set ────────────────────────────────────────────────────
       // Some garments arrive as one photograph of two things: a pyjama set, a
@@ -1513,7 +1553,7 @@ Return ONLY a JSON object: {"summary": "...", "facts": "..."}`,
       // Not extractInstruction, which asks what is being WORN in a photograph
       // — nobody is wearing a flat lay, and asked that question of one the
       // model hedges. {categories} is substituted.
-      splitInstruction: "This photograph shows clothing. It may be a flat lay, a product shot, or a person wearing the clothes, and it may be one garment or a set made up of more than one separate garment — a pyjama set is a top and bottoms, a bikini is a top and briefs, a suit is a jacket and trousers.\n\nList the separately wearable garments in it.\n\nReturn ONLY a JSON array, no markdown and no commentary. Each element is an object:\n{\n  \"name\": a short specific name for that piece alone, 2-5 words,\n  \"category\": exactly one of [{categories}],\n  \"gender\": exactly one of [{genders}] — the cut, not who may wear it. \"Unisex\" whenever the garment is not clearly cut for one, which is true of most plain tops, trousers, coats and trainers,\n  \"description\": 15 to 30 words describing THAT PIECE alone — colour, fabric, cut, length, neckline, sleeves, fastenings, pattern,\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion\n}\n\nA piece counts as separate only if it can be worn without the other — the top half and bottom half of a two-piece do; a hood on a coat, a belt sewn to a dress and a lining do not. Name each piece for what it is on its own: \"pink striped pyjama top\", not \"pyjama set top\".\n\nIgnore anyone wearing the clothes, and ignore the background, jewellery and bags. If there is only one garment, return an array of one — that is a normal answer, not a failure.",
+      splitInstruction: "This photograph shows clothing. It may be a flat lay, a product shot, or a person wearing the clothes, and it may be one garment or a set made up of more than one separate garment — a pyjama set is a top and bottoms, a bikini is a top and briefs, a suit is a jacket and trousers.\n\nList the separately wearable garments in it.\n\nReturn ONLY a JSON array, no markdown and no commentary. Each element is an object:\n{\n  \"name\": a short specific name for that piece alone, 2-5 words,\n  \"category\": exactly one of [{categories}],\n  \"gender\": exactly one of [{genders}] — the cut, not who may wear it. \"Unisex\" for a garment genuinely cut for either, which is true of most plain tops, trousers, coats and trainers. But \"Unisex\" is not the safe answer and it is not the default: a skirt, a dress, a blouse, a bikini, a bra, knickers, tights, a camisole, a bodysuit, a playsuit, heels and ballet flats are \"Women's\" — never \"Unisex\", and so is anything with a fitted bust, a nipped waist or a womens cut. Boxers, Y-fronts and swim trunks are \"Men's\". Decide by the cut of the garment in front of you, not by who could get away with wearing it,\n  \"description\": 15 to 30 words describing THAT PIECE alone — colour, fabric, cut, length, neckline, sleeves, fastenings, pattern,\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion\n}\n\nA piece counts as separate only if it can be worn without the other — the top half and bottom half of a two-piece do; a hood on a coat, a belt sewn to a dress and a lining do not. Name each piece for what it is on its own: \"pink striped pyjama top\", not \"pyjama set top\".\n\nIgnore anyone wearing the clothes, and ignore the background, jewellery and bags. If there is only one garment, return an array of one — that is a normal answer, not a failure.",
 
       // Read back off the finished picture, so that naming and filing a garment
       // is not a form to fill in. {categories} is substituted with the list
@@ -1523,7 +1563,7 @@ Return ONLY a JSON object: {"summary": "...", "facts": "..."}`,
       // It reads the IMAGE, not the description, on purpose: a generated flat
       // lay often differs from what was asked for, and what is actually in the
       // picture is what a later scene will be copying.
-      analyseInstruction: "Look at this photograph of a single item of clothing, laid out flat. Return ONLY valid JSON with these exact fields, no markdown and no commentary:\n{\n  \"name\": a short specific name for the garment, 2-5 words, no brand names,\n  \"category\": exactly one of [{categories}],\n  \"gender\": exactly one of [{genders}] — the cut, not who may wear it. \"Unisex\" whenever the garment is not clearly cut for one, which is true of most plain tops, trousers, coats and trainers,\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion. Only ever tags that will fit many garments \u2014 never the cut, the fastening, the fit or the sleeve length, because a tag describing one garment can never group anything,\n  \"description\": one or two sentences describing cut, fabric, colour, length, neckline, sleeves, fastenings and pattern, as a clothing catalogue would\n}\nDescribe only the garment. Say nothing about the background, the lighting or the photograph itself. If the picture shows more than one item, describe the largest.",
+      analyseInstruction: "Look at this photograph of a single item of clothing, laid out flat. Return ONLY valid JSON with these exact fields, no markdown and no commentary:\n{\n  \"name\": a short specific name for the garment, 2-5 words, no brand names,\n  \"category\": exactly one of [{categories}],\n  \"gender\": exactly one of [{genders}] — the cut, not who may wear it. \"Unisex\" for a garment genuinely cut for either, which is true of most plain tops, trousers, coats and trainers. But \"Unisex\" is not the safe answer and it is not the default: a skirt, a dress, a blouse, a bikini, a bra, knickers, tights, a camisole, a bodysuit, a playsuit, heels and ballet flats are \"Women's\" — never \"Unisex\", and so is anything with a fitted bust, a nipped waist or a womens cut. Boxers, Y-fronts and swim trunks are \"Men's\". Decide by the cut of the garment in front of you, not by who could get away with wearing it,\n  \"tags\": an array of exactly 3 lowercase one-word tags: the main colour, then the two most useful of season, formality or occasion. Only ever tags that will fit many garments \u2014 never the cut, the fastening, the fit or the sleeve length, because a tag describing one garment can never group anything,\n  \"description\": one or two sentences describing cut, fabric, colour, length, neckline, sleeves, fastenings and pattern, as a clothing catalogue would\n}\nDescribe only the garment. Say nothing about the background, the lighting or the photograph itself. If the picture shows more than one item, describe the largest.",
 
       // Dezgo models, cheapest-capable first. Each entry says which endpoint it
       // belongs to and the parameters that endpoint takes, because they differ:
@@ -1606,12 +1646,16 @@ Return ONLY a JSON object: {"summary": "...", "facts": "..."}`,
         // Keyed by the category names in wardrobe.categories; a category
         // missing from here is unconstrained.
         quotas: {
-          Top:           { min: 5, max: 8 },
-          Bottom:        { min: 4, max: 6 },
-          Underwear:     { min: 4, max: 7 },
-          Shoes:         { min: 2, max: 3 },
-          Outerwear:     { min: 1, max: 3 },
-          Sleepwear:     { min: 1, max: 2 },
+          // `essential` marks the ones worth complaining about when the
+          // wardrobe cannot fill them — nobody needs telling that a man was
+          // not given a dress, but a character with no underwear is a gap in
+          // the library that somebody should know about.
+          Top:           { min: 5, max: 8, essential: true },
+          Bottom:        { min: 4, max: 6, essential: true },
+          Underwear:     { min: 4, max: 7, essential: true },
+          Shoes:         { min: 2, max: 3, essential: true },
+          Outerwear:     { min: 1, max: 3, essential: true },
+          Sleepwear:     { min: 1, max: 2, essential: true },
           Swimwear:      { min: 1, max: 2 },
           Dress:         { min: 1, max: 3 },
           Accessory:     { min: 1, max: 4 },
@@ -2875,7 +2919,30 @@ Return ONLY a JSON object: {"summary": "...", "facts": "..."}`,
     const w = ((cfg || DEFAULTS).wardrobe) || {};
     const list = w.genders || [];
     const g = garment && garment.gender;
-    return list.includes(g) ? g : (w.defaultGender || list[0] || "");
+    const dflt = w.defaultGender || list[0] || "";
+    if (list.includes(g) && g !== dflt) return g;
+    return garmentCutHint(garment, cfg) || dflt;
+  }
+
+  // What wardrobe.cutHints makes of a garment whose cut was never really
+  // decided — "" when nothing matches, which is most garments and is the right
+  // answer for them. Name and tags only; see the note on cutHints above.
+  function garmentCutHint(garment, cfg) {
+    const conf = cfg || DEFAULTS;
+    const w = conf.wardrobe || {};
+    const hints = w.cutHints || [];
+    if (!garment || !hints.length) return "";
+    const hay = [garment.name || "", (garment.tags || []).join(" ")].join(" ").toLowerCase();
+    if (!hay.trim()) return "";
+    const cat = garment.category || "";
+    for (const h of hints) {
+      if (!h || !h.match || !(w.genders || []).includes(h.cut)) continue;
+      if (Array.isArray(h.categories) && h.categories.length && !h.categories.includes(cat)) continue;
+      let re;
+      try { re = new RegExp(h.match, "i"); } catch { continue; }
+      if (re.test(hay)) return h.cut;
+    }
+    return "";
   }
 
   // Whether a garment should be offered to someone of this gender.
@@ -3355,6 +3422,29 @@ Return ONLY a JSON object: {"summary": "...", "facts": "..."}`,
     return lib.filter(g => chosen.has(g.id)).map(g => g.id).slice(0, hardMax);
   }
 
+  // Which floors the library simply could not meet. balanceCloset fills what it
+  // can and stays quiet about the rest, which is right — a closet is not
+  // improved by putting the wrong thing in it — but quiet is how you end up
+  // wondering why a man owns no underwear for a month. The answer is usually
+  // that the wardrobe has none cut for him, and that is worth saying out loud.
+  //
+  // Returns category names, for the caller to fold into whatever it already
+  // reports as missing.
+  function closetShortfall(ids, library, closetCfg) {
+    const cfg = closetCfg || {};
+    const quotas = cfg.quotas || {};
+    const chosen = new Set(ids || []);
+    const have = {};
+    (library || []).forEach(g => {
+      if (g && chosen.has(g.id)) have[g.category || ""] = (have[g.category || ""] || 0) + 1;
+    });
+    return Object.keys(quotas).filter(cat => {
+      const q = quotas[cat] || {};
+      const min = Number(q.min) || 0;
+      return q.essential && min > 0 && (have[cat] || 0) < min;
+    });
+  }
+
   function fillTemplate(template, values) {
     return String(template == null ? "" : template)
       .replace(/\{(\w+)\}/g, (match, key) => (key in values ? String(values[key]) : match));
@@ -3393,7 +3483,9 @@ Return ONLY a JSON object: {"summary": "...", "facts": "..."}`,
     tierFor,
     fillTemplate,
     garmentGender,
+    garmentCutHint,
     garmentFitsGender,
     balanceCloset,
+    closetShortfall,
   };
 })(window);
