@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Site Settings</title>
-<script src="site-config.js?v=77"></script>
+<script src="site-config.js?v=78"></script>
 <style>
   :root {
     --pink: #d4547a; --pink-bg: #fdf1f4; --pink-border: #f0c4d1;
@@ -527,6 +527,8 @@
       "System prompt fragments",
       "Text in braces is substituted in. \\n is a line break.",
       [
+        field("Don't repeat yourself", p + "repetitionClause", "area",
+          "Goes into every chat prompt. The model can see its own earlier replies but nothing was asking it to look, and the sampling penalties only break single-token loops — not a whole sentence re-served three turns later. Clear the box to switch it off."),
         field("Personality section header", p + "personalityHeader", "area"),
         field("Defining-traits heading", p + "definingHeader", "area",
           "Leads the block with the few traits furthest from their normal setting."),
