@@ -171,8 +171,28 @@
   .card .nm { font-weight:800; font-size:13px; line-height:1.3; }
   .card .cat { font-size:11px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.04em; margin-top:2px; }
   .card .setname { color:var(--pink); }
+  .card .cut { color:var(--muted); }
   .card .tags { margin-top:6px; display:flex; gap:4px; flex-wrap:wrap; }
   .card .tags span { font-size:10px; font-weight:700; background:var(--bg3); color:var(--muted); border-radius:999px; padding:2px 7px; }
+  /* Selecting. The tick and the pink ring are the fitting room's, deliberately:
+     choosing several garments should look the same wherever it is done. */
+  .grid.selecting .card.chosen { border-color:var(--pink); box-shadow:0 0 0 2px var(--pink-border); }
+  .grid.selecting .card.chosen .shot::after { content:"\2713"; position:absolute; top:6px; left:6px;
+    width:26px; height:26px; border-radius:50%; background:var(--pink); color:#fff;
+    font-weight:800; font-size:15px; display:flex; align-items:center; justify-content:center; }
+  .bulkbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding:10px 18px;
+             border-bottom:1px solid var(--border); background:var(--pink-bg); }
+  .bulkbar[hidden] { display:none; }
+  .bulkcount { font-size:12px; font-weight:800; color:var(--pink); }
+  .bulkgap { flex:1 1 0; }
+  .bulklabel { font-size:12px; font-weight:700; color:var(--muted);
+               display:flex; align-items:center; gap:6px; }
+  .bulkbar select { width:auto; min-width:120px; }
+  .bulkbar button#bulkApplyBtn { min-height:36px; }
+  @media (max-width:600px) {
+    .bulkgap { display:none; }
+    .bulklabel, .bulkbar button#bulkApplyBtn { flex:1 1 100%; }
+  }
   .empty { text-align:center; color:var(--muted); padding:60px 20px; line-height:1.6; }
 
   /* ── Editor ── */
@@ -316,10 +336,22 @@
     <select id="catFilter" onchange="render()"></select>
     <select id="genderFilter" onchange="render()"></select>
     <select id="setFilter" onchange="render()"></select>
+    <button type="button" class="chip" id="selectBtn" onclick="toggleSelectMode()">Select</button>
     <details class="tagbox" id="tagBox">
       <summary id="tagSummary"></summary>
       <div class="chips" id="tagChips"></div>
     </details>
+  </div>
+
+  <!-- Only on screen while selecting. It is the one place in the page that
+       changes many garments at once, so it says how many before it offers to. -->
+  <div class="bulkbar" id="bulkBar" hidden>
+    <span class="bulkcount" id="bulkCount">Nothing selected</span>
+    <button type="button" class="chip" onclick="selectAllShown()">Select all shown</button>
+    <button type="button" class="chip" onclick="clearSelection()">Clear</button>
+    <span class="bulkgap"></span>
+    <label class="bulklabel">Set cut to <select id="bulkGender"></select></label>
+    <button type="button" id="bulkApplyBtn" onclick="applyBulkGender()">Apply</button>
   </div>
 
   <main>
@@ -572,6 +604,8 @@
       w.genders.map(g => '<option value="' + esc(g) + '">' + esc(g) + "</option>").join("");
     document.getElementById("fGender").innerHTML =
       w.genders.map(g => '<option value="' + esc(g) + '">' + esc(g) + "</option>").join("");
+    document.getElementById("bulkGender").innerHTML =
+      w.genders.map(g => '<option value="' + esc(g) + '">' + esc(g) + "</option>").join("");
     document.getElementById("fAspect").innerHTML =
       w.aspectRatios.map(a => '<option value="' + esc(a) + '">' + esc(a) + "</option>").join("");
     document.getElementById("fProvider").innerHTML =
@@ -693,6 +727,83 @@
     });
   }
 
+  // ── Selecting several garments at once ─────────────────────────────────────
+  // One garment's cut is a tap in the editor; a hundred of them read wrong is
+  // not, and that is the shape the mistake actually comes in — a run of
+  // garments read from photographs on the same afternoon, all filed the same
+  // wrong way. So: a mode, a tick on each card, and one change applied to
+  // everything ticked.
+  //
+  // A mode rather than a long-press, because tapping a card already opens its
+  // editor and there is no way to tell one intention from the other. While it
+  // is on, a tap picks; the delete button is off the cards entirely, since a
+  // mis-tap there while choosing forty garments is not recoverable.
+  let selectMode = false;
+  const selected = new Set();
+
+  window.toggleSelectMode = function () {
+    selectMode = !selectMode;
+    if (!selectMode) selected.clear();
+    render();
+  };
+
+  window.selectAllShown = function () {
+    visibleItems().forEach(it => selected.add(it.id));
+    render();
+  };
+
+  window.clearSelection = function () {
+    selected.clear();
+    render();
+  };
+
+  // Written as an explicit cut, which is the point: an explicit Women's or
+  // Men's is left alone by the cut hints in site-config.js, so a correction
+  // made here is not quietly re-decided the next time the page reads it.
+  window.applyBulkGender = async function () {
+    const w = wardrobeCfg();
+    const cut = document.getElementById("bulkGender").value;
+    const ids = [...selected].filter(id => items.some(i => i.id === id));
+    if (!ids.length) { status("Nothing selected.", "err"); return; }
+    if (!w.genders.includes(cut)) { status("That is not a cut this wardrobe has.", "err"); return; }
+    const btn = document.getElementById("bulkApplyBtn");
+    btn.disabled = true;
+    const before = items.map(it => ({ id: it.id, gender: it.gender }));
+    let changed = 0;
+    items = items.map(it => {
+      if (!selected.has(it.id) || it.gender === cut) return it;
+      changed++;
+      return { ...it, gender: cut, updatedAt: Date.now() };
+    });
+    try {
+      await saveItems();
+      status(changed
+        ? changed + " garment" + (changed === 1 ? "" : "s") + " set to " + cut + "."
+        : "Those " + ids.length + " were already " + cut + ".", "ok");
+      render();
+    } catch (e) {
+      // Put them back rather than leaving the page showing a change the
+      // wardrobe never took.
+      const was = new Map(before.map(b => [b.id, b.gender]));
+      items = items.map(it => (was.has(it.id) ? { ...it, gender: was.get(it.id) } : it));
+      status("Could not save that: " + e.message, "err");
+      render();
+    }
+    btn.disabled = false;
+  };
+
+  function renderBulkBar() {
+    document.getElementById("selectBtn").classList.toggle("on", selectMode);
+    document.getElementById("selectBtn").textContent = selectMode ? "Done" : "Select";
+    const bar = document.getElementById("bulkBar");
+    bar.hidden = !selectMode;
+    const n = selected.size;
+    document.getElementById("bulkCount").textContent = n
+      ? n + " selected"
+      : "Tap the garments to change";
+    document.getElementById("bulkApplyBtn").disabled = n === 0;
+  }
+
   window.render = function () {
     // Rebuilt from the wardrobe rather than a fixed list: a set exists because
     // a garment says it belongs to one, so the options are whatever is in use.
@@ -724,30 +835,45 @@
 
     const list = visibleItems();
     const grid = document.getElementById("grid");
+    grid.classList.toggle("selecting", selectMode);
+    // Selections survive a filter change: picking every shirt, then searching
+    // for "bra" and picking those too, is one job and not two.
     grid.innerHTML = list.map(it =>
-      '<div class="card" data-id="' + esc(it.id) + '">' +
+      '<div class="card' + (selectMode && selected.has(it.id) ? " chosen" : "") +
+        '" data-id="' + esc(it.id) + '">' +
         '<div class="shot">' + (it.image
           ? '<img src="' + esc(it.image) + '" alt="' + esc(it.name) + '" loading="lazy" />'
           : '<span class="none">No image yet</span>') +
-          '<button class="carddel" data-del="' + esc(it.id) + '" ' +
-          'title="Delete" aria-label="Delete ' + esc(it.name) + '">\u00d7</button>' +
+          (selectMode ? "" : '<button class="carddel" data-del="' + esc(it.id) + '" ' +
+          'title="Delete" aria-label="Delete ' + esc(it.name) + '">\u00d7</button>') +
         "</div>" +
         '<div class="meta">' +
           '<div class="nm">' + esc(it.name || "Untitled") + "</div>" +
+          // The cut, on the card. Changing forty of them from a screen that
+          // does not say what any of them is would be working blind, and this
+          // is the effective cut — what the filters and the closet see, hints
+          // and all — rather than whatever the row happens to store.
           '<div class="cat">' + esc(it.category || "") +
+            ' <span class="cut">· ' + esc(garmentGender(it)) + "</span>" +
             (it.set ? ' <span class="setname">· ' + esc(it.set) + "</span>" : "") + "</div>" +
           ((it.tags || []).length
             ? '<div class="tags">' + it.tags.map(t => "<span>" + esc(t) + "</span>").join("") + "</div>"
             : "") +
         "</div></div>").join("");
     grid.querySelectorAll(".card").forEach(c => {
-      c.onclick = () => openEditor(items.find(i => i.id === c.dataset.id));
+      c.onclick = () => {
+        if (!selectMode) { openEditor(items.find(i => i.id === c.dataset.id)); return; }
+        if (selected.has(c.dataset.id)) selected.delete(c.dataset.id);
+        else selected.add(c.dataset.id);
+        render();
+      };
     });
     // stopPropagation, or deleting would also open the editor of the garment
     // that is on its way out.
     grid.querySelectorAll("button[data-del]").forEach(b => {
       b.onclick = (e) => { e.stopPropagation(); quickDelete(b.dataset.del); };
     });
+    renderBulkBar();
 
     const empty = document.getElementById("empty");
     empty.hidden = list.length > 0;
