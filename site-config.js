@@ -1083,6 +1083,8 @@
       // {name} {summary} {facts} {recent}
       updatePrompt: `You maintain the long-term memory of a roleplay conversation between a user and {name}.
 
+Memory exists for what will otherwise be LOST. The whole conversation is already in front of {name} when she replies, and where everyone is, how they are sitting, how close they are and what they are wearing are all tracked separately and told to her every turn. None of that needs remembering, and writing it down is worse than useless: this memory is a frozen snapshot while those are live, so the moment anyone moves or changes, a remembered "they are in the bedroom" is simply a false statement sitting in her prompt. Record what happened and what it means. Never record where things currently stand.
+
 Here is the memory as it currently stands.
 
 STORY SO FAR:
@@ -1098,10 +1100,12 @@ Update the memory so it accounts for the new events. Rules:
 - Build on what is already there. Keep everything still true, in roughly its existing wording. You are revising a document, not writing a new one.
 - Only drop something if the new events have made it wrong or superseded it, and then say the corrected version instead.
 - Do not invent anything that is not in the memory or the new events.
-- "Story so far" is a flowing narrative of the relationship — what has happened, how things stand between them. Keep it under {summaryLimit} characters, condensing older material as it grows rather than dropping it.
+- "Story so far" is a flowing narrative of the relationship — what has happened, and how things stand BETWEEN THEM: what they now know about each other, what has been admitted, what changed. Not where they are standing. Keep it under {summaryLimit} characters, condensing older material as it grows rather than dropping it.
 - Record EVENTS, not the texture of the conversation. "They are chatting", "getting to know each other", "exchanging compliments", "enjoying each other's company" are not things that happened — they are what a stretch of talk feels like, and written down they come back into every later prompt as the plot, which is how a stalled conversation teaches itself to keep stalling. Name what was said, decided, revealed, offered, refused or done, or say nothing.
 - If nothing of substance happened since the last update, return the narrative unchanged rather than padding it with how the talk was going.
-- "Key facts" is a terse list, one item per line, of things worth remembering exactly: names, places, promises, preferences, milestones, physical details mentioned. No more than {factsLimit} characters.
+- "Key facts" is a terse list, one item per line, of things worth remembering exactly: names, promises, preferences, admissions, decisions, milestones, physical details mentioned. Durable things — a fact should still be true an hour from now. No more than {factsLimit} characters.
+- Never write down present position or present state. "Mei and Tim are in the bedroom alone", "they are sitting on the bed", "Tim is wearing a casual shirt", "they are alone together" are not facts to remember, they are where the scene happens to be this minute — already tracked live, already in the conversation, and wrong the moment anyone stands up. Where they WENT and why can belong in the narrative if it mattered; where they ARE never does.
+- Drop anything already in the memory that breaks these rules, rather than carrying it forward because it is there.
 
 Return ONLY a JSON object: {"summary": "...", "facts": "..."}`,
     },
