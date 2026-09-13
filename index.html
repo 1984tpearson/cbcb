@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=75"></script>
+  <script src="site-config.js?v=76"></script>
   <script src="image-prompt.js?v=32"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -314,7 +314,7 @@
     // at anything except the caching that actually caused it.
     const REQUIRED_EXPORTS = ["aiComplete", "aiStreamComplete", "parseJsonReply", "garmentGender", "garmentFitsGender",
       "pendingImages", "recordPendingImage", "dropPendingImage", "pollImageTask",
-      "persistGeneratedImage", "startImageTaskSweeps", "recoveredImages"];
+      "persistGeneratedImage", "startImageTaskSweeps", "recoveredImages", "balanceCloset"];
     if (!window.SiteConfig || REQUIRED_EXPORTS.some(k => typeof window.SiteConfig[k] !== "function")) {
       document.body.innerHTML =
         '<div style="padding:28px;font-family:system-ui,sans-serif;line-height:1.6;max-width:520px;margin:0 auto;color:#3a2b30">' +
@@ -2205,12 +2205,23 @@ async function suggestCloset({ character, model }) {
   // asked to choose from a list will occasionally return an id that is not on
   // it, and an invented id in a closet is a garment that can never resolve.
   const known = new Set(library.map(g => g.id));
-  const closet = [...new Set((parsed.closet || []).filter(id => known.has(id)))]
+  const picked = [...new Set((parsed.closet || []).filter(id => known.has(id)))];
+  // Balanced against the quotas before it is anyone's closet. Left to itself
+  // the model answers with six pairs of shoes, no underwear and tops with
+  // nothing to wear below them; balanceCloset keeps what fits, trims the rail
+  // that ran away and fills the ones it forgot out of the same library.
+  const closet = window.SiteConfig.balanceCloset(picked, library, cfg)
     .slice(0, cfg.maxCount || 24);
   const missing = (parsed.missing || [])
     .filter(m => typeof m === "string" && m.trim())
     .map(m => m.trim()).slice(0, 8);
-  console.info(`[closet] ${who || "(no reasoning given)"} — picked ${closet.length} of ${library.length}`);
+  const spread = {};
+  closet.forEach(id => {
+    const c = (library.find(g => g.id === id) || {}).category || "uncategorised";
+    spread[c] = (spread[c] || 0) + 1;
+  });
+  console.info(`[closet] ${who || "(no reasoning given)"} — model picked ${picked.length}, balanced to ${closet.length} of ${library.length}:`,
+    Object.entries(spread).map(([c, n]) => `${c} ${n}`).join(", "));
   return { closet, missing, who };
 }
 

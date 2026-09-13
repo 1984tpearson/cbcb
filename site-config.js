@@ -1583,12 +1583,42 @@ Return ONLY a JSON object: {"summary": "...", "facts": "..."}`,
         // A wardrobe rather than an outfit: enough for a week, a job, a night
         // out and a night in, with the underwear to go under all of it. Twelve
         // was the first guess and it was too few — a closet that size cannot
-        // dress a character twice without repeating.
-        targetCount: 20,
+        // dress a character twice without repeating. Twenty still left her
+        // short of a change of underwear once the model had spent its picks on
+        // six pairs of shoes, so thirty, with the quotas below deciding how
+        // those thirty are spread.
+        targetCount: 30,
         // Hard ceiling on what is accepted back, whatever it returns.
-        maxCount: 40,
+        maxCount: 45,
+
+        // What the closet must cover, and what it may not be mostly made of.
+        // The model, left to itself, picks whatever it liked the look of: six
+        // pairs of shoes and no knickers, tops with nothing to wear under
+        // them. So its answer is balanced afterwards rather than trusted —
+        // every category the (gender-filtered) library can supply gets at
+        // least `min`, and nothing gets more than `max`.
+        //
+        // `min` is a floor, not a promise: a category the library has nothing
+        // suitable in is skipped rather than filled with something wrong, and
+        // that is also what keeps dresses off a man — the cut filter has
+        // already emptied that rail before the quota is read.
+        //
+        // Keyed by the category names in wardrobe.categories; a category
+        // missing from here is unconstrained.
+        quotas: {
+          Top:           { min: 5, max: 8 },
+          Bottom:        { min: 4, max: 6 },
+          Underwear:     { min: 4, max: 7 },
+          Shoes:         { min: 2, max: 3 },
+          Outerwear:     { min: 1, max: 3 },
+          Sleepwear:     { min: 1, max: 2 },
+          Swimwear:      { min: 1, max: 2 },
+          Dress:         { min: 1, max: 3 },
+          Accessory:     { min: 1, max: 4 },
+          "Full outfit": { min: 1, max: 2 },
+        },
         // {desc}, {catalogue} and {count} are substituted.
-        instruction: "Here is a character:\n\n{desc}\n\nHere is every garment in the wardrobe. One per line, as: id | name | category | set | tags\n\n{catalogue}\n\nFirst work out who this person is, then pick their clothes. Aim for about {count} garments.\n\nReturn ONLY a JSON object, no markdown and no commentary:\n{\"who\": \"...\", \"closet\": [\"id\", ...], \"missing\": [\"...\"]}\n\n\"who\" comes FIRST and you must write it before choosing anything: one sentence, under 25 words, on what this person does with their days and how they dress. \"a night-shift nurse in her thirties, practical, lives in scrubs and jeans\". The picks must follow from it.\n\n\"closet\" is the garments they own. Cover, where the wardrobe has something suitable:\n- everyday clothes they would wear most days\n- work clothes IF their job needs them\n- something to sleep in\n- underwear, several\n- shoes\n- a coat or jacket\n- one thing for a night out or an occasion\n\nRules, and the first one is the one that gets broken:\n- A uniform belongs to the person whose job it is. Do not give someone a nurse's, paramedic's, police or military uniform unless \"who\" says that is their job. A teacher does not own scrubs. This is the most common mistake — check every uniform you picked against \"who\" before answering.\n- Only ids from the list. Never invent one.\n- A closet is one person's taste, not a catalogue. Pick what THIS person would own given their age, their build, their circumstances and how they carry themselves. If your picks would suit any character equally well, you have not chosen — start again from \"who\".\n- Garments sharing a set name are one outfit: take the whole set or none of it.\n- Do not pick two of something they would only own one of.\n\n\"missing\" is for things this character plainly should own that the wardrobe has nothing suitable for, each 2-5 words, like \"police uniform\" or \"walking boots\". Use an empty array when the wardrobe covered them.",
+        instruction: "Here is a character:\n\n{desc}\n\nHere is every garment in the wardrobe. One per line, as: id | name | category | set | tags\n\n{catalogue}\n\nFirst work out who this person is, then pick their clothes. Aim for about {count} garments.\n\nReturn ONLY a JSON object, no markdown and no commentary:\n{\"who\": \"...\", \"closet\": [\"id\", ...], \"missing\": [\"...\"]}\n\n\"who\" comes FIRST and you must write it before choosing anything: one sentence, under 25 words, on what this person does with their days and how they dress. \"a night-shift nurse in her thirties, practical, lives in scrubs and jeans\". The picks must follow from it.\n\n\"closet\" is the garments they own, and it has to work as a whole wardrobe — someone has to be able to get dressed from it every day for a week. Take at least one of EVERY category the list offers, and roughly this many of each:\n- Top: 5-8 — the shirts, tees and jumpers they live in\n- Bottom: 4-6 — jeans, trousers, skirts\n- Underwear: 4-7 — they wear clean underwear every day; a closet with none is wrong\n- Shoes: 2-3 — NOT more; nobody needs six pairs, and every extra pair is a garment they could have worn instead\n- Outerwear: 1-3 — a coat or a jacket\n- Sleepwear: 1-2 — something to sleep in\n- Swimwear: 1-2\n- Dress: 1-3 where the list has dresses that suit them\n- Accessory: 1-4\n- Full outfit: 1-2\n- work clothes IF their job needs them, and at least one thing for a night out or an occasion\n\nIf the list has nothing suitable in a category, skip it and say so in \"missing\" — but check before you skip, and never leave out underwear, tops, bottoms or shoes when the list has them.\n\nRules, and the first one is the one that gets broken:\n- A uniform belongs to the person whose job it is. Do not give someone a nurse's, paramedic's, police or military uniform unless \"who\" says that is their job. A teacher does not own scrubs. This is the most common mistake — check every uniform you picked against \"who\" before answering.\n- Only ids from the list. Never invent one.\n- A closet is one person's taste, not a catalogue. Pick what THIS person would own given their age, their build, their circumstances and how they carry themselves. If your picks would suit any character equally well, you have not chosen — start again from \"who\".\n- Garments sharing a set name are one outfit: take the whole set or none of it.\n- Do not pick two of something they would only own one of.\n- Balance beats enthusiasm. Tops with nothing to wear on the bottom, or five pairs of shoes and no underwear, is a failed answer however good each pick was. Count what you have per category against the numbers above before you answer.\n\n\"missing\" is for things this character plainly should own that the wardrobe has nothing suitable for, each 2-5 words, like \"police uniform\" or \"walking boots\". Use an empty array when the wardrobe covered them.",
       },
 
       // ── Layers ─────────────────────────────────────────────────────────────
@@ -3175,6 +3205,156 @@ Return ONLY a JSON object: {"summary": "...", "facts": "..."}`,
     };
   }
 
+  // ── Balancing a stocked closet ────────────────────────────────────────────
+  // What comes back from the model is a list it liked, not a wardrobe: asked
+  // for twenty garments it has answered with six pairs of shoes, no underwear,
+  // and tops with nothing to wear under or below them. Asking more firmly
+  // helps and does not fix it, because the failure is arithmetic rather than
+  // taste — so the arithmetic is done here, afterwards, against
+  // wardrobe.closet.quotas.
+  //
+  // Its choices are kept wherever they fit: this only trims a category that
+  // ran away with the answer and fills one it forgot, both out of the same
+  // library the model was choosing from. A category the library cannot supply
+  // stays empty rather than being filled with something wrong — which is also
+  // what keeps dresses off a man, since the cut filter has already emptied
+  // that rail before this runs.
+  //
+  // Sets move as one. A garment sharing a `set` name with others is half an
+  // outfit on its own, so everything here adds and removes whole sets.
+  //
+  // Framework-free and pure, so both the app and a test can call it:
+  //   balanceCloset(ids, library, CFG.wardrobe.closet) -> ids
+  function balanceCloset(pickedIds, library, closetCfg) {
+    const cfg = closetCfg || {};
+    const quotas = cfg.quotas || {};
+    const lib = (library || []).filter(g => g && g.id);
+    if (!lib.length) return [];
+    const byId = new Map(lib.map(g => [g.id, g]));
+    const catOf = (id) => (byId.get(id) || {}).category || "";
+
+    // A unit is one garment, or one whole set.
+    const unitKeyOf = (g) => (g.set ? "set:" + String(g.set).trim().toLowerCase() : "id:" + g.id);
+    const units = new Map();
+    lib.forEach(g => {
+      const k = unitKeyOf(g);
+      if (!units.has(k)) units.set(k, []);
+      units.get(k).push(g);
+    });
+
+    const chosen = new Set();
+    const order = [];                       // unit keys, in the order taken
+    const take = (k) => {
+      if (!units.has(k) || order.includes(k)) return;
+      order.push(k);
+      units.get(k).forEach(g => chosen.add(g.id));
+    };
+    const drop = (k) => {
+      const i = order.indexOf(k);
+      if (i >= 0) order.splice(i, 1);
+      (units.get(k) || []).forEach(g => chosen.delete(g.id));
+    };
+    const count = (cat) => {
+      let n = 0;
+      chosen.forEach(id => { if (catOf(id) === cat) n++; });
+      return n;
+    };
+    const unitCats = (k) => (units.get(k) || []).map(g => g.category || "");
+    const minOf = (cat) => Number((quotas[cat] || {}).min) || 0;
+    const maxOf = (cat) => {
+      const m = (quotas[cat] || {}).max;
+      return Number.isFinite(Number(m)) ? Number(m) : Infinity;
+    };
+
+    // Whatever the model chose, in its order, as the starting point.
+    (pickedIds || []).forEach(id => {
+      const g = byId.get(id);
+      if (g) take(unitKeyOf(g));
+    });
+
+    // 1. Trim the runaway categories. The last thing taken goes first: the
+    //    model's earlier picks are the ones it thought about.
+    Object.keys(quotas).forEach(cat => {
+      let guard = lib.length + 8;
+      while (count(cat) > maxOf(cat) && guard-- > 0) {
+        const k = [...order].reverse().find(key => unitCats(key).includes(cat));
+        if (!k) break;
+        drop(k);
+      }
+    });
+
+    // Candidate units for a category, freshly shuffled so a restock is not the
+    // same answer every time, and whole outfits last — a set drags its other
+    // pieces in with it, so it is the expensive way to fill one gap.
+    const candidatesFor = (cat) => {
+      const seen = new Set();
+      const out = [];
+      lib.forEach(g => {
+        if ((g.category || "") !== cat) return;
+        const k = unitKeyOf(g);
+        if (seen.has(k) || order.includes(k)) return;
+        seen.add(k);
+        out.push(k);
+      });
+      for (let i = out.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [out[i], out[j]] = [out[j], out[i]];
+      }
+      return out.sort((a, b) => units.get(a).length - units.get(b).length);
+    };
+
+    // Would taking this unit push some OTHER category past its ceiling?
+    const overflows = (k) => unitCats(k).some(c => c && count(c) + 1 > maxOf(c));
+
+    // 2. Fill what it forgot, up to each category's floor.
+    Object.keys(quotas).forEach(cat => {
+      const need = minOf(cat);
+      if (!need) return;
+      const pool = candidatesFor(cat);
+      while (count(cat) < need && pool.length) {
+        const k = pool.shift();
+        // A set that would break another ceiling is skipped while there is
+        // anything else; a floor is worth more than a ceiling, so the last
+        // resort takes it anyway.
+        if (overflows(k) && pool.length) { pool.push(k); continue; }
+        take(k);
+      }
+    });
+
+    const total = () => chosen.size;
+    const hardMax = Number(cfg.maxCount) || Infinity;
+    const target = Math.min(Number(cfg.targetCount) || 0, hardMax);
+
+    // 3. Top up towards the target, spreading across whatever still has room,
+    //    widest headroom first so it does not all land on one rail.
+    if (target > total()) {
+      let guard = lib.length + 8;
+      while (total() < target && guard-- > 0) {
+        const cat = Object.keys(quotas)
+          .filter(c => count(c) < maxOf(c) && candidatesFor(c).length)
+          .sort((a, b) => (maxOf(b) - count(b)) - (maxOf(a) - count(a)))[0];
+        if (!cat) break;
+        const pool = candidatesFor(cat);
+        const k = pool.find(key => !overflows(key)) || pool[0];
+        if (!k) break;
+        take(k);
+      }
+    }
+
+    // 4. And trim back down if it is over, taking only from categories that
+    //    are above their floor — the floors are the point of all of this.
+    let guard = lib.length + 8;
+    while (total() > Math.max(target, 0) && total() > 0 && guard-- > 0) {
+      const k = [...order].reverse().find(key =>
+        unitCats(key).every(c => !c || count(c) > minOf(c)));
+      if (!k) break;
+      drop(k);
+    }
+
+    // Library order, so a closet reads the same way the wardrobe does.
+    return lib.filter(g => chosen.has(g.id)).map(g => g.id).slice(0, hardMax);
+  }
+
   function fillTemplate(template, values) {
     return String(template == null ? "" : template)
       .replace(/\{(\w+)\}/g, (match, key) => (key in values ? String(values[key]) : match));
@@ -3214,5 +3394,6 @@ Return ONLY a JSON object: {"summary": "...", "facts": "..."}`,
     fillTemplate,
     garmentGender,
     garmentFitsGender,
+    balanceCloset,
   };
 })(window);
