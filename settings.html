@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Site Settings</title>
-<script src="site-config.js?v=78"></script>
+<script src="site-config.js?v=79"></script>
 <style>
   :root {
     --pink: #d4547a; --pink-bg: #fdf1f4; --pink-border: #f0c4d1;
@@ -612,6 +612,8 @@
             "Replaces the pacing rules above as soon as any goal reaches the top of its climb. Kept short on purpose \u2014 it is framing, not the instruction."),
           field("Do-it-now directive", i + "readyDirective", "area",
             "{goal} is substituted in. Sent as the last message before the reply is generated, not as part of the character prompt \u2014 the same words in the prompt were ignored eight times in nine, because a rule sitting thousands of tokens earlier loses to everything after it. If a character keeps hinting at a ready goal instead of doing it, this is the field to sharpen."),
+          field("Working-on-it directive", i + "workingDirective", "area",
+            "{focus} is substituted in — the current step, or the goal where there is none. Sent the same way as the do-it-now directive, but for a goal that is NOT ready yet, which used to get no turn-level message at all: the stage wording alone sits in the character prompt, which is exactly the placement known to lose. It asks for one thing that serves the goal, never the goal itself. Clear the box and characters go back to doing nothing about a goal until it reaches the top of its climb."),
           jsonField("How they pursue a goal, by honesty", i + "methodTiers",
             "Keyed off the honesty slider, with \u201cearly\u201d, \u201cmid\u201d and \u201clate\u201d wording for each. A manipulative character is working the goal from the first moment and escalates what they are willing to do; an honest one does not manoeuvre at all early on. Skipped entirely if the honesty slider is switched off for that character."),
           jsonField("Where early becomes mid becomes late", i + "methodProgressBands",

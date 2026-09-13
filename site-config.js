@@ -1129,6 +1129,22 @@ Return ONLY a JSON object: {"summary": "...", "facts": "..."}`,
       // leaves nothing to soften.
       readyDirective: "\n\n[THIS TURN — DO IT] You are going to {goal}. It happens in this reply, described in your own narration as something you do. Not a suggestion of it, not a question about it, not a hint, and not a milder version of it. Act first and stop before their reaction — do not wait to be told you may.",
 
+      // The same mechanism as readyDirective, for a goal that is NOT ready yet
+      // — which, until now, got no turn-level message at all. That was the
+      // whole weakness: readyDirective exists because this repo established
+      // that a named instruction placed as the last message before generation
+      // beats the same words sitting thousands of tokens earlier in the system
+      // prompt. Everything below the acting stage was relying on exactly the
+      // placement already known to lose, so an intention was inert until the
+      // turn it went ready, and it could not go ready without moves it was
+      // never being asked to make.
+      //
+      // Deliberately much milder than readyDirective: it asks for ONE thing
+      // that serves the goal, not for the goal. How overt that thing is comes
+      // from the stage note in the system prompt; this only insists that the
+      // reply is not purely a response to what was just said.
+      workingDirective: "\n\n[THIS TURN] Privately, you are working toward: {focus}. Something in this reply has to serve it — a question asked, a reason made to stay or to move somewhere, something offered, something given away about yourself, the subject steered. Do not announce it, do not explain it, and do not make the whole reply about it. But do not let this reply be nothing but an answer to what they just said: if the conversation has not handed you an opening, make one.",
+
       // A goal can have prerequisite steps: things that have to happen before
       // the goal itself is even possible ("buy the ingredients" before "bake
       // the cake" before the goal, "eat it"). Only the current step is shown —
@@ -1173,13 +1189,25 @@ Return ONLY a JSON object: {"summary": "...", "facts": "..."}`,
       // What progress MEANS: how far the approach has come, nothing else. Seven
       // bands rather than four so the climb is a gradient instead of three
       // plateaus and a cliff, which is what made it read as sudden.
+      //
+      // Every band is an INSTRUCTION, not a status report. Six of these seven
+      // used to be pure description — "nothing has come of it yet", "the
+      // subject has been circled" — telling the character where she stood and
+      // never what to do about it. Only the last one had a verb in it. So
+      // below the acting stage an intention was a fact about her rather than
+      // something she was doing, and a character with a goal behaved exactly
+      // like a character without one until the judge decided otherwise. The
+      // judge, meanwhile, only pays for moves. Nothing moved.
+      //
+      // Progress now governs how OVERT she is, never whether she is trying.
+      // She is always trying; early on it is deniable and late on it is plain.
       stages: [
-        { max: 0.15, note: "This has barely started. Nothing has come of it yet." },
-        { max: 0.30, note: "The smallest beginning has been made. Nothing has been said outright." },
-        { max: 0.45, note: "It has been edged toward once or twice, but nothing is out in the open and nothing is settled." },
-        { max: 0.60, note: "You have made real headway. The subject has been circled, even if it has never been named." },
-        { max: 0.78, note: "You are well along. From here it would not be a leap to say what you actually want." },
-        { max: 0.95, note: "You are nearly there. Only the last step is left, and you can feel how close it is." },
+        { max: 0.15, note: "Nothing has come of this yet, so this reply is where it starts. Do one thing that serves it — ask what you need to know, steer what you are talking about, find a reason to be near them or to keep them here. Small enough to deny, but do it." },
+        { max: 0.30, note: "A beginning has been made. Build on it rather than starting over: follow what you learned last time, or take the next small move it opened up. Still nothing said outright." },
+        { max: 0.45, note: "It has been edged toward once or twice. Close more of the distance this reply — go a step further than you went last time, and stop waiting to be invited." },
+        { max: 0.60, note: "You have made real headway and the subject has been circled without being named. Push it nearer the open now: a suggestion rather than a hint, a move rather than a question." },
+        { max: 0.78, note: "You are well along. From here it would not be a leap to say what you actually want, so stop dressing it up — make the next move plainly, and make it this reply if there is any way to." },
+        { max: 0.95, note: "You are nearly there and you can feel it. Only the last step is left: set it up so that it can happen, and do not let this reply go by without moving on it." },
         { max: 1.00, note: "You are at the point of acting. Work toward it actively now — steer things that way, take openings instead of waiting to be handed one, and press it when you reasonably can. This is what the whole approach has been for." },
       ],
       // HOW they will chase a goal, keyed off the honesty slider. Honesty was

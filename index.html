@@ -12,7 +12,7 @@
        loads, and only the feature whose helper is missing from the cached file
        fails — which is exactly how the face editor first showed up as a blank
        screen. Bump BOTH when either file changes. -->
-  <script src="site-config.js?v=78"></script>
+  <script src="site-config.js?v=79"></script>
   <script src="image-prompt.js?v=32"></script>
   <style>
     /* ── DECOY STYLES ─────────────────────────────────────────────────── */
@@ -802,26 +802,46 @@ const activeIntentions = (character) =>
 // lands as the final message before generation, while the same words sitting
 // thousands of tokens earlier in the system prompt lost to everything after
 // them. Same text, same convention as the regeneration instruction.
-function readyIntentionDirective(character) {
+//
+// A goal that is NOT ready gets one too, and that is the part that was
+// missing. Only the ready case was ever delivered here; everything below it
+// relied on the stage note in the system prompt, which is precisely the
+// placement the paragraph above says loses. So an intention did nothing until
+// the turn it went ready, and it could not go ready without the moves nobody
+// was asking it to make. The not-ready directive is deliberately mild — one
+// thing that serves the goal, not the goal — and how overt that thing should
+// be is still the stage note's business.
+function intentionTurnDirective(character) {
   const cfg = CFG.intentions;
-  if (!cfg || !cfg.readyDirective) return "";
+  if (!cfg) return "";
   if (character.intentionsEnabled === false) return "";
   const sliders = character.sliders || DEFAULT_SLIDERS;
-  const ready = activeIntentions(character).find(intent => {
-    const threshold = currentThreshold(intent, sliders);
-    return (Number(intent.progress) || 0) / threshold >= 1;
-  });
-  if (!ready) return "";
-  const goal = ready.goal.trim().replace(/[.!?]$/, "");
-  // While groundwork is outstanding it is the STEP that is ready, never the
-  // goal. Naming the goal here would hand a character who has only just bought
-  // the ingredients an instruction to eat the cake this reply.
-  const step = activeStep(ready);
-  if (step) {
-    const template = cfg.stepReadyDirective || cfg.readyDirective;
-    return fillTemplate(template, { step: step.text.trim().replace(/[.!?]$/, ""), goal });
+  const ratio = (intent) =>
+    (Number(intent.progress) || 0) / currentThreshold(intent, sliders);
+
+  const active = activeIntentions(character);
+  const ready = active.find(intent => ratio(intent) >= 1);
+  if (ready && cfg.readyDirective) {
+    const goal = ready.goal.trim().replace(/[.!?]$/, "");
+    // While groundwork is outstanding it is the STEP that is ready, never the
+    // goal. Naming the goal here would hand a character who has only just
+    // bought the ingredients an instruction to eat the cake this reply.
+    const step = activeStep(ready);
+    if (step) {
+      const template = cfg.stepReadyDirective || cfg.readyDirective;
+      return fillTemplate(template, { step: step.text.trim().replace(/[.!?]$/, ""), goal });
+    }
+    return fillTemplate(cfg.readyDirective, { goal });
   }
-  return fillTemplate(cfg.readyDirective, { goal });
+
+  // Nothing is ready. The one furthest along is the one she works this turn —
+  // same reason the ready branch names a single goal: two directives in one
+  // reply is how "do something about it" becomes "gesture at both".
+  if (!cfg.workingDirective || active.length === 0) return "";
+  const nearest = active.reduce((a, b) => (ratio(b) > ratio(a) ? b : a));
+  const step = activeStep(nearest);
+  const focus = (step ? step.text : nearest.goal).trim().replace(/[.!?]$/, "");
+  return focus ? fillTemplate(cfg.workingDirective, { focus }) : "";
 }
 
 // The block the character sees. Progress is described, never numbered — handed
@@ -1418,7 +1438,7 @@ async function sendChat({ messages, character, model, settings, onDelta }) {
 
   // Appended to the request only — never stored in the conversation — exactly
   // as the regeneration instruction is.
-  const turnDirective = readyIntentionDirective(character);
+  const turnDirective = intentionTurnDirective(character);
   const outbound = [
     ...messages,
     ...(turnDirective ? [{ role: "user", content: turnDirective.trim() }] : []),
