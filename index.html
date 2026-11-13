@@ -515,6 +515,7 @@ const ACCESS_TOKEN = "pc_8f3a9d2e7b1c4f6a0d5e9c3b7a2f1e8d";
 // read from SiteConfig so the two can never drift apart, with the literal only
 // as a fallback for a cached copy of site-config.js predating the export.
 const WARDROBE_ROW_ID = window.SiteConfig.WARDROBE_ROW_ID || "__wardrobe__";
+const USER_PERSONA_ROW_ID = "__user_persona__";
 
 // How many pictures a gallery keeps. See site-config: it was 20 and nobody
 // asked for it, so a busy character quietly shed its oldest entry on every
@@ -557,6 +558,12 @@ const dataApi = {
   // new proxy action. Read-only here: garments are created and edited over
   // there, and this app only ever picks from them.
   getWardrobe: () => dataApi.call("get_chat", { characterId: WARDROBE_ROW_ID }).then(r => Array.isArray(r.messages) ? r.messages : []),
+  // The user persona otherwise lives only in this browser's localStorage, so
+  // the server cannot tell which stored images it still uses — and a storage
+  // clean-up that cannot see them would delete the user's own pictures. A
+  // copy rides in the chats table under a reserved id, like the wardrobe.
+  // Write-only: localStorage stays the source of truth.
+  backupUserPersona: (persona) => dataApi.call("save_chat", { characterId: USER_PERSONA_ROW_ID, messages: persona }),
 };
 
 // The whole library in one row, so it is fetched once per page load rather
@@ -8553,6 +8560,13 @@ function App() {
     window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
 
   useEffect(() => { storage.set("personachat_settings", settings); }, [settings]);
+  // Mirror the persona to the server (see backupUserPersona). Keyed on its
+  // serialised form so an unrelated settings change does not re-send it.
+  const personaJson = JSON.stringify(settings.userPersona || null);
+  useEffect(() => {
+    if (personaJson === "null") return;
+    dataApi.backupUserPersona(JSON.parse(personaJson)).catch(e => console.warn("Persona backup failed:", e.message));
+  }, [personaJson]);
   useEffect(() => { storage.set("personachat_discreet", discreetMode); }, [discreetMode]);
   useEffect(() => { storage.set("personachat_gridmode", gridMode); }, [gridMode]);
   // The tokens hang off the root element, so one attribute repaints every screen.
